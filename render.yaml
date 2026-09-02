@@ -16,6 +16,8 @@ services:
         sync: false
       - key: X402_NETWORK
         value: "eip155:8453"
+      - key: PUBLIC_BASE_URL
+        value: "https://alphapipeline.onrender.com"
       - key: KIMCHI_CACHE_TTL_SECONDS
         value: "2"
       - key: UNLOCK_REFRESH_INTERVAL_HOURS

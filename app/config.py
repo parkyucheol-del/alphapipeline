@@ -40,6 +40,12 @@ class Settings:
     # Base Sepolia(eip155:84532)로 강제 전환된다 (app/payment.py 참고).
     X402_NETWORK: str = os.getenv("X402_NETWORK", "eip155:8453")
 
+    # 이 서비스가 실제로 서빙되는 공개 절대 URL (프로토콜+도메인, 끝에 / 없이).
+    # x402 Bazaar 인덱서는 각 라우트의 절대 URL(RouteConfig.resource)을 요구하고
+    # 상대경로는 등록 실패 사유로 명시되어 있어서, Render 배포 주소를 여기 넣는다.
+    # (app/payment.py의 build_routes()가 이 값 + 각 라우트 경로로 절대 URL을 만든다)
+    PUBLIC_BASE_URL: str = os.getenv("PUBLIC_BASE_URL", "https://alphapipeline.onrender.com")
+
     # 김치프리미엄/시세 캐시 TTL(초) - 짧을수록 실시간성은 올라가지만
     # 업비트/바이낸스 API 호출 빈도가 늘어남. 2초면 봇의 연타 호출을 막으면서도
     # 사람이 체감하기엔 사실상 실시간.

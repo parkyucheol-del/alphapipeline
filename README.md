@@ -22,7 +22,8 @@ alphapipeline/
 │   ├── data_sources.py      # 업비트/바이낸스/DropsTab 원본 데이터 fetch
 │   ├── logic.py              # dump-risk / kimchi-alert 가공 로직
 │   ├── markdown_tool.py      # ai-markdown 웹 정제기
-│   ├── payment.py            # 공식 x402 SDK + CDP Facilitator 결제 미들웨어 조립
+│   ├── payment.py            # 공식 x402 SDK + CDP Facilitator 결제 미들웨어 조립 + Bazaar 메타데이터
+│   ├── schemas.py            # OpenAPI 응답 스키마 (Pydantic) + Bazaar output 예시 값
 │   ├── scheduler.py          # UNLOCK_REFRESH_INTERVAL_HOURS 주기(기본 24h)로 락업 데이터 자동 갱신
 │   └── cache.py              # 인메모리 캐시 (가격 2초, 락업 26h)
 ├── examples/client_example.py  # 봇 클라이언트에서 결제→호출하는 예시 코드
@@ -109,27 +110,45 @@ curl "http://localhost:8000/v1/tools/ai-markdown?url=https://example.com"
 
 ### x402 Bazaar / Agentic.Market 등록
 
-공식 SDK로 교체한 것 자체가 등록을 위한 **필요조건**입니다. 실제 등록/노출은 아래처럼 진행됩니다.
+공식 SDK로 교체한 것 자체가 등록을 위한 **필요조건**이었고, 2026-09 업데이트로 실제 Bazaar 노출
+메타데이터까지 채워 넣었습니다 (`app/payment.py`의 `_bazaar_extension()`, `_resource_url()`).
 
+**지금 코드가 실제로 하는 일**
+- 각 결제 라우트(`RouteConfig`)에 `resource`(절대 URL, `PUBLIC_BASE_URL` + 경로)와
+  `extensions.bazaar`(입력 파라미터 스펙, 출력 예시, 서비스명, 태그)를 채워 넣습니다.
+  이 값들은 공식 Bazaar 문서(`docs.x402.org/extensions/bazaar`)의 실제 JSON 예시 구조를 그대로
+  따랐습니다 (`extensions.bazaar.info.input`/`output`, `serviceName`, `tags`).
+- `output.example` 값은 `app/schemas.py`의 `KIMCHI_ALERT_EXAMPLE`/`MARKDOWN_EXAMPLE`/`DUMP_RISK_EXAMPLE`을
+  그대로 재사용합니다 — 이 예시들은 동시에 FastAPI의 OpenAPI 응답 스키마(Pydantic 모델)와 짝을
+  이루고 있어서, `/docs`·`/openapi.json`에 나오는 응답 구조와 Bazaar에 보고되는 예시가 항상 같은
+  모양을 유지합니다. 새 필드를 추가/변경할 때는 `app/schemas.py`도 같이 고쳐야 합니다.
+- `PUBLIC_BASE_URL`(.env, 기본값이 이미 `https://alphapipeline.onrender.com`)로 절대 URL을
+  만듭니다 — Bazaar 문서가 "relative URLs"를 흔한 등록 실패 사유로 명시하고 있어서입니다.
+
+**등록/노출이 실제로 되는 절차**
 1. CDP Facilitator를 실제로 붙인 상태(`CDP_API_KEY_ID`/`SECRET` 설정, `PAYMENT_BYPASS_FOR_TESTING=false`)로
-   서버를 배포합니다 — 테스트넷 파실리테이터나 결제 우회 상태로는 등록 의미가 없습니다.
-2. 별도의 "등록 신청" 절차는 없습니다. 공식 문서(`docs.x402.org/extensions/bazaar`)에 따르면, 클라이언트가
-   결제 시 "bazaar extension"을 echo해서 보내면 **facilitator가 그 결제 페이로드를 처리하는 순간
-   자동으로 카탈로그에 반영**됩니다. 즉 실제 트래픽(공식 SDK를 쓰는 클라이언트의 결제)이 최소 1건
-   이상 발생해야 카탈로그에 뜬다는 뜻입니다.
-3. 서비스 이름/설명/태그/아이콘 같은 노출용 메타데이터는 `RouteConfig`에 추가 필드로 설정할 수
-   있다고 문서에 나와 있는데(예: `serviceName`, `tags`, `iconUrl`), 이 리포는 최신 필드 목록까지
-   확인하지 못했습니다 — 로컬에서 `python -c "from x402.http.types import RouteConfig; help(RouteConfig)"`로
-   설치된 버전의 실제 필드를 확인하고 `app/payment.py`의 `build_routes()`에 채워 넣으세요.
-4. Agentic.Market은 x402로 결제받는 API를 모아 보여주는 마켓플레이스입니다 - 별도 문서를 더
-   확인해봐야 하는 부분이라, 서버가 정식으로 돌아가기 시작하면 다음 단계로 조사해드릴 수 있습니다.
+   서버를 배포합니다 — 이미 Render에 이 상태로 배포되어 있다면 완료된 단계입니다.
+2. 별도의 "등록 신청" 절차는 없습니다. 공식 문서에 따르면, 클라이언트가 결제 시 "bazaar extension"을
+   echo해서 보내면 **facilitator가 그 결제 페이로드를 처리하는 순간 자동으로 카탈로그에 반영**됩니다.
+   즉 이 메타데이터를 코드에 넣어둔 것만으로는 카탈로그에 즉시 뜨지 않고, 공식 x402 클라이언트
+   SDK를 쓰는 누군가의 **실제 결제가 최소 1건** 있어야 합니다.
+3. Agentic.Market은 x402로 결제받는 API를 모아 보여주는 별도 마켓플레이스입니다 - 자체 등록
+   양식/심사 절차가 있을 가능성이 높은데, 이 리포 작성 시점에는 공식 문서에서 셀프서비스 등록
+   경로를 확인하지 못했습니다. 실제 트래픽이 좀 쌓인 뒤 다시 조사해드릴 수 있습니다.
 
-> **정직하게 밝혀둠**: 이 코드는 외부망이 막힌 샌드박스에서 작성되어 `x402`/`cdp-sdk` 패키지를 실제로
-> 설치·실행해보지 못했습니다. 공식 문서(docs.x402.org, docs.cdp.coinbase.com, PyPI `x402` 패키지
-> README)에서 확인한 API 모양대로 작성했지만, import 경로나 일부 파라미터명은 패키지 버전에 따라
-> 달라질 수 있습니다. 로컬에서 `pip install -r requirements.txt` 후 `uvicorn main:app --reload`로
-> 실행해보고, import 에러가 나면 설치된 버전의 실제 모듈 구조에 맞춰 `app/payment.py`를 조정해야
-> 할 수 있습니다.
+**OpenAPI 메타데이터 (Bazaar와는 별개)**
+- FastAPI가 자동 생성하는 `/openapi.json`, `/docs`도 함께 다듬었습니다 (`main.py`의 각 라우트에
+  `summary`/`description`/`tags`/`responses` 추가, `app/schemas.py`의 Pydantic 모델을
+  `response_model`로 연결). Bazaar는 자체 `extensions` 스키마를 쓰지 그대로 OpenAPI 스펙을
+  읽지는 않지만, OpenAPI 스펙을 직접 읽어 도구를 등록하는 다른 에이전트 디렉토리(Agentic.Market
+  포함, 확인 안 됨)를 위한 대비 차원이자, 사람이 `/docs`에서 API를 파악하기에도 훨씬 좋아집니다.
+
+> **정직하게 밝혀둠**: `RouteConfig`의 `extensions`/`resource` 필드는 공식 GitHub 소스
+> (`coinbase/x402`, `python/x402/http/types.py`)로 실제 필드명을 확인하고 작성했지만, `serviceName`/
+> `tags`를 `extensions.bazaar` 안 어디에 정확히 두는지는 문서의 두 예시가 조금 다르게 보여주고
+> 있어서(하나는 `info` 옆, 하나는 별도 `resource` 객체 안) 확신도가 100%는 아닙니다. 실제 카탈로그에
+> 반영된 결과를 보고 위치를 조정해야 할 수 있습니다. 이 환경은 여전히 `x402`/`cdp-sdk` 패키지를 직접
+> 실행해볼 수 없어서, `python3 -m py_compile`로 문법만 검증했습니다.
 
 ## 3) GitHub 업로드 & Render 무료 배포 (Step 3)
 
@@ -307,3 +326,25 @@ DropsTab은 두 가지 방법으로 접근할 수 있습니다.
 
 **바뀌지 않은 것**: `app/logic.py`, `app/data_sources.py`, `app/markdown_tool.py`, `app/scheduler.py`,
 `mcp_server.py` — 결제 레이어와 무관한 데이터 가공 로직/MCP 서버는 그대로입니다.
+
+## 11) 이번 업데이트: x402 Bazaar 메타데이터 + OpenAPI 문서화 (파일별 변경점)
+
+Render 배포 확인 후, 외부 AI 에이전트가 이 API를 검색/호출할 수 있도록 Bazaar 노출 메타데이터와
+OpenAPI 문서를 채워 넣으면서 바뀐 파일들입니다.
+
+| 파일 | 변경 내용 |
+|---|---|
+| `app/schemas.py` | **신규 파일.** 각 엔드포인트 응답의 Pydantic 모델(`KimchiAlertResponse`, `MarkdownResponse`, `DumpRiskResponse` 등)과, OpenAPI 예시·Bazaar `output.example`이 동시에 참조하는 예시 값(`KIMCHI_ALERT_EXAMPLE` 등)을 정의. |
+| `app/payment.py` | `build_routes()`의 각 `RouteConfig`에 `resource`(절대 URL)와 `extensions`(Bazaar `info.input`/`output`/`serviceName`/`tags`) 추가. `_resource_url()`, `_bazaar_extension()` 헬퍼 신규 추가. |
+| `app/config.py` | `PUBLIC_BASE_URL` 추가 (기본값이 이미 실제 Render 배포 주소로 설정됨 — Bazaar가 요구하는 절대 URL을 만드는 데 사용). |
+| `main.py` | 세 엔드포인트 각각에 `summary`/`description`/`tags`/`responses`(+ `response_model`)를 추가해 `/docs`·`/openapi.json`을 풍부하게 함. `FastAPI(...)`에 `openapi_tags` 추가. root(`/`) 응답에 `openapi_spec` 필드 추가. |
+| `.env`, `.env.example`, `render.yaml` | `PUBLIC_BASE_URL` 추가 (선택사항 — 기본값이 이미 맞게 설정되어 있어 안 넣어도 동작함). |
+
+**바뀌지 않은 것**: `app/logic.py`, `app/data_sources.py`, `app/markdown_tool.py`, `app/cache.py`,
+`app/scheduler.py`, `mcp_server.py`, `examples/client_example.py` — 데이터 가공/MCP/클라이언트
+예제는 이번 변경과 무관합니다.
+
+> 이 업데이트는 여러 파일에 걸쳐있어서, 로컬(또는 GitHub 모바일 편집기)에 반영한 뒤
+> `git add . && git commit -m "..." && git push`로 GitHub에 올리면 Render가 자동으로
+> 재배포합니다. Render 대시보드에서 `PUBLIC_BASE_URL` 환경변수를 따로 안 넣어도, 코드
+> 기본값이 이미 실제 배포 주소와 같아서 정상 동작합니다.

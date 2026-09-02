@@ -14,6 +14,7 @@ from app.scheduler import start_scheduler
 from app.logic import get_dump_risk, get_kimchi_alert, refresh_unlock_cache
 from app.markdown_tool import url_to_markdown
 from app.payment import ACTIVE_NETWORK, USE_CDP_FACILITATOR, build_resource_server, build_routes
+from app.schemas import ComingSoonResponse, DumpRiskResponse, ErrorResponse, KimchiAlertResponse, MarkdownResponse
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("alphapipeline")
@@ -47,8 +48,15 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="AlphaPipeline API",
     description="AI 에이전트/트레이더 봇을 위한 초미세 결제(0.01 USDC) 데이터 API",
-    version="0.2.0",
+    version="0.3.0",
     lifespan=lifespan,
+    # /openapi.json, /docs에 표시되는 태그 그룹 설명. x402 Bazaar 스펙과는 무관하지만,
+    # OpenAPI 스펙을 그대로 읽는 에이전트 디렉토리(예: Agentic.Market 후보군)를 위해
+    # 사람이 읽어도, 기계가 읽어도 되는 문서를 갖춰두는 차원.
+    openapi_tags=[
+        {"name": "market", "description": "실시간 시세/온체인 이벤트 기반 시장 데이터"},
+        {"name": "tools", "description": "AI 에이전트용 유틸리티 도구"},
+    ],
 )
 
 # ===== x402 공식 결제 미들웨어 장착 =====
@@ -83,6 +91,7 @@ async def root():
             ["/v1/unlocks/dump-risk"] if not settings.DUMP_RISK_ENABLED else []
         ),
         "docs": "/docs",
+        "openapi_spec": "/openapi.json",
     }
 
 
@@ -91,7 +100,21 @@ async def healthz():
     return {"status": "healthy"}
 
 
-@app.get("/v1/unlocks/dump-risk")
+@app.get(
+    "/v1/unlocks/dump-risk",
+    tags=["market"],
+    summary="토큰 락업 해제 덤핑 위험도",
+    description=(
+        "D-7 이내 유통량 3% 이상 락업 해제가 예정된 토큰 목록과, 거래량 대비 매도 충격 위험도를 반환합니다. "
+        "DUMP_RISK_ENABLED=false인 동안은 결제 없이 503(coming_soon)만 반환합니다."
+    ),
+    responses={
+        200: {"model": DumpRiskResponse, "description": "락업 해제 위험도 데이터"},
+        402: {"description": "x402 결제 필요"},
+        503: {"model": ComingSoonResponse, "description": "아직 서비스 준비 중 (과금 없음)"},
+        502: {"model": ErrorResponse, "description": "업스트림(DropsTab/바이낸스) 오류"},
+    },
+)
 async def dump_risk_endpoint():
     # DUMP_RISK_ENABLED=false 인 동안은 build_routes()가 이 경로를 x402 미들웨어의
     # 결제 대상 목록에서 아예 빼두기 때문에, 요청이 결제 검사 없이 곧장 여기로
@@ -115,7 +138,20 @@ async def dump_risk_endpoint():
         return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
 
 
-@app.get("/v1/market/kimchi-alert")
+@app.get(
+    "/v1/market/kimchi-alert",
+    tags=["market"],
+    summary="업비트 vs 바이낸스 김치프리미엄",
+    description=(
+        "업비트(KRW-{symbol})와 바이낸스({symbol}USDT) 시세를 실시간으로 비교해 김치프리미엄(%)을 계산하고, "
+        "역프(-1.5% 이하) 및 1시간 내 3%p 이상 급변을 감지해 알려줍니다."
+    ),
+    responses={
+        200: {"model": KimchiAlertResponse, "description": "김치프리미엄 계산 결과"},
+        402: {"description": "x402 결제 필요"},
+        502: {"model": ErrorResponse, "description": "업스트림(업비트/바이낸스) 오류"},
+    },
+)
 async def kimchi_alert_endpoint(symbol: str = Query("BTC", description="예: BTC, ETH, SOL")):
     # 결제 검증은 이제 main.py 상단에서 장착한 x402 PaymentMiddlewareASGI가
     # 라우트 진입 전에 처리한다 - 여기까지 왔다는 건 이미 결제가 확인됐다는 뜻.
@@ -127,7 +163,20 @@ async def kimchi_alert_endpoint(symbol: str = Query("BTC", description="예: BTC
         return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
 
 
-@app.get("/v1/tools/ai-markdown")
+@app.get(
+    "/v1/tools/ai-markdown",
+    tags=["tools"],
+    summary="AI 친화적 웹페이지 → 마크다운 변환기",
+    description=(
+        "임의의 웹페이지 URL을 받아 광고/네비게이션/스크립트를 제거하고, 본문만 순수 마크다운으로 "
+        "변환해 반환합니다. AI 에이전트의 토큰 낭비와 환각을 줄이는 용도입니다."
+    ),
+    responses={
+        200: {"model": MarkdownResponse, "description": "정제된 마크다운"},
+        402: {"description": "x402 결제 필요"},
+        502: {"model": ErrorResponse, "description": "대상 URL 접근/파싱 오류"},
+    },
+)
 async def ai_markdown_endpoint(url: str = Query(..., description="변환할 웹페이지 URL")):
     try:
         data = await url_to_markdown(url)
