@@ -12,8 +12,12 @@ DropsTab은 Builders Program(학생/스타트업 대상 무료 API 키 신청, �
 유료 Advanced 플랜(월 $59, Basic $19에는 tokenUnlocks가 없음. DeFiLlama 대비 훨씬 저렴)으로 접근할 수 있다.
 자세한 내용은 README.md의 "락업 데이터 소스 변경 이력" 참고.
 """
+import logging
+
 import httpx
 from app.config import settings
+
+logger = logging.getLogger("alphapipeline")
 
 UPBIT_TICKER_URL = "https://api.upbit.com/v1/ticker"
 # 바이낸스는 (1) 미국 리전 IP를 451로 차단하고 (2) 공유 IP에서 짧은 시간에 요청이
@@ -28,6 +32,7 @@ UPBIT_TICKER_URL = "https://api.upbit.com/v1/ticker"
 BINANCE_TICKER_URL = "https://data-api.binance.vision/api/v3/ticker/price"
 BINANCE_24H_URL = "https://data-api.binance.vision/api/v3/ticker/24hr"
 COINGECKO_SIMPLE_PRICE_URL = "https://api.coingecko.com/api/v3/simple/price"
+COINBASE_SPOT_PRICE_URL = "https://api.coinbase.com/v2/prices/{base}-USD/spot"
 
 # 심볼(BTC 등) -> CoinGecko 코인 id. 자주 쓰이는 것 위주로 등록해뒀고,
 # 목록에 없는 심볼이 필요해지면 https://api.coingecko.com/api/v3/coins/list 에서
@@ -79,8 +84,10 @@ async def get_binance_price_usdt(symbol: str) -> float:
             r = await client.get(COINBASE_SPOT_PRICE_URL.format(base=base))
             r.raise_for_status()
             return float(r.json()["data"]["amount"])
-    except Exception:
-        pass  # 코인베이스가 막히면 아래 CoinGecko로 폴백
+    except Exception as e:
+        # 조용히 넘어가지 않고 로그를 남긴다 - 이전에 COINBASE_SPOT_PRICE_URL이
+        # 정의조차 안 되어 있던 버그를 이 exception이 숨겨버려서 한참 헤맸었다.
+        logger.warning("코인베이스 시세 조회 실패, CoinGecko로 폴백합니다: %s", e)
 
     coin_id = _COINGECKO_IDS.get(base)
     if not coin_id:
