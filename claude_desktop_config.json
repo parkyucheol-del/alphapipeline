@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "alphapipeline": {
+      "command": "/절대경로/alphapipeline/.venv/bin/python",
+      "args": ["/절대경로/alphapipeline/mcp_server.py"],
+      "env": {
+        "DUMP_RISK_ENABLED": "false",
+        "DROPSTAB_API_KEY": ""
+      }
+    }
+  }
+}

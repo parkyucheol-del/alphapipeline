@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: alphapipeline-api
+    env: python
+    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: RECEIVER_WALLET_ADDRESS
+        sync: false
+      - key: PRICE_PER_CALL_USDC
+        value: "0.01"
+      - key: CDP_API_KEY_ID
+        sync: false
+      - key: CDP_API_KEY_SECRET
+        sync: false
+      - key: X402_NETWORK
+        value: "eip155:8453"
+      - key: KIMCHI_CACHE_TTL_SECONDS
+        value: "2"
+      - key: UNLOCK_REFRESH_INTERVAL_HOURS
+        value: "24"
+      - key: DUMP_RISK_ENABLED
+        value: "false"
+      - key: DROPSTAB_API_KEY
+        sync: false
+      - key: DROPSTAB_API_BASE_URL
+        value: https://public-api.dropstab.com/api/v1
+      - key: DROPSTAB_PAGE_SIZE
+        value: "100"
+      - key: MAX_UNLOCK_SCAN_PAGES
+        value: "20"
+      - key: PAYMENT_BYPASS_FOR_TESTING
+        value: "false"
