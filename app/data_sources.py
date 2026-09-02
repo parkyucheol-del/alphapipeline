@@ -16,8 +16,30 @@ import httpx
 from app.config import settings
 
 UPBIT_TICKER_URL = "https://api.upbit.com/v1/ticker"
+# 바이낸스는 (1) 미국 리전 IP를 451로 차단하고 (2) 공유 IP에서 짧은 시간에 요청이
+# 몰리면 418(자동 밴)을 돌려주는 걸 실제로 겪었다. 도메인을 시세 조회 전용
+# data-api.binance.vision으로 바꿔도 여전히 418이 났는데, 이건 도메인이 아니라
+# "이 서버 IP" 자체가 바이낸스 쪽에서 이미 밴 상태라는 뜻이다(Render 무료 플랜은
+# 여러 사용자가 같은 지역 IP를 공유하므로, 다른 사용자의 트래픽 때문에 밴 먹었을 수 있다).
+# 그래서 김치프리미엄 계산에 쓰는 "글로벌 USD 시세"를 바이낸스 대신 CoinGecko
+# 공개 API로 교체했다 - 지금까지 이런 지역차단/IP밴 이슈가 보고되지 않았고
+# API 키도 필요 없다. (거래대금 기반 dump-risk 계산용 get_binance_24h_stats는
+# 어차피 DUMP_RISK_ENABLED=false로 꺼져있어서 당장 급하지 않아 그대로 둔다.)
 BINANCE_TICKER_URL = "https://data-api.binance.vision/api/v3/ticker/price"
 BINANCE_24H_URL = "https://data-api.binance.vision/api/v3/ticker/24hr"
+COINGECKO_SIMPLE_PRICE_URL = "https://api.coingecko.com/api/v3/simple/price"
+
+# 심볼(BTC 등) -> CoinGecko 코인 id. 자주 쓰이는 것 위주로 등록해뒀고,
+# 목록에 없는 심볼이 필요해지면 https://api.coingecko.com/api/v3/coins/list 에서
+# 정확한 id를 찾아 추가하면 된다.
+_COINGECKO_IDS = {
+    "BTC": "bitcoin", "ETH": "ethereum", "SOL": "solana", "XRP": "ripple",
+    "DOGE": "dogecoin", "ADA": "cardano", "AVAX": "avalanche-2", "DOT": "polkadot",
+    "LINK": "chainlink", "LTC": "litecoin", "BCH": "bitcoin-cash", "TRX": "tron",
+    "ATOM": "cosmos", "UNI": "uniswap", "NEAR": "near", "MATIC": "matic-network",
+    "BNB": "binancecoin", "SHIB": "shiba-inu", "PEPE": "pepe", "SUI": "sui",
+    "APT": "aptos", "ARB": "arbitrum", "OP": "optimism",
+}
 
 _TIMEOUT = httpx.Timeout(10.0, connect=5.0)
 
@@ -41,11 +63,24 @@ async def get_upbit_usdkrw_rate() -> float:
 
 
 async def get_binance_price_usdt(symbol: str) -> float:
-    """예: symbol='BTCUSDT' -> 바이낸스 현재가(USDT)"""
+    """
+    예: symbol='BTCUSDT' -> 글로벌 USD 시세.
+    함수 이름은 호출부(app/logic.py)와의 호환을 위해 그대로 뒀지만, 실제로는
+    바이낸스가 아니라 CoinGecko를 호출한다 (위 상단 주석 참고).
+    """
+    base = symbol.upper().removesuffix("USDT")
+    coin_id = _COINGECKO_IDS.get(base)
+    if not coin_id:
+        raise ValueError(
+            f"지원하지 않는 심볼입니다: {base} "
+            f"(현재 지원 목록: {', '.join(sorted(_COINGECKO_IDS))})"
+        )
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        r = await client.get(BINANCE_TICKER_URL, params={"symbol": symbol})
+        r = await client.get(
+            COINGECKO_SIMPLE_PRICE_URL, params={"ids": coin_id, "vs_currencies": "usd"}
+        )
         r.raise_for_status()
-        return float(r.json()["price"])
+        return float(r.json()[coin_id]["usd"])
 
 
 async def get_binance_24h_stats(symbol: str) -> dict:
