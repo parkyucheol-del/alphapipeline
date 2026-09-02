@@ -16,8 +16,8 @@ import httpx
 from app.config import settings
 
 UPBIT_TICKER_URL = "https://api.upbit.com/v1/ticker"
-BINANCE_TICKER_URL = "https://api.binance.com/api/v3/ticker/price"
-BINANCE_24H_URL = "https://api.binance.com/api/v3/ticker/24hr"
+BINANCE_TICKER_URL = "https://data-api.binance.vision/api/v3/ticker/price"
+BINANCE_24H_URL = "https://data-api.binance.vision/api/v3/ticker/24hr"
 
 _TIMEOUT = httpx.Timeout(10.0, connect=5.0)
 
