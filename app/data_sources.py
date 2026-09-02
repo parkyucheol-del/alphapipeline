@@ -66,9 +66,22 @@ async def get_binance_price_usdt(symbol: str) -> float:
     """
     예: symbol='BTCUSDT' -> 글로벌 USD 시세.
     함수 이름은 호출부(app/logic.py)와의 호환을 위해 그대로 뒀지만, 실제로는
-    바이낸스가 아니라 CoinGecko를 호출한다 (위 상단 주석 참고).
+    바이낸스가 아니다 (위 상단 주석 참고). CoinGecko 무료 API도 같은 공유 IP
+    문제로 429(레이트리밋)를 겪어서, 코인베이스 공개 스팟 시세를 1순위로 쓰고
+    CoinGecko는 그게 실패했을 때만 쓰는 폴백으로 내렸다. 코인베이스는 이미
+    결제(CDP Facilitator)에도 쓰고 있는 인프라라 시세 조회도 상대적으로
+    안정적일 가능성이 높다.
     """
     base = symbol.upper().removesuffix("USDT")
+
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            r = await client.get(COINBASE_SPOT_PRICE_URL.format(base=base))
+            r.raise_for_status()
+            return float(r.json()["data"]["amount"])
+    except Exception:
+        pass  # 코인베이스가 막히면 아래 CoinGecko로 폴백
+
     coin_id = _COINGECKO_IDS.get(base)
     if not coin_id:
         raise ValueError(
