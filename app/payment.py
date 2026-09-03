@@ -188,40 +188,43 @@ def _resource_url(path: str) -> str:
 
 def _bazaar_extension(
     *,
-    method: str,
     input_example: dict,
     input_schema: dict,
-    output_example: dict,
-    output_schema: dict | None = None,
+    output_example=None,
+    output_schema=None,
 ) -> dict:
-    """
-    x402 Bazaar 인덱서가 읽는 extensions.bazaar 스키마를 만든다 - "info"(input/output)만
-    담고, serviceName/tags는 절대 여기 넣지 않는다 (RouteConfig 쪽 필드로 따로 감 -
-    위 모듈 docstring "버그 수정" 절 참고. 여기 다시 넣으면 예전 버그가 재발한다).
+    """x402 Bazaar 인덱서가 읽는 discovery extension을 만든다.
 
-    가능하면 공식 헬퍼 declare_discovery_extension()을 쓴다. 헬퍼가 없거나(구버전
-    SDK) 시그니처가 달라 TypeError가 나면, 공식 문서의 "Response Schema" 예시와
-    정확히 같은 모양(info.input.type/method/queryParams, info.output.type/example)
-    으로 수동 구성해서 폴백한다.
+    2026-09-03 밤, 실제 설치된 x402==2.21.0 패키지 소스를 inspect.getsource()로
+    직접 열어서 확인한 결과, 공식 헬퍼 declare_discovery_extension()의 진짜
+    시그니처는 이전에 참고했던 문서 사이트(docs.x402.org) 설명과 달랐다:
+      - method 파라미터 자체가 없다 (호출부의 라우트 키("GET /v1/...")에서
+        bazaar_resource_server_extension이 런타임에 자동으로 채워 넣는다).
+      - 반환값도 {"bazaar": {"info": {...}}} 한 겹이 아니라
+        {"bazaar": {"info": {...}, "schema": {...}}} 두 겹 구조다.
+    이전의 수동 fallback({"info": {"input": {"type": "http", "method": ...,
+    "queryParams": ...}, "output": {...}}})은 이 실제 구조와 맞지 않아서 매
+    결제마다 "invalid discovery configuration"으로 계속 거부되고 있었다.
+    이제 공식 헬퍼를 있는 그대로 호출해서 이 문제를 해결한다 - 손으로 다시
+    만들지 말 것, 위 버그가 재발한다.
     """
-    if _HAS_DISCOVERY_HELPER:
-        try:
-            kwargs = {"input": input_example, "input_schema": input_schema}
-            if output_example is not None:
-                kwargs["output"] = OutputConfig(example=output_example, schema=output_schema)
-            return declare_discovery_extension(**kwargs)
-        except TypeError as e:
-            logger.warning(
-                "declare_discovery_extension() 호출이 실패했습니다(%s) - "
-                "수동 구성 폴백으로 대체합니다.", e,
-            )
+    if not _HAS_DISCOVERY_HELPER:
+        logger.warning(
+            "x402.extensions.bazaar.declare_discovery_extension을 쓸 수 없어 "
+            "이 라우트는 Bazaar 디스커버리 메타데이터 없이 서빙됩니다. "
+            "'pip install -U x402'로 SDK를 업그레이드하면 자동으로 복구됩니다."
+        )
+        return {}
 
-    info: dict = {"input": {"type": "http", "method": method, "queryParams": input_example}}
-    if output_example is not None:
-        info["output"] = {"type": "json", "example": output_example}
-        if output_schema is not None:
-            info["output"]["schema"] = output_schema
-    return {"bazaar": {"info": info}}
+    output = None
+    if output_example is not None or output_schema is not None:
+        output = OutputConfig(example=output_example, schema=output_schema)
+
+    return declare_discovery_extension(
+        input=input_example,
+        input_schema=input_schema,
+        output=output,
+    )
 
 
 def _make_route_config(*, service_name: str, tags: list[str], icon_url: str | None = None, **kwargs) -> RouteConfig:
@@ -281,7 +284,6 @@ def build_routes(dump_risk_enabled: bool) -> dict[str, RouteConfig]:
             ),
             resource=_resource_url("/v1/market/kimchi-alert"),
             extensions=_bazaar_extension(
-                method="GET",
                 input_example={"symbol": "BTC"},
                 input_schema={
                     "type": "object",
@@ -308,7 +310,6 @@ def build_routes(dump_risk_enabled: bool) -> dict[str, RouteConfig]:
             ),
             resource=_resource_url("/v1/tools/ai-markdown"),
             extensions=_bazaar_extension(
-                method="GET",
                 input_example={"url": "https://example.com"},
                 input_schema={
                     "type": "object",
@@ -338,7 +339,6 @@ def build_routes(dump_risk_enabled: bool) -> dict[str, RouteConfig]:
             ),
             resource=_resource_url("/v1/unlocks/dump-risk"),
             extensions=_bazaar_extension(
-                method="GET",
                 input_example={},
                 input_schema={"type": "object", "properties": {}, "required": []},
                 output_example=DUMP_RISK_EXAMPLE,
