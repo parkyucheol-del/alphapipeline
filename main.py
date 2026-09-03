@@ -7,14 +7,15 @@ AlphaPipeline - 초미세 결제 기반 온체인 데이터 파이프라인 API
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 from app.config import settings
 from app.scheduler import start_scheduler
 from app.logic import get_dump_risk, get_kimchi_alert, refresh_unlock_cache
+from app.llms_txt import build_llms_txt
 from app.markdown_tool import url_to_markdown
 from app.payment import ACTIVE_NETWORK, USE_CDP_FACILITATOR, build_resource_server, build_routes
-from app.schemas import ComingSoonResponse, DumpRiskResponse, ErrorResponse, KimchiAlertResponse, MarkdownResponse
+from app.schemas import DumpRiskResponse, ErrorResponse, KimchiAlertResponse, MarkdownResponse
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("alphapipeline")
@@ -31,17 +32,14 @@ async def lifespan(app: FastAPI):
         logger.warning("PAYMENT_BYPASS_FOR_TESTING=true : x402 결제 미들웨어가 장착되지 않았습니다 (테스트 모드, 전 엔드포인트 무료).")
 
     start_scheduler()
-    if settings.DUMP_RISK_ENABLED:
-        try:
-            # 서버 기동 시 락업 캐시가 비어있으면 1회 즉시 채워둔다 (첫 요청 지연 방지)
-            await refresh_unlock_cache()
-        except Exception:
-            logger.exception("초기 unlock 캐시 생성 실패 (스케줄러가 다음 주기에 재시도합니다)")
-    else:
-        logger.info(
-            "DUMP_RISK_ENABLED=false : dump-risk 엔드포인트는 '준비 중' 상태로 서빙됩니다 "
-            "(kimchi-alert/ai-markdown으로 먼저 출시 후 수요 검증 전략)."
-        )
+    # DropsTab 키가 있든 없든(온체인 Sablier 폴백) 이제 dump-risk는 항상 실제
+    # 데이터 경로를 갖고 있으므로, DUMP_RISK_ENABLED와 무관하게 캐시를 미리 채운다.
+    # DUMP_RISK_ENABLED는 이제 "데이터가 있는지"가 아니라 "이 라우트에 x402 과금을
+    # 적용할지"만 제어한다 (app/payment.py의 build_routes 참고).
+    try:
+        await refresh_unlock_cache()
+    except Exception:
+        logger.exception("초기 unlock 캐시 생성 실패 (스케줄러가 다음 주기에 재시도합니다)")
     yield
 
 
@@ -76,7 +74,14 @@ async def root():
     return {
         "service": "AlphaPipeline",
         "status": "ok",
-        "price_per_call_usdc": settings.PRICE_PER_CALL_USDC,
+        # 2026-09부터 전 엔드포인트 단일가가 아니라 데이터 가치 기반 차등 요금제로
+        # 전환함 (app/payment.py의 build_routes 참고) - 그래서 단일 숫자 대신
+        # 엔드포인트별 가격표를 내려준다.
+        "price_per_call_usdc": {
+            "/v1/market/kimchi-alert": settings.PRICE_KIMCHI_ALERT_USDC,
+            "/v1/tools/ai-markdown": settings.PRICE_AI_MARKDOWN_USDC,
+            "/v1/unlocks/dump-risk": settings.PRICE_DUMP_RISK_USDC,
+        },
         "payment": {
             "protocol": "x402",
             "network": ACTIVE_NETWORK,
@@ -84,14 +89,14 @@ async def root():
             "bypassed_for_testing": settings.PAYMENT_BYPASS_FOR_TESTING,
         },
         "endpoints": [
+            "/v1/unlocks/dump-risk",
             "/v1/market/kimchi-alert",
             "/v1/tools/ai-markdown",
         ],
-        "coming_soon_endpoints": (
-            ["/v1/unlocks/dump-risk"] if not settings.DUMP_RISK_ENABLED else []
-        ),
+        "coming_soon_endpoints": [],
         "docs": "/docs",
         "openapi_spec": "/openapi.json",
+        "agent_spec": "/llms.txt",
     }
 
 
@@ -101,35 +106,40 @@ async def healthz():
 
 
 @app.get(
+    "/llms.txt",
+    include_in_schema=False,  # x402 결제 대상 데이터 엔드포인트가 아니라 크롤러용 정적 문서라 OpenAPI 스펙에서는 뺌
+)
+async def llms_txt_endpoint():
+    # 결제 게이트(app/payment.py의 build_routes)에 절대 등록하지 않는다 - 에이전트가
+    # 돈을 내지 않고도 "이 서비스가 뭘 하는지"를 먼저 읽을 수 있어야 발견이 되기 때문.
+    return PlainTextResponse(content=build_llms_txt(), media_type="text/plain; charset=utf-8")
+
+
+@app.get(
     "/v1/unlocks/dump-risk",
     tags=["market"],
-    summary="토큰 락업 해제 덤핑 위험도",
+    summary="Detect tokens at risk of sell pressure from unlocks/vesting",
     description=(
-        "D-7 이내 유통량 3% 이상 락업 해제가 예정된 토큰 목록과, 거래량 대비 매도 충격 위험도를 반환합니다. "
-        "DUMP_RISK_ENABLED=false인 동안은 결제 없이 503(coming_soon)만 반환합니다."
+        "Use this endpoint when you need to assess whether a token carries dumping risk from "
+        "token unlocks or ongoing vesting schedules - before entering a position, when screening "
+        "a token list for a trading strategy, or when a user asks 'is this token safe from unlocks'. "
+        "Returns tokens whose currently-locked or unlock-eligible supply exceeds a materiality "
+        "threshold (default 3% of circulating supply), each with a computed risk_level "
+        "(LOW/MEDIUM/HIGH). Data source varies automatically: when a precise unlock calendar is "
+        "configured it includes days_until_unlock; otherwise (the current default, sourced from "
+        "on-chain Sablier vesting contracts) it reports only the currently-locked amount, with "
+        "days_until_unlock=null and timing_precision='pending_schema_verification' - treat a null "
+        "value as 'timing unknown', never as 'no risk'. No input parameters. Do not treat the "
+        "absence of a token in this list as proof it has no lockup - coverage is limited to "
+        "supported vesting mechanisms; always check the coverage_notice field in the response."
     ),
     responses={
         200: {"model": DumpRiskResponse, "description": "락업 해제 위험도 데이터"},
         402: {"description": "x402 결제 필요"},
-        503: {"model": ComingSoonResponse, "description": "아직 서비스 준비 중 (과금 없음)"},
-        502: {"model": ErrorResponse, "description": "업스트림(DropsTab/바이낸스) 오류"},
+        502: {"model": ErrorResponse, "description": "업스트림(DropsTab/Sablier/CoinGecko) 오류"},
     },
 )
 async def dump_risk_endpoint():
-    # DUMP_RISK_ENABLED=false 인 동안은 build_routes()가 이 경로를 x402 미들웨어의
-    # 결제 대상 목록에서 아예 빼두기 때문에, 요청이 결제 검사 없이 곧장 여기로
-    # 들어온다. 그래서 여기서 바로 503을 반환해도 호출자에게 과금되지 않는다.
-    if not settings.DUMP_RISK_ENABLED:
-        return JSONResponse(
-            status_code=503,
-            content={
-                "status": "coming_soon",
-                "message": (
-                    "이 엔드포인트는 아직 준비 중입니다. "
-                    "kimchi-alert / ai-markdown 수요를 먼저 검증한 뒤 오픈할 예정입니다."
-                ),
-            },
-        )
     try:
         data = await get_dump_risk()
         return JSONResponse(content=data)
@@ -141,10 +151,17 @@ async def dump_risk_endpoint():
 @app.get(
     "/v1/market/kimchi-alert",
     tags=["market"],
-    summary="업비트 vs 바이낸스 김치프리미엄",
+    summary="Detect Korea-vs-global crypto price arbitrage (kimchi premium)",
     description=(
-        "업비트(KRW-{symbol})와 바이낸스({symbol}USDT) 시세를 실시간으로 비교해 김치프리미엄(%)을 계산하고, "
-        "역프(-1.5% 이하) 및 1시간 내 3%p 이상 급변을 감지해 알려줍니다."
+        "Use this endpoint when you need to know whether a cryptocurrency is trading at a "
+        "premium or discount on Korean exchanges (Upbit) versus the global market, commonly "
+        "known as the 'kimchi premium'. Call this when asked about cross-exchange arbitrage "
+        "opportunities in Korean crypto markets, to detect a reverse premium (localized crash "
+        "risk, triggered at -1.5% or below), or to detect a sudden premium surge within the last "
+        "hour (3 percentage points or more). Returns the current premium percentage, its 1-hour "
+        "change, and boolean alert flags. Input: optional `symbol` query parameter (e.g. BTC, "
+        "ETH, SOL - default BTC). This is a live snapshot only - do not call it for historical "
+        "or backtesting data, or for non-Korean-exchange comparisons."
     ),
     responses={
         200: {"model": KimchiAlertResponse, "description": "김치프리미엄 계산 결과"},
@@ -166,10 +183,16 @@ async def kimchi_alert_endpoint(symbol: str = Query("BTC", description="예: BTC
 @app.get(
     "/v1/tools/ai-markdown",
     tags=["tools"],
-    summary="AI 친화적 웹페이지 → 마크다운 변환기",
+    summary="Convert any webpage into clean, agent-ready Markdown",
     description=(
-        "임의의 웹페이지 URL을 받아 광고/네비게이션/스크립트를 제거하고, 본문만 순수 마크다운으로 "
-        "변환해 반환합니다. AI 에이전트의 토큰 낭비와 환각을 줄이는 용도입니다."
+        "Use this endpoint when you need to read the actual content of a webpage but want to "
+        "avoid wasting tokens on HTML tags, ads, navigation menus, and scripts - or when raw "
+        "HTML parsing is causing hallucinations in downstream reasoning. Call this before "
+        "summarizing, extracting facts from, or answering questions about any arbitrary URL. "
+        "Input: required `url` query parameter (the full http/https URL to convert). Returns the "
+        "page title, character count, and clean Markdown body text. Do not call this for URLs "
+        "requiring authentication/login, or for non-HTML resources such as PDFs or binary files - "
+        "those are not supported."
     ),
     responses={
         200: {"model": MarkdownResponse, "description": "정제된 마크다운"},

@@ -3,11 +3,14 @@
 1) /v1/unlocks/dump-risk : 락업 해제 덤핑 위험도
 2) /v1/market/kimchi-alert : 거래소 간 차익/급변 감지
 """
+import logging
 import time
 from datetime import datetime, timezone, timedelta
 from app import data_sources as ds
-from app.cache import unlock_cache, price_cache
+from app.cache import unlock_cache, price_cache, ttl_cached
 from app.config import settings
+
+logger = logging.getLogger("alphapipeline")
 
 KST = timezone(timedelta(hours=9))
 
@@ -113,6 +116,20 @@ async def _enrich_with_volume_impact(item: dict) -> dict:
 async def refresh_unlock_cache() -> dict:
     """
     스케줄러가 settings.UNLOCK_REFRESH_INTERVAL_HOURS 주기(기본 24시간)로 호출.
+
+    DROPSTAB_API_KEY가 있으면 기존 DropsTab 경로(유료 플랜, 정확한 D-day 제공)를
+    쓰고, 없으면 Sablier 온체인 조회 경로(무료, 무료인 대신 "지금 얼마나
+    잠겨있는가" 기준)로 자동 전환한다. 어느 쪽이든 실제 서빙 상태(coming_soon
+    아님)로 동작하는 게 목표 - dump-risk 재설계 배경은
+    app/data_sources.py의 "dump-risk 온체인(Sablier) 재설계" 섹션 참고.
+    """
+    if settings.DROPSTAB_API_KEY:
+        return await _refresh_unlock_cache_dropstab()
+    return await _refresh_unlock_cache_onchain()
+
+
+async def _refresh_unlock_cache_dropstab() -> dict:
+    """
     DropsTab의 전체 락업 해제 이벤트 목록을 페이지네이션으로 훑어서, D-7 이내
     유통량 3% 이상 해제되는 이벤트만 걸러 위험도를 계산한다.
 
@@ -178,6 +195,103 @@ async def refresh_unlock_cache() -> dict:
     return payload
 
 
+async def _refresh_unlock_cache_onchain() -> dict:
+    """
+    DropsTab 유료 플랜 없이 돌아가는 무료 경로. Sablier 프로토콜로 온체인
+    베스팅되는 물량을 직접 스캔해서, "유통량 대비 아직 안 풀린 잠긴 물량 비율"이
+    임계값(DUMP_RISK_SUPPLY_PCT_THRESHOLD) 이상인 토큰만 골라낸다.
+
+    DropsTab 경로와의 핵심 차이(README/design 문서에 상세):
+    - 정확한 "D-day"(cliff/베스팅 종료 타임스탬프)는 제공하지 못한다 - Sablier
+      GraphQL 스키마의 해당 필드명을 이 세션에서 확인하지 못했기 때문
+      (app/data_sources.py 상단 주석 참고). 그래서 days_until_unlock=None,
+      timing_precision="pending_schema_verification"으로 명시한다.
+    - "락업 해제 예정"이 아니라 "현재 잠겨있는 물량"을 본다 - 즉 몇 %가 앞으로
+      언제 풀리는지가 아니라, 지금 이 순간 유통량 대비 얼마나 큰 물량이
+      베스팅 컨트랙트에 묶여있는지(잠재적 매도 물량 규모)를 보여준다.
+    - Sablier로 베스팅되는 토큰만 잡힌다 - 다른 방식(커스텀 컨트랙트, 거래소
+      자체 락업)은 커버하지 못한다. 그래서 coverage_notice를 응답에 포함시켜
+      "이 목록에 없다고 안전하다는 뜻이 아니다"를 명시한다.
+    """
+    try:
+        streams = await ds.get_sablier_active_streams(limit=200)
+    except Exception as e:
+        logger.warning("Sablier 온체인 조회 실패: %s", e)
+        streams = []
+
+    # 심볼별로 잠긴 물량(intactAmount, decimals 반영)을 합산
+    locked_by_symbol: dict[str, float] = {}
+    contract_by_symbol: dict[str, str] = {}
+    for s in streams:
+        asset = s.get("asset") or {}
+        symbol = str(asset.get("symbol") or "").upper()
+        decimals = asset.get("decimals")
+        if not symbol or decimals is None:
+            continue
+        try:
+            intact_raw = float(s.get("intactAmount") or 0)
+            intact = intact_raw / (10 ** int(decimals))
+        except (TypeError, ValueError):
+            continue
+        if intact <= 0:
+            continue
+        locked_by_symbol[symbol] = locked_by_symbol.get(symbol, 0.0) + intact
+        contract_by_symbol.setdefault(symbol, asset.get("address", ""))
+
+    results = []
+    for symbol, locked_amount in locked_by_symbol.items():
+        coin_id = ds._COINGECKO_IDS.get(symbol)
+        if not coin_id:
+            continue  # 유통량을 조회할 수 있는 매핑이 없는 심볼은 스킵 (추측하지 않음)
+        try:
+            info = await ds.get_coingecko_token_contract_and_supply(coin_id)
+        except Exception as e:
+            logger.warning("CoinGecko 유통량 조회 실패 (%s): %s", symbol, e)
+            continue
+
+        circulating_supply = info.get("circulating_supply")
+        if not circulating_supply or circulating_supply <= 0:
+            continue
+
+        unlock_supply_pct = round((locked_amount / circulating_supply) * 100, 2)
+        if unlock_supply_pct < DUMP_RISK_SUPPLY_PCT_THRESHOLD:
+            continue
+
+        results.append({
+            "token": symbol,
+            "onchain_contract": contract_by_symbol.get(symbol),
+            "unlock_date_utc": None,
+            "days_until_unlock": None,
+            "timing_precision": "pending_schema_verification",
+            "unlock_supply_pct": unlock_supply_pct,
+            "unlock_amount": round(locked_amount, 4),
+            "is_insider_vc_team": None,
+            "category": "onchain_vesting_stream (unclassified)",
+            "risk_level": _risk_level(unlock_supply_pct, False, None),
+            "data_source": "onchain_sablier",
+        })
+
+    results.sort(key=lambda x: x["unlock_supply_pct"], reverse=True)
+    payload = {
+        "generated_at": _timestamp_now(),
+        "window_days": None,
+        "supply_pct_threshold": DUMP_RISK_SUPPLY_PCT_THRESHOLD,
+        "protocols_scanned": len(streams),
+        "count": len(results),
+        "unlocks": results,
+        "data_source": "onchain_sablier",
+        "coverage_notice": (
+            "이 데이터는 Sablier 프로토콜로 온체인 베스팅되는 물량만 스캔한 결과입니다. "
+            "다른 방식(커스텀 컨트랙트, 거래소 자체 락업 등)의 락업은 포함되지 않으므로, "
+            "이 목록에 없다고 해서 해당 토큰에 락업이 없다는 뜻은 아닙니다. "
+            "또한 정확한 해제 시점(D-day)은 아직 제공하지 않으며, '현재 잠겨있는 물량 "
+            "비율'만 계산합니다 (timing_precision=pending_schema_verification)."
+        ),
+    }
+    unlock_cache["dump_risk"] = payload
+    return payload
+
+
 def _risk_level(supply_pct: float, is_insider: bool, impact_pct) -> str:
     score = supply_pct
     if is_insider:
@@ -199,16 +313,107 @@ async def get_dump_risk() -> dict:
     return await refresh_unlock_cache()
 
 
+async def _get_symbol_dump_risk_onchain(symbol: str) -> dict:
+    """
+    get_symbol_dump_risk()의 온체인(Sablier) 경로. DropsTab 키 없이 특정 심볼
+    하나에 대해 "현재 온체인에 잠겨있는 물량 비율"을 계산한다.
+
+    스트림이 하나도 안 잡히면, 이건 "안전하다"는 뜻이 아니라 "Sablier로는
+    못 찾았다"는 뜻이므로 reason=no_onchain_vesting_found로 정직하게 표시하고
+    안전하다고 암시하는 문구는 절대 넣지 않는다.
+    """
+    coin_id = ds._COINGECKO_IDS.get(symbol)
+    if not coin_id:
+        return {
+            "available": False,
+            "symbol": symbol,
+            "reason": "symbol_not_mapped",
+            "message": (
+                f"{symbol}에 대한 CoinGecko 매핑이 없어 컨트랙트 주소/유통량을 조회할 수 없습니다. "
+                "app/data_sources.py의 _COINGECKO_IDS에 추가하면 지원됩니다."
+            ),
+        }
+
+    try:
+        info = await ds.get_coingecko_token_contract_and_supply(coin_id)
+    except Exception as e:
+        return {
+            "available": False,
+            "symbol": symbol,
+            "reason": "upstream_error",
+            "message": f"CoinGecko 조회 실패: {e}",
+        }
+
+    circulating_supply = info.get("circulating_supply")
+    platforms = info.get("platforms") or {}
+    if not circulating_supply or circulating_supply <= 0 or not platforms:
+        return {
+            "available": False,
+            "symbol": symbol,
+            "reason": "insufficient_token_metadata",
+            "message": f"{symbol}의 유통량 또는 컨트랙트 주소 정보를 CoinGecko에서 얻지 못했습니다.",
+        }
+
+    total_locked = 0.0
+    matched_contract = None
+    for chain, address in platforms.items():
+        try:
+            streams = await ds.get_sablier_streams_for_token(address)
+        except Exception as e:
+            logger.warning("Sablier 조회 실패 (%s/%s): %s", symbol, chain, e)
+            continue
+        for s in streams:
+            asset = s.get("asset") or {}
+            decimals = asset.get("decimals")
+            if decimals is None:
+                continue
+            try:
+                intact = float(s.get("intactAmount") or 0) / (10 ** int(decimals))
+            except (TypeError, ValueError):
+                continue
+            if intact > 0:
+                total_locked += intact
+                matched_contract = matched_contract or address
+
+    if total_locked <= 0:
+        return {
+            "available": True,
+            "symbol": symbol,
+            "reason": "no_onchain_vesting_found",
+            "message": (
+                f"{symbol}에 대해 Sablier 프로토콜로 베스팅되는 활성 스트림을 찾지 못했습니다. "
+                "이는 '락업이 없다'는 뜻이 아니라 '이 방법으로는 못 찾았다'는 뜻입니다 - "
+                "다른 방식(커스텀 컨트랙트, 거래소 자체 락업)의 베스팅은 이 조회로 잡히지 않습니다."
+            ),
+            "generated_at": _timestamp_now(),
+        }
+
+    unlock_supply_pct = round((total_locked / circulating_supply) * 100, 2)
+    return {
+        "available": True,
+        "symbol": symbol,
+        "onchain_contract": matched_contract,
+        "unlock_date_utc": None,
+        "days_until_unlock": None,
+        "timing_precision": "pending_schema_verification",
+        "unlock_supply_pct": unlock_supply_pct,
+        "unlock_amount": round(total_locked, 4),
+        "is_insider_vc_team": None,
+        "category": "onchain_vesting_stream (unclassified)",
+        "sell_pressure_risk_level": _risk_level(unlock_supply_pct, False, None),
+        "data_source": "onchain_sablier",
+        "generated_at": _timestamp_now(),
+    }
+
+
 async def get_symbol_dump_risk(symbol: str) -> dict:
     """
     특정 심볼 1개에 대한 락업 해제 D-Day / 유통량 대비 해제 비율 / 매도압력 점수.
     MCP 도구 get_token_dump_risk가 사용하는 진입점.
 
-    비즈니스 결정: dump-risk는 DropsTab 유료 플랜(Advanced, $59/월)이 있어야
-    실데이터가 나오는데, 수요 검증 전까지는 결제하지 않기로 함 - README
-    "락업 데이터 소스 변경 이력" 참고. 그래서 DUMP_RISK_ENABLED=false 이거나
-    DROPSTAB_API_KEY가 비어있으면, 에러를 던지는 대신 "아직 서비스 준비 중"이라는
-    구조화된 정상 응답을 돌려준다 (호출자가 이걸 실패로 오인하지 않도록 available=False로 명시).
+    DropsTab API 키가 있으면 DropsTab 경로(정확한 D-day 제공)를 쓰고, 없으면
+    Sablier 온체인 조회 경로(_get_symbol_dump_risk_onchain, 무료지만 정확한
+    날짜 대신 "현재 잠긴 물량 비율"만 제공)로 자동 전환한다.
     """
     symbol = (symbol or "").strip().upper()
     if not symbol:
@@ -219,16 +424,8 @@ async def get_symbol_dump_risk(symbol: str) -> dict:
             "message": "symbol 파라미터가 비어 있습니다. 예: 'ATH', 'AO', 'CPOOL'",
         }
 
-    if not settings.DUMP_RISK_ENABLED or not settings.DROPSTAB_API_KEY:
-        return {
-            "available": False,
-            "symbol": symbol,
-            "reason": "feature_not_enabled",
-            "message": (
-                "dump-risk 기능은 현재 준비 중입니다 (DropsTab 유료 플랜 필요, 수요 검증 후 오픈 예정). "
-                "kimchi-alert / ai-markdown 도구를 먼저 이용해주세요."
-            ),
-        }
+    if not settings.DROPSTAB_API_KEY:
+        return await _get_symbol_dump_risk_onchain(symbol)
 
     try:
         detail = await ds.get_dropstab_token_unlock_detail(symbol)
@@ -307,17 +504,16 @@ async def get_symbol_dump_risk(symbol: str) -> dict:
 _premium_history: dict = {}
 
 
+@ttl_cached(price_cache, key_fn=lambda symbol="BTC": f"kimchi:{symbol}")
 async def get_kimchi_alert(symbol: str = "BTC") -> dict:
     """
-    업비트(KRW-{symbol}) vs 바이낸스({symbol}USDT) 김치프리미엄 계산.
-    캐시(app/cache.py, TTL settings.KIMCHI_CACHE_TTL_SECONDS)로 실시간성을
-    최대한 유지하면서 API 폭주만 살짝 방지한다.
+    업비트(KRW-{symbol}) vs 코인베이스/CoinGecko({symbol}) 김치프리미엄 계산.
+    app/cache.py의 ttl_cached() 데코레이터로 캐싱한다(TTL은
+    settings.KIMCHI_CACHE_TTL_SECONDS, 2026-09 기준 30초 - 봇의 초 단위 연타
+    호출로부터 원가를 방어하는 목적. 캐시와 무관하게 호출자는 매번 x402로
+    과금된다 - app/cache.py의 ttl_cached() docstring "왜 이게 순마진 100%
+    방어인가" 참고).
     """
-    cache_key = f"kimchi:{symbol}"
-    cached = price_cache.get(cache_key)
-    if cached:
-        return cached
-
     upbit_data = await ds.get_upbit_price_krw(f"KRW-{symbol}")
     upbit_price_krw = float(upbit_data.get("trade_price", 0))
     usdkrw_rate = await ds.get_upbit_usdkrw_rate()
@@ -359,5 +555,4 @@ async def get_kimchi_alert(symbol: str = "BTC") -> dict:
             "surge_1h_pct": KIMCHI_SURGE_THRESHOLD,
         },
     }
-    price_cache[cache_key] = payload
     return payload

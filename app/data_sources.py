@@ -32,7 +32,14 @@ UPBIT_TICKER_URL = "https://api.upbit.com/v1/ticker"
 BINANCE_TICKER_URL = "https://data-api.binance.vision/api/v3/ticker/price"
 BINANCE_24H_URL = "https://data-api.binance.vision/api/v3/ticker/24hr"
 COINGECKO_SIMPLE_PRICE_URL = "https://api.coingecko.com/api/v3/simple/price"
+COINGECKO_COIN_DETAIL_URL = "https://api.coingecko.com/api/v3/coins/{coin_id}"
 COINBASE_SPOT_PRICE_URL = "https://api.coinbase.com/v2/prices/{base}-USD/spot"
+
+# dump-risk 온체인 재설계(Sablier)용 GraphQL 엔드포인트.
+# Envio가 운영하는 무료/무인증 공개 인덱서 - Base + Ethereum 통합.
+# (The Graph의 공식 프로덕션 엔드포인트는 유료/API 키가 필요하고, 무료 "testing"
+# 엔드포인트는 일 3,000쿼리로 제한돼 있어서 이쪽을 1순위로 채택함)
+SABLIER_GRAPHQL_URL = "https://indexer.hyperindex.xyz/53b7e25/v1/graphql"
 
 # 심볼(BTC 등) -> CoinGecko 코인 id. 자주 쓰이는 것 위주로 등록해뒀고,
 # 목록에 없는 심볼이 필요해지면 https://api.coingecko.com/api/v3/coins/list 에서
@@ -156,3 +163,155 @@ async def get_dropstab_token_unlock_detail(coin_slug: str) -> dict:
         r = await client.get(url, headers=headers)
         r.raise_for_status()
         return r.json()
+
+
+# ============================================================================
+# dump-risk 온체인(Sablier) 재설계 - DropsTab 유료 플랜 없이 무료로 서빙하기 위한 경로.
+#
+# 설계 배경(자세한 비교는 alphapipeline_dump_risk_design.md 참고):
+#   1) DropsTab/TokenUnlocks 내부 API 역공학 - ToS 위반/차단 리스크가 커서 기각.
+#   2) 무료 공개 API + 자체 스코어링 - 정작 핵심 데이터(락업 캘린더)를 무료로
+#      주는 곳이 없어서(DeFiLlama/DropsTab/CryptoRank/CMC 전부 유료화) 기각.
+#   3) 온체인 베스팅 컨트랙트(Sablier) 직접 조회 - 채택. "순수 온체인 검증 데이터"
+#      라는 타이틀 자체가 차별화 포인트가 되고, 제3자 API 정책에 종속되지 않는다.
+#
+# 정직하게 밝혀둘 한계: Sablier GraphQL 스키마 중 "cliff/시작/종료 타임스탬프"
+# 필드명은 이 세션에서 끝내 확인하지 못했다 (GraphQL introspection을 이 서버
+# 환경에서 실행할 방법이 없었음 - WebFetch는 GET 기반이라
+# "PersistedQueryNotSupported"로 거부됐고, 직접 POST도 아웃바운드 네트워크가
+# 막혀 있어 실패함). 그래서 v1은 "언제" 대신 "지금 얼마나 잠겨있는가"만으로
+# 위험도를 계산한다 - 틀린 필드명을 추측해서 쿼리 에러를 내거나, 더 나쁘게는
+# 그럴듯하지만 틀린 날짜를 보여주는 것보다 안전한 선택이다.
+# 타임스탬프 필드까지 확인되면 get_sablier_active_streams()의 GraphQL 쿼리에
+# 필드를 추가하고 app/logic.py의 _refresh_unlock_cache_onchain()에서
+# days_until_unlock을 채워주면 된다. 아래가 사용자가 직접 확인할 수 있는 방법:
+#
+#   curl -X POST https://indexer.hyperindex.xyz/53b7e25/v1/graphql \
+#     -H "Content-Type: application/json" \
+#     -d '{"query": "{ __type(name: \"LockupStream\") { fields { name } } }"}'
+#
+# (또는 그냥 브라우저로 위 URL에 접속하면 뜨는 GraphiQL 콘솔에서 실행해도 됨)
+# ============================================================================
+
+# 확인된(Sablier 공식 문서 예시에 실제로 등장하는) 필드만 사용한다.
+# cliff/startTime/endTime 등은 미확인이라 의도적으로 제외했다 - 위 설명 참고.
+_SABLIER_ACTIVE_STREAMS_QUERY = """
+query ActiveStreams($limit: Int!) {
+  lockupStreams(
+    where: {canceled: {_eq: false}, intactAmount: {_gt: "0"}}
+    limit: $limit
+  ) {
+    id
+    chainId
+    depositAmount
+    intactAmount
+    withdrawnAmount
+    canceled
+    asset {
+      address
+      symbol
+      decimals
+    }
+  }
+}
+"""
+
+_SABLIER_STREAMS_FOR_TOKEN_QUERY = """
+query StreamsForToken($tokenAddress: String!, $limit: Int!) {
+  lockupStreams(
+    where: {
+      canceled: {_eq: false}
+      intactAmount: {_gt: "0"}
+      asset: {address: {_eq: $tokenAddress}}
+    }
+    limit: $limit
+  ) {
+    id
+    chainId
+    depositAmount
+    intactAmount
+    withdrawnAmount
+    canceled
+    asset {
+      address
+      symbol
+      decimals
+    }
+  }
+}
+"""
+
+
+async def _sablier_graphql(query: str, variables: dict) -> dict:
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        r = await client.post(
+            SABLIER_GRAPHQL_URL,
+            json={"query": query, "variables": variables},
+        )
+        r.raise_for_status()
+        body = r.json()
+        if "errors" in body and body["errors"]:
+            raise RuntimeError(f"Sablier GraphQL 오류: {body['errors']}")
+        return body.get("data", {})
+
+
+async def get_sablier_active_streams(limit: int = 200) -> list[dict]:
+    """
+    현재 취소되지 않고 잠긴 물량(intactAmount > 0)이 남아있는 베스팅 스트림을
+    최신순 상위 `limit`개 스캔한다. dump-risk 전체 목록(/v1/unlocks/dump-risk)
+    스캔용 - app/logic.py의 _refresh_unlock_cache_onchain()이 사용한다.
+
+    주의: 이건 "Sablier 프로토콜로 베스팅되는 물량"만 잡는다. 다른 베스팅
+    방식(커스텀 컨트랙트, 거래소 자체 락업 등)은 이 방법으로는 안 잡히므로,
+    "이 목록에 없다고 락업이 없는 게 아니다"라는 커버리지 한계가 있다
+    (응답에 coverage_notice로 명시함).
+    """
+    data = await _sablier_graphql(_SABLIER_ACTIVE_STREAMS_QUERY, {"limit": limit})
+    return data.get("lockupStreams", []) or []
+
+
+async def get_sablier_streams_for_token(contract_address: str, limit: int = 200) -> list[dict]:
+    """
+    특정 토큰 컨트랙트 주소 하나에 대한 활성 베스팅 스트림만 조회.
+    MCP get_token_dump_risk / GET /v1/unlocks/dump-risk?symbol=... 같은
+    "심볼 1개 지정" 조회용 - app/logic.py의 _get_symbol_dump_risk_onchain()이 사용한다.
+    """
+    data = await _sablier_graphql(
+        _SABLIER_STREAMS_FOR_TOKEN_QUERY,
+        {"tokenAddress": contract_address.lower(), "limit": limit},
+    )
+    return data.get("lockupStreams", []) or []
+
+
+async def get_coingecko_token_contract_and_supply(coin_id: str) -> dict:
+    """
+    CoinGecko 코인 상세 조회에서 (1) 체인별 컨트랙트 주소와 (2) 유통량을 뽑아온다.
+    Sablier는 "토큰 컨트랙트 주소" 기준으로 스트림을 색인하기 때문에, 심볼(BTC 등)
+    -> 컨트랙트 주소로 변환하는 다리 역할이며, 유통량은 "유통량 대비 잠긴 비율(%)"
+    계산의 분모로 쓰인다.
+
+    반환 예: {"circulating_supply": 19_800_000.0,
+              "platforms": {"ethereum": "0xabc...", "base": "0xdef...", ...}}
+    """
+    url = COINGECKO_COIN_DETAIL_URL.format(coin_id=coin_id)
+    params = {
+        "localization": "false",
+        "tickers": "false",
+        "market_data": "true",
+        "community_data": "false",
+        "developer_data": "false",
+    }
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        r = await client.get(url, params=params)
+        r.raise_for_status()
+        body = r.json()
+
+    market_data = body.get("market_data") or {}
+    platforms = body.get("platforms") or {}
+    # 값이 빈 문자열인 체인은 걸러낸다 (CoinGecko가 미지원 체인은 "" 로 채워둠)
+    platforms = {chain: addr for chain, addr in platforms.items() if addr}
+
+    return {
+        "circulating_supply": market_data.get("circulating_supply"),
+        "platforms": platforms,
+    }

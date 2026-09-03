@@ -25,7 +25,19 @@ class Settings:
     # 호출당 가격 (USD 단위, 사람이 읽는 값. 예: 0.01 -> x402 SDK에 "$0.01"로 전달됨.
     # 메인넷에서는 이 달러 가격이 Base의 기본 USDC로 자동 환산되므로 컨트랙트 주소를
     # 직접 지정할 필요가 없다 - CDP Facilitator가 처리)
+    # 2026-09 업데이트: 더 이상 전 엔드포인트에 똑같이 쓰이지 않는다 - 아래
+    # PRICE_*_USDC로 엔드포인트별 차등 요금을 매기고, 이 값은 신규 엔드포인트
+    # 추가 시 임시 기본값/legacy 폴백으로만 남겨둔다 (app/payment.py 참고).
     PRICE_PER_CALL_USDC: float = float(os.getenv("PRICE_PER_CALL_USDC", "0.01"))
+
+    # ===== 엔드포인트별 차등 요금 (Tiered Pricing, 2026-09) =====
+    # "데이터 가치 기반 차등 요금제" - 대체하기 쉬운 단순 유틸리티(ai-markdown)는
+    # 싸게, 아무 데서나 못 구하는 핵심 알파 데이터(dump-risk)는 비싸게 매겨서
+    # 마진 곡선을 데이터의 실제 가치에 맞춘다. 세 값 다 독립적으로 .env에서
+    # 조정 가능 - 가격 실험(A/B, 수요 반응 테스트)을 코드 수정 없이 할 수 있다.
+    PRICE_KIMCHI_ALERT_USDC: float = float(os.getenv("PRICE_KIMCHI_ALERT_USDC", "0.01"))
+    PRICE_AI_MARKDOWN_USDC: float = float(os.getenv("PRICE_AI_MARKDOWN_USDC", "0.005"))
+    PRICE_DUMP_RISK_USDC: float = float(os.getenv("PRICE_DUMP_RISK_USDC", "0.03"))
 
     # ===== x402 공식 결제 레이어 (Coinbase CDP Facilitator) =====
     # Coinbase Developer Platform(https://portal.cdp.coinbase.com)에서 발급받는 API 키.
@@ -47,9 +59,13 @@ class Settings:
     PUBLIC_BASE_URL: str = os.getenv("PUBLIC_BASE_URL", "https://alphapipeline.onrender.com")
 
     # 김치프리미엄/시세 캐시 TTL(초) - 짧을수록 실시간성은 올라가지만
-    # 업비트/바이낸스 API 호출 빈도가 늘어남. 2초면 봇의 연타 호출을 막으면서도
-    # 사람이 체감하기엔 사실상 실시간.
-    KIMCHI_CACHE_TTL_SECONDS: int = int(os.getenv("KIMCHI_CACHE_TTL_SECONDS", "2"))
+    # 업비트/코인베이스/CoinGecko API 호출 빈도가 늘어남.
+    # 2026-09 업데이트: 기존 2초에서 30초로 늘렸다 - 봇들이 초 단위로 같은 심볼을
+    # 반복 결제 호출할 때, x402 결제는 요청마다 그대로 징수되면서(캐시와 무관)
+    # 외부 API 호출만 캐시 히트만큼 아낄 수 있어 원가가 0에 수렴한다("순마진 100%
+    # 방어" - app/cache.py의 ttl_cached() 참고). 김치프리미엄은 30초 안에 급변하는
+    # 지표가 아니라 실시간성 손실도 체감상 미미하다.
+    KIMCHI_CACHE_TTL_SECONDS: int = int(os.getenv("KIMCHI_CACHE_TTL_SECONDS", "30"))
 
     # 락업 해제(dump-risk) 스캔 주기(시간). 언락 일정은 몇 주 전에 미리 확정되는
     # 경우가 대부분이라 실시간일 필요가 없음 - 기본값 24시간(하루 1회)이 이미

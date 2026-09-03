@@ -32,16 +32,16 @@ Agentic.Market 같은 공식 인덱서/마켓플레이스에 등록될 수 없�
   `X402_NETWORK` 설정과 무관하게 네트워크를 강제로 테스트넷으로
   전환한다 - 실제 메인넷 USDC는 이 상태에서 정산되지 않는다.
 
-## x402 Bazaar 등록용 메타데이터 (2026-09 업데이트)
+## x402 Bazaar 등록용 메타데이터 (2026-09 업데이트, 아래 "버그 수정" 절 참고)
 Render 배포(https://alphapipeline.onrender.com)가 실제로 살아있는 걸 확인한 뒤,
 Bazaar 인덱서가 카탈로그에 반영할 때 읽는 `extensions.bazaar` 스키마를 각 라우트에
 채워 넣었다. `RouteConfig`의 실제 필드는 공식 GitHub 소스(coinbase/x402,
 python/x402/http/types.py)로 확인했다 - `resource`(절대 URL 문자열),
 `extensions`(자유 형식 dict)가 존재해서, 여기에 `bazaar.info.input`/`output`
-(입출력 스펙+예시)과 `bazaar.serviceName`/`tags`를 넣는다. 절대 URL이 필요한
-이유: Bazaar 문서(docs.x402.org/extensions/bazaar)가 "relative URLs"를 흔한
-등록 실패 사유로 명시하고 있어서, `PUBLIC_BASE_URL`(.env, 기본값이 이미 Render
-주소로 설정됨) + 라우트 경로로 절대 URL을 만든다.
+(입출력 스펙+예시)을 넣는다. 절대 URL이 필요한 이유: Bazaar 문서
+(docs.x402.org/extensions/bazaar)가 "relative URLs"를 흔한 등록 실패 사유로
+명시하고 있어서, `PUBLIC_BASE_URL`(.env, 기본값이 이미 Render 주소로 설정됨) +
+라우트 경로로 절대 URL을 만든다.
 
 **등록이 실제로 되려면**: Bazaar는 "신청" 절차가 없다 - 공식 x402 클라이언트
 SDK를 쓰는 누군가가 이 bazaar extension을 echo하면서 실제 결제를 완료하는
@@ -49,17 +49,45 @@ SDK를 쓰는 누군가가 이 bazaar extension을 echo하면서 실제 결제�
 반영한다. 즉 이 메타데이터를 넣는 것만으로는 카탈로그에 즉시 뜨지 않고,
 실제 결제 트래픽이 최소 1건 있어야 한다 (README "x402 Bazaar 등록" 절 참고).
 
+## 버그 수정 (2026-09-03): "invalid discovery configuration" 거부 해결
+실결제 테스트 도중 Render 로그에 실제로 이 거부가 찍혔다:
+`{"bazaar": {"status": "rejected", "rejectedReason": "invalid discovery configuration"}}`
+
+원인: 이전 버전은 `serviceName`/`tags`를 `extensions.bazaar` 안에 `info`와
+나란히 넣었다. 공식 문서(docs.x402.org/extensions/bazaar, "Service Metadata"
+절)를 다시 정확히 대조해보니, `serviceName`/`tags`/`iconUrl`은
+`extensions.bazaar` 안이 아니라 **`RouteConfig` 자체의 별도 필드**
+(`service_name`/`tags`/`icon_url`)로 들어가야 하는 게 맞다 - `extensions.bazaar`
+안에는 오직 `info`(input/output)만 있어야 한다. 즉 `extensions.bazaar`가
+"info" 옆에 낯선 키(serviceName/tags)를 더 들고 있었던 게 인덱서의 스키마
+검증(엄격한 additionalProperties 제약으로 추정)에 걸려 통째로 거부당한
+것으로 보인다.
+
+수정: `_bazaar_extension()`은 이제 `info`만 만들고, `serviceName`/`tags`는
+`_make_route_config()`가 `RouteConfig`의 최상위 필드로 직접 붙인다. 또한
+문서가 명시적으로 "hand-rolling 하지 말고 공식 SDK 헬퍼를 쓰라"고 권장하므로,
+가능하면 `x402.extensions.bazaar.declare_discovery_extension()` 공식 헬퍼를
+쓰고, 어떤 이유로든(구버전 SDK 등) 그게 안 되면 문서의 "Response Schema"
+예시와 정확히 같은 모양으로 수동 구성하는 폴백을 쓴다.
+
+**정직하게 밝혀둘 점**: 이 세션은 x402 패키지를 실제로 설치해서 검증할
+네트워크 접근이 없었다(README/design 문서에 명시된 샌드박스 제약). 그래서
+`_make_route_config()`는 설치된 `RouteConfig`가 `service_name`/`tags`/`icon_url`
+필드를 실제로 지원하는지 런타임에 `dataclasses.fields()`로 확인해서, 지원 안
+하면 조용히 빼고 경고 로그만 남긴다 (서버가 죽는 대신 최소한 결제/데이터
+기능은 정상 동작). 배포 후 Render 로그에서 이 경고가 뜨는지 꼭 확인할 것 -
+뜨면 `pip install -U x402`로 SDK를 올려야 서비스명/태그까지 카탈로그에 반영된다.
+
 ## 알아두어야 할 점 (정직하게 밝혀둠)
 - `iconUrl`은 아직 안 넣었다 - 공개적으로 접근 가능한 이미지 URL이 있어야 하는데
   아직 호스팅해둔 아이콘이 없어서다. 나중에 아이콘 이미지를 하나 만들어서 어딘가에
-  올리고, `_bazaar_extension()`에 `iconUrl` 키를 추가하면 된다.
-- `extensions.bazaar` 안에 `serviceName`/`tags`를 나란히 두는 배치는 공식 예시
-  JSON(docs.x402.org/extensions/bazaar)에서 "info" 옆에 있는 걸 보고 그대로 따른
-  것인데, 문서에 있는 두 번째 예시는 이 필드들을 `resource`라는 별도 객체 안에도
-  보여주고 있어서 정확한 스펙 버전에 따라 위치가 다를 수 있다. 실제 카탈로그 반영
-  결과를 보고 필요하면 위치를 조정해야 할 수 있다.
+  올리고, `_make_route_config()` 호출부에 `icon_url=` 키를 추가하면 된다.
 - x402 패키지 버전에 따라 import 경로가 바뀔 수 있다 (이 파일은 2.21.0 기준).
+- 위 수정을 실제 배포 후, 결제를 1건 더 발생시켜 Render 로그에서
+  `"status": "rejected"`가 사라지고 `"success"`(또는 `"processing"`)로 바뀌는지
+  반드시 재확인해야 한다 - 이 세션은 그 재검증까지는 못 했다.
 """
+import dataclasses
 import logging
 
 from x402.http import FacilitatorConfig, HTTPFacilitatorClient, PaymentOption
@@ -68,9 +96,38 @@ from x402.mechanisms.evm.exact import ExactEvmServerScheme
 from x402.server import x402ResourceServer
 
 from app.config import settings
-from app.schemas import DUMP_RISK_EXAMPLE, KIMCHI_ALERT_EXAMPLE, MARKDOWN_EXAMPLE
+from app.schemas import (
+    DUMP_RISK_EXAMPLE,
+    KIMCHI_ALERT_EXAMPLE,
+    MARKDOWN_EXAMPLE,
+    DumpRiskResponse,
+    KimchiAlertResponse,
+    MarkdownResponse,
+)
 
 logger = logging.getLogger("alphapipeline")
+
+# 공식 헬퍼가 있으면 우선 사용한다 (문서가 hand-rolling 대신 이걸 쓰라고 명시적으로
+# 권장함). 설치된 x402 버전이 이 모듈/함수를 아직 갖고 있지 않을 수도 있어서
+# ImportError를 잡아 폴백한다 - 이 세션에서 실제 설치 검증을 못 했기 때문에
+# 방어적으로 작성했다 (위 클래스 docstring "버그 수정" 절 참고).
+try:
+    from x402.extensions.bazaar import OutputConfig, declare_discovery_extension
+
+    _HAS_DISCOVERY_HELPER = True
+except ImportError:
+    OutputConfig = None
+    declare_discovery_extension = None
+    _HAS_DISCOVERY_HELPER = False
+    logger.warning(
+        "x402.extensions.bazaar.declare_discovery_extension을 임포트하지 못했습니다 "
+        "(설치된 x402 버전이 이 헬퍼를 지원하지 않을 수 있음) - 수동으로 구성한 "
+        "extensions.bazaar dict로 대체합니다. 'pip install -U x402'로 최신 버전을 "
+        "설치하면 공식 헬퍼를 쓰도록 자동 전환됩니다."
+    )
+
+# RouteConfig가 실제로 지원하는 필드 목록 (설치된 x402 버전에 따라 달라질 수 있음).
+_ROUTECONFIG_FIELD_NAMES = {f.name for f in dataclasses.fields(RouteConfig)}
 
 # 테스트넷 파실리테이터(x402.org/facilitator)는 Base Sepolia만 검증 가능하다.
 TESTNET_FALLBACK_NETWORK = "eip155:84532"  # Base Sepolia
@@ -109,11 +166,17 @@ def build_resource_server() -> x402ResourceServer:
     return server
 
 
-def _payment_option() -> PaymentOption:
+def _payment_option(price_usdc: float) -> PaymentOption:
+    """
+    2026-09 업데이트(차등 요금제): 엔드포인트마다 다른 가격을 매길 수 있도록
+    가격을 인자로 받는다. 예전에는 전 라우트가 settings.PRICE_PER_CALL_USDC
+    하나만 썼는데, 이제 build_routes()가 라우트별로 settings.PRICE_*_USDC
+    값을 넘겨준다.
+    """
     return PaymentOption(
         scheme="exact",
         pay_to=settings.RECEIVER_WALLET_ADDRESS,
-        price=f"${settings.PRICE_PER_CALL_USDC}",
+        price=f"${price_usdc}",
         network=ACTIVE_NETWORK,
     )
 
@@ -126,33 +189,62 @@ def _resource_url(path: str) -> str:
 def _bazaar_extension(
     *,
     method: str,
-    query_params: dict,
+    input_example: dict,
+    input_schema: dict,
     output_example: dict,
-    service_name: str,
-    tags: list[str],
+    output_schema: dict | None = None,
 ) -> dict:
     """
-    x402 Bazaar 인덱서가 읽는 extensions.bazaar 스키마 (docs.x402.org/extensions/bazaar
-    의 공식 예시 구조를 그대로 따름). serviceName은 32자, tags는 최대 5개(각 32자)
-    이내의 출력 가능한 ASCII 문자만 쓰라는 게 공식 제약이라, 호출부에서 지키도록 한다.
+    x402 Bazaar 인덱서가 읽는 extensions.bazaar 스키마를 만든다 - "info"(input/output)만
+    담고, serviceName/tags는 절대 여기 넣지 않는다 (RouteConfig 쪽 필드로 따로 감 -
+    위 모듈 docstring "버그 수정" 절 참고. 여기 다시 넣으면 예전 버그가 재발한다).
+
+    가능하면 공식 헬퍼 declare_discovery_extension()을 쓴다. 헬퍼가 없거나(구버전
+    SDK) 시그니처가 달라 TypeError가 나면, 공식 문서의 "Response Schema" 예시와
+    정확히 같은 모양(info.input.type/method/queryParams, info.output.type/example)
+    으로 수동 구성해서 폴백한다.
     """
-    return {
-        "bazaar": {
-            "info": {
-                "input": {
-                    "type": "http",
-                    "method": method,
-                    "queryParams": query_params,
-                },
-                "output": {
-                    "type": "json",
-                    "example": output_example,
-                },
-            },
-            "serviceName": service_name,
-            "tags": tags,
-        }
-    }
+    if _HAS_DISCOVERY_HELPER:
+        try:
+            kwargs = {"input": input_example, "input_schema": input_schema}
+            if output_example is not None:
+                kwargs["output"] = OutputConfig(example=output_example, schema=output_schema)
+            return declare_discovery_extension(**kwargs)
+        except TypeError as e:
+            logger.warning(
+                "declare_discovery_extension() 호출이 실패했습니다(%s) - "
+                "수동 구성 폴백으로 대체합니다.", e,
+            )
+
+    info: dict = {"input": {"type": "http", "method": method, "queryParams": input_example}}
+    if output_example is not None:
+        info["output"] = {"type": "json", "example": output_example}
+        if output_schema is not None:
+            info["output"]["schema"] = output_schema
+    return {"bazaar": {"info": info}}
+
+
+def _make_route_config(*, service_name: str, tags: list[str], icon_url: str | None = None, **kwargs) -> RouteConfig:
+    """
+    RouteConfig(...)를 만들되, 설치된 x402 SDK 버전이 service_name/tags/icon_url을
+    아직 지원하지 않으면(구버전) 그 필드만 조용히 빼고 나머지(결제/데이터 기능에
+    필수인 accepts/resource/description/extensions 등)는 정상적으로 채운다 -
+    이 세션은 실제 패키지를 설치해 확인할 네트워크 접근이 없었기 때문에 방어적으로
+    작성했다. 지원되면 자동으로 살아나고, 지원 안 되면 경고 로그만 남기고 서버는
+    정상 기동한다.
+    """
+    metadata = {"service_name": service_name, "tags": tags}
+    if icon_url:
+        metadata["icon_url"] = icon_url
+    supported_metadata = {k: v for k, v in metadata.items() if k in _ROUTECONFIG_FIELD_NAMES}
+    dropped = sorted(set(metadata) - set(supported_metadata))
+    if dropped:
+        logger.warning(
+            "설치된 x402 SDK의 RouteConfig가 %s 필드를 지원하지 않아 제외했습니다. "
+            "'pip install -U x402'로 업그레이드하면 Bazaar 카탈로그에 서비스명/태그가 노출됩니다.",
+            dropped,
+        )
+    return RouteConfig(**kwargs, **supported_metadata)
 
 
 def build_routes(dump_risk_enabled: bool) -> dict[str, RouteConfig]:
@@ -160,50 +252,99 @@ def build_routes(dump_risk_enabled: bool) -> dict[str, RouteConfig]:
     PaymentMiddlewareASGI에 넘길 라우트별 결제 스펙 + Bazaar 노출 메타데이터.
     여기 등록된 "METHOD /path" 조합만 결제가 필요해지고, 등록되지 않은 라우트는
     미들웨어를 그냥 통과한다 - dump_risk_enabled=False일 때 dump-risk를 이 dict에서
-    빼두면, 그 요청은 결제 검사 없이 바로 핸들러로 가서 기존 503 "coming_soon"
-    응답을 내보낸다 (호출자에게 과금되지 않음 - 기존 정책 그대로 유지).
+    빼두면, 그 요청은 결제 검사 없이 바로 핸들러로 가서 (온체인/DropsTab) 데이터를
+    무료로 내보낸다 (main.py/app/logic.py의 dump-risk 재설계 참고).
+
+    각 라우트의 output_schema는 app/schemas.py의 Pydantic 모델에서 그대로 뽑아써서
+    (model_json_schema()), Bazaar/OpenAPI에 노출되는 스펙이 실제 응답 모양과
+    어긋나지 않게 한다 - Pydantic v2 기본 $ref는 "#/$defs/..." 형태라 Bazaar 문서가
+    금지하는 외부 참조($ref가 "#"로 시작하지 않는 경우)에 해당하지 않는다.
+
+    ## 차등 요금제 (Tiered Pricing, 2026-09)
+    라우트마다 별도의 PaymentOption을 만들어서 서로 다른 가격을 매긴다 - 대체
+    가능한 단순 유틸리티(ai-markdown)는 싸게, 어디서나 못 구하는 핵심 알파
+    데이터(dump-risk)는 비싸게. 실제 단가는 app/config.py의
+    PRICE_KIMCHI_ALERT_USDC / PRICE_AI_MARKDOWN_USDC / PRICE_DUMP_RISK_USDC로
+    코드 수정 없이 .env에서 조정 가능하다.
     """
-    option = _payment_option()
+    kimchi_option = _payment_option(settings.PRICE_KIMCHI_ALERT_USDC)
+    ai_markdown_option = _payment_option(settings.PRICE_AI_MARKDOWN_USDC)
+    dump_risk_option = _payment_option(settings.PRICE_DUMP_RISK_USDC)
+
     routes: dict[str, RouteConfig] = {
-        "GET /v1/market/kimchi-alert": RouteConfig(
-            accepts=[option],
+        "GET /v1/market/kimchi-alert": _make_route_config(
+            accepts=[kimchi_option],
             mime_type="application/json",
-            description="업비트 vs 바이낸스 김치프리미엄 실시간 계산 및 1시간 급변/역프 감지",
+            description=(
+                "Real-time Korea (Upbit) vs global crypto price premium - the "
+                "'kimchi premium' - with reverse-premium and 1h-surge alerts."
+            ),
             resource=_resource_url("/v1/market/kimchi-alert"),
             extensions=_bazaar_extension(
                 method="GET",
-                query_params={"symbol": "BTC"},
+                input_example={"symbol": "BTC"},
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "symbol": {
+                            "type": "string",
+                            "description": "Crypto ticker symbol to check, e.g. BTC, ETH, SOL. Defaults to BTC.",
+                        }
+                    },
+                    "required": [],
+                },
                 output_example=KIMCHI_ALERT_EXAMPLE,
-                service_name="AlphaPipeline Kimchi Alert",
-                tags=["crypto", "arbitrage", "korea", "realtime"],
+                output_schema=KimchiAlertResponse.model_json_schema(),
             ),
+            service_name="AlphaPipeline Kimchi Alert",
+            tags=["crypto", "arbitrage", "korea", "realtime"],
         ),
-        "GET /v1/tools/ai-markdown": RouteConfig(
-            accepts=[option],
+        "GET /v1/tools/ai-markdown": _make_route_config(
+            accepts=[ai_markdown_option],
             mime_type="application/json",
-            description="임의의 웹페이지 URL을 광고/네비게이션 없는 AI 친화적 순수 마크다운으로 변환",
+            description=(
+                "Convert any webpage URL into clean, ad-free Markdown text "
+                "optimized for LLM context windows."
+            ),
             resource=_resource_url("/v1/tools/ai-markdown"),
             extensions=_bazaar_extension(
                 method="GET",
-                query_params={"url": "https://example.com"},
+                input_example={"url": "https://example.com"},
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "url": {
+                            "type": "string",
+                            "format": "uri",
+                            "description": "Full http(s) URL of the webpage to convert to Markdown.",
+                        }
+                    },
+                    "required": ["url"],
+                },
                 output_example=MARKDOWN_EXAMPLE,
-                service_name="AlphaPipeline AI Markdown",
-                tags=["ai-tools", "web-scraping", "markdown", "llm"],
+                output_schema=MarkdownResponse.model_json_schema(),
             ),
+            service_name="AlphaPipeline AI Markdown",
+            tags=["ai-tools", "web-scraping", "markdown", "llm"],
         ),
     }
     if dump_risk_enabled:
-        routes["GET /v1/unlocks/dump-risk"] = RouteConfig(
-            accepts=[option],
+        routes["GET /v1/unlocks/dump-risk"] = _make_route_config(
+            accepts=[dump_risk_option],
             mime_type="application/json",
-            description="D-7 이내 유통량 3% 이상 락업 해제 이벤트와 거래량 대비 매도 충격 위험도",
+            description=(
+                "Tokens with large amounts of currently-locked or vesting supply "
+                "relative to circulating supply - a proxy for future sell/dump pressure."
+            ),
             resource=_resource_url("/v1/unlocks/dump-risk"),
             extensions=_bazaar_extension(
                 method="GET",
-                query_params={},
+                input_example={},
+                input_schema={"type": "object", "properties": {}, "required": []},
                 output_example=DUMP_RISK_EXAMPLE,
-                service_name="AlphaPipeline Dump Risk",
-                tags=["crypto", "token-unlock", "risk"],
+                output_schema=DumpRiskResponse.model_json_schema(),
             ),
+            service_name="AlphaPipeline Dump Risk",
+            tags=["crypto", "token-unlock", "risk"],
         )
     return routes

@@ -72,46 +72,69 @@ MARKDOWN_EXAMPLE = {
 
 
 class DumpRiskUnlockItem(BaseModel):
+    """
+    두 데이터 경로(DropsTab / 온체인-Sablier)를 하나의 모델로 표현한다 - 그래서
+    DropsTab 전용 필드(unlock_date_utc, is_insider_vc_team 등)와 온체인 전용
+    필드(onchain_contract, timing_precision, data_source)가 전부 Optional이다.
+    어느 경로든 항상 채워지는 필드는 token/unlock_supply_pct/category/risk_level뿐.
+    (app/logic.py의 _process_event / _refresh_unlock_cache_onchain 참고)
+    """
     token: str
-    unlock_date_utc: str
-    days_until_unlock: float
+    onchain_contract: Optional[str] = None
+    unlock_date_utc: Optional[str] = None
+    days_until_unlock: Optional[float] = None
+    timing_precision: Optional[str] = None
     unlock_supply_pct: float
     unlock_amount: Optional[float] = None
-    is_insider_vc_team: bool
+    is_insider_vc_team: Optional[bool] = None
     category: str
     risk_level: str
     volume_impact_pct: Optional[float] = None
+    data_source: Optional[str] = None
 
 
 class DumpRiskResponse(BaseModel):
     generated_at: TimestampPair
-    window_days: int
+    window_days: Optional[int] = None
     supply_pct_threshold: float
     protocols_scanned: int
     count: int
     unlocks: list[DumpRiskUnlockItem] = Field(default_factory=list)
     notice: Optional[str] = None
+    data_source: Optional[str] = None
+    coverage_notice: Optional[str] = None
 
 
+# DROPSTAB_API_KEY가 없는 게 기본 배포 상태라, 실제로 서빙될 가능성이 더 높은
+# 온체인(Sablier) 경로의 모양을 예시로 쓴다 - Bazaar/OpenAPI에 노출되는 예시가
+# 실제 응답과 어긋나지 않도록(app/payment.py가 이 값을 그대로 가져다 씀).
 DUMP_RISK_EXAMPLE = {
-    "generated_at": {"utc": "2026-09-02T12:00:00Z", "kst": "2026-09-02 21:00:00 KST"},
-    "window_days": 7,
+    "generated_at": {"utc": "2026-09-03T12:00:00Z", "kst": "2026-09-03 21:00:00 KST"},
+    "window_days": None,
     "supply_pct_threshold": 3.0,
-    "protocols_scanned": 120,
+    "protocols_scanned": 87,
     "count": 1,
     "unlocks": [
         {
-            "token": "ATH",
-            "unlock_date_utc": "2026-09-06T00:00:00Z",
-            "days_until_unlock": 4.0,
-            "unlock_supply_pct": 5.2,
-            "unlock_amount": 12000000,
-            "is_insider_vc_team": True,
-            "category": "team",
-            "risk_level": "HIGH",
-            "volume_impact_pct": 62.3,
+            "token": "UNI",
+            "onchain_contract": "0x1f9840a85d5af5bf1d1762f925bdaddc4201f984",
+            "unlock_date_utc": None,
+            "days_until_unlock": None,
+            "timing_precision": "pending_schema_verification",
+            "unlock_supply_pct": 4.8,
+            "unlock_amount": 28500000.0,
+            "is_insider_vc_team": None,
+            "category": "onchain_vesting_stream (unclassified)",
+            "risk_level": "MEDIUM",
+            "volume_impact_pct": None,
+            "data_source": "onchain_sablier",
         }
     ],
+    "data_source": "onchain_sablier",
+    "coverage_notice": (
+        "Scanned via on-chain Sablier vesting streams only. Absence from this list "
+        "does not mean a token has no lockup - other vesting mechanisms are not covered."
+    ),
 }
 
 
