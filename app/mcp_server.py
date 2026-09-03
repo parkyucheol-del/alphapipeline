@@ -286,6 +286,15 @@ _HOP_BY_HOP_RESPONSE_HEADERS = {
 }
 
 
+def _relay_headers(upstream: httpx.Response) -> dict[str, str]:
+    """내부 self-call 응답 헤더 중 hop-by-hop/길이 관련만 빼고 그대로 릴레이한다.
+
+    402(결제 조건)와 200(결제 정산 영수증) 양쪽 다 이걸 쓴다 - 두 경우 모두
+    실제 정보가 본문이 아니라 헤더에 실려 오기 때문이다.
+    """
+    return {k: v for k, v in upstream.headers.items() if k.lower() not in _HOP_BY_HOP_RESPONSE_HEADERS}
+
+
 async def _call_tool(body: dict, request: Request, client: httpx.AsyncClient) -> Response:
     req_id = body.get("id")
     params = body.get("params") or {}
@@ -321,10 +330,7 @@ async def _call_tool(body: dict, request: Request, client: httpx.AsyncClient) ->
         # 헤더를 함께 그대로 릴레이한다. MCP에는 402에 대응하는 JSON-RPC
         # 에러 코드가 없으므로, 이 요청 자체의 HTTP 응답을 그대로 402로
         # 릴레이한다(모듈 docstring 참고).
-        relay_headers = {
-            k: v for k, v in upstream.headers.items() if k.lower() not in _HOP_BY_HOP_RESPONSE_HEADERS
-        }
-        return Response(content=upstream.content, status_code=402, headers=relay_headers)
+        return Response(content=upstream.content, status_code=402, headers=_relay_headers(upstream))
     if upstream.status_code >= 400:
         return JSONResponse(
             content=_jsonrpc_error(
@@ -334,7 +340,10 @@ async def _call_tool(body: dict, request: Request, client: httpx.AsyncClient) ->
 
     data = upstream.json()
     result = {"content": [{"type": "text", "text": json.dumps(data, ensure_ascii=False)}], "isError": False}
-    return JSONResponse(content=_jsonrpc_result(req_id, result))
+    # 결제 성공 시에도 정산 영수증(payment-response류 헤더 - 402 때와 마찬가지로
+    # 정확한 이름을 하드코딩하지 않았다)이 실려 있으므로, 클라이언트가
+    # get_payment_settle_response()로 읽을 수 있도록 그대로 같이 릴레이한다.
+    return JSONResponse(content=_jsonrpc_result(req_id, result), headers=_relay_headers(upstream))
 
 
 async def _dispatch(body, request: Request, client: httpx.AsyncClient) -> Response:
