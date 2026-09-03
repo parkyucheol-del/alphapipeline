@@ -756,3 +756,118 @@ async def get_funding_rate(symbol: str) -> dict:
         "data_source": data_source,
         "notice": notice,
     }
+
+
+
+def _pick_most_liquid_pool(pools: list[dict]) -> dict | None:
+    """토큰의 풀 목록 중 reserve_in_usd(합산 USD 유동성)가 가장 큰 풀을 고른다."""
+    best = None
+    best_liquidity = -1.0
+    for pool in pools:
+        attrs = pool.get("attributes") or {}
+        try:
+            liquidity = float(attrs.get("reserve_in_usd") or 0)
+        except (TypeError, ValueError):
+            liquidity = 0.0
+        if liquidity > best_liquidity:
+            best_liquidity = liquidity
+            best = pool
+    return best
+
+
+_DEX_SLIPPAGE_NOTICE = (
+    "슬리피지는 GeckoTerminal이 제공하는 풀의 합산 USD 유동성만으로 계산한 근사치입니다 - "
+    "이 풀이 표준 constant-product(x*y=k) AMM이고 두 토큰이 50:50 비율로 구성되어 있다고 "
+    "가정합니다. Uniswap v3류 집중 유동성 풀이나 스테이블스왑 풀에서는 실제 슬리피지와 "
+    "차이가 클 수 있습니다 - 실제 매매 전 온체인 견적(quote)으로 반드시 재확인하세요."
+)
+
+
+async def get_dex_liquidity_slippage(
+    network: str,
+    trade_size_usd: float,
+    pool_address: str | None = None,
+    token_address: str | None = None,
+) -> dict:
+    """
+    GeckoTerminal(무료, 키 불필요) 기반 DEX 유동성 + 예상 슬리피지 조회.
+    GET /v1/dex/liquidity-slippage가 사용한다 (main.py 참고).
+
+    정직하게 밝혀둘 한계: GeckoTerminal 무료 API는 풀의 "합산 USD 유동성"만
+    주고 각 토큰별 실제 보유량(reserve)은 주지 않는다. 그래서 슬리피지는
+    표준 Uniswap v2류 constant-product(x*y=k) 풀이 정확히 50:50 비율로
+    구성되어 있다고 "가정"하고 근사 계산한다 - 이 가정은 항상 notice
+    필드에 명시한다 (그럴듯하지만 틀릴 수 있는 값을 조용히 내보내지 않기 위함).
+    """
+    if not pool_address and not token_address:
+        raise ValueError("pool_address 또는 token_address 중 하나는 반드시 필요합니다")
+
+    resolved_pool_address = pool_address
+    if not pool_address:
+        pools = await ds.get_geckoterminal_pools_for_token(network, token_address)
+        best_pool = _pick_most_liquid_pool(pools)
+        if not best_pool:
+            return {
+                "generated_at": _timestamp_now(),
+                "network": network,
+                "pool_address": None,
+                "token_address": token_address,
+                "trade_size_usd": trade_size_usd,
+                "price_impact_model": "constant_product_50_50_approximation",
+                "data_source": "none",
+                "notice": f"GeckoTerminal에서 {network}의 {token_address} 토큰에 연결된 풀을 찾지 못했습니다.",
+            }
+        pool_data = best_pool
+        resolved_pool_address = (pool_data.get("attributes") or {}).get("address")
+    else:
+        pool_data = await ds.get_geckoterminal_pool(network, pool_address)
+
+    attrs = pool_data.get("attributes") or {}
+    try:
+        liquidity_usd = float(attrs.get("reserve_in_usd") or 0)
+    except (TypeError, ValueError):
+        liquidity_usd = 0.0
+
+    volume_24h_usd = None
+    volume_obj = attrs.get("volume_usd") or {}
+    if volume_obj.get("h24") is not None:
+        try:
+            volume_24h_usd = float(volume_obj["h24"])
+        except (TypeError, ValueError):
+            volume_24h_usd = None
+
+    pool_name = attrs.get("name")
+
+    if liquidity_usd <= 0:
+        return {
+            "generated_at": _timestamp_now(),
+            "network": network,
+            "pool_address": resolved_pool_address,
+            "token_address": token_address,
+            "pool_name": pool_name,
+            "liquidity_usd": liquidity_usd or None,
+            "volume_24h_usd": volume_24h_usd,
+            "trade_size_usd": trade_size_usd,
+            "estimated_slippage_pct": None,
+            "price_impact_model": "constant_product_50_50_approximation",
+            "data_source": "geckoterminal",
+            "notice": _DEX_SLIPPAGE_NOTICE + " (이 풀의 유동성 데이터를 확인할 수 없어 슬리피지를 계산하지 못했습니다.)",
+        }
+
+    half_liquidity_usd = liquidity_usd / 2
+    estimated_slippage_pct = (trade_size_usd / (half_liquidity_usd + trade_size_usd)) * 100
+
+    return {
+        "generated_at": _timestamp_now(),
+        "network": network,
+        "pool_address": resolved_pool_address,
+        "token_address": token_address,
+        "pool_name": pool_name,
+        "liquidity_usd": liquidity_usd,
+        "volume_24h_usd": volume_24h_usd,
+        "trade_size_usd": trade_size_usd,
+        "estimated_slippage_pct": round(estimated_slippage_pct, 4),
+        "price_impact_model": "constant_product_50_50_approximation",
+        "data_source": "geckoterminal",
+        "notice": _DEX_SLIPPAGE_NOTICE,
+    }

@@ -11,11 +11,26 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 
 from app.config import settings
 from app.scheduler import start_scheduler
-from app.logic import get_dump_risk, get_funding_rate, get_kimchi_alert, get_token_risk, refresh_unlock_cache
+from app.logic import (
+    get_dex_liquidity_slippage,
+    get_dump_risk,
+    get_funding_rate,
+    get_kimchi_alert,
+    get_token_risk,
+    refresh_unlock_cache,
+)
 from app.llms_txt import build_llms_txt
 from app.markdown_tool import url_to_markdown
 from app.payment import ACTIVE_NETWORK, USE_CDP_FACILITATOR, build_resource_server, build_routes
-from app.schemas import DumpRiskResponse, ErrorResponse, FundingRateResponse, KimchiAlertResponse, MarkdownResponse, TokenRiskResponse
+from app.schemas import (
+    DexSlippageResponse,
+    DumpRiskResponse,
+    ErrorResponse,
+    FundingRateResponse,
+    KimchiAlertResponse,
+    MarkdownResponse,
+    TokenRiskResponse,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("alphapipeline")
@@ -83,6 +98,7 @@ async def root():
             "/v1/unlocks/dump-risk": settings.PRICE_DUMP_RISK_USDC,
             "/v1/security/token-risk": settings.PRICE_TOKEN_RISK_USDC,
             "/v1/derivatives/funding-rate": settings.PRICE_FUNDING_RATE_USDC,
+            "/v1/dex/liquidity-slippage": settings.PRICE_DEX_SLIPPAGE_USDC,
         },
         "payment": {
             "protocol": "x402",
@@ -96,6 +112,7 @@ async def root():
             "/v1/tools/ai-markdown",
             "/v1/security/token-risk",
             "/v1/derivatives/funding-rate",
+            "/v1/dex/liquidity-slippage",
         ],
         "coming_soon_endpoints": [],
         "docs": "/docs",
@@ -275,6 +292,50 @@ async def funding_rate_endpoint(symbol: str = Query(..., description="e.g. BTC, 
         return JSONResponse(content=data)
     except Exception as e:
         logger.exception("funding-rate 처리 실패")
+        return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
+
+
+@app.get(
+    "/v1/dex/liquidity-slippage",
+    tags=["market"],
+    summary="Estimate DEX pool liquidity and trade slippage (GeckoTerminal)",
+    description=(
+        "Use this endpoint when you need to size a trade or check whether a DEX pool has "
+        "enough depth before swapping - call it before executing a swap to estimate price "
+        "impact, or when comparing pools for a given token. Returns the pool's total USD "
+        "liquidity, 24h volume, and an ESTIMATED slippage percentage for a given trade size, "
+        "computed under a documented approximation (see notice) since GeckoTerminal's free "
+        "API only exposes combined USD liquidity, not per-token reserve amounts. Input: "
+        "`network` (e.g. base, eth - default base), `trade_size_usd` (required), and either "
+        "`pool_address` (a specific pool) or `token_address` (the most liquid pool for that "
+        "token is selected automatically) - one of the two is required. Do not treat "
+        "estimated_slippage_pct as an exact on-chain quote - always re-verify with a live "
+        "quote before executing, especially for concentrated-liquidity or stableswap pools."
+    ),
+    responses={
+        200: {"model": DexSlippageResponse, "description": "DEX 유동성/슬리피지 추정 데이터"},
+        402: {"description": "x402 결제 필요"},
+        502: {"model": ErrorResponse, "description": "업스트림(GeckoTerminal) 오류 또는 입력 오류"},
+    },
+)
+async def dex_liquidity_slippage_endpoint(
+    trade_size_usd: float = Query(..., description="Hypothetical trade size in USD"),
+    network: str = Query("base", description="GeckoTerminal network id, e.g. base, eth"),
+    pool_address: str | None = Query(None, description="Specific pool contract address"),
+    token_address: str | None = Query(
+        None, description="Token contract address (picks the most liquid pool automatically)"
+    ),
+):
+    try:
+        data = await get_dex_liquidity_slippage(
+            network=network,
+            trade_size_usd=trade_size_usd,
+            pool_address=pool_address,
+            token_address=token_address,
+        )
+        return JSONResponse(content=data)
+    except Exception as e:
+        logger.exception("dex-liquidity-slippage 처리 실패")
         return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
 
 

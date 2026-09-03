@@ -97,11 +97,13 @@ from x402.server import x402ResourceServer
 
 from app.config import settings
 from app.schemas import (
+    DEX_SLIPPAGE_EXAMPLE,
     DUMP_RISK_EXAMPLE,
     FUNDING_RATE_EXAMPLE,
     KIMCHI_ALERT_EXAMPLE,
     MARKDOWN_EXAMPLE,
     TOKEN_RISK_EXAMPLE,
+    DexSlippageResponse,
     DumpRiskResponse,
     FundingRateResponse,
     KimchiAlertResponse,
@@ -313,6 +315,7 @@ def build_routes(dump_risk_enabled: bool) -> dict[str, RouteConfig]:
     dump_risk_option = _payment_option(settings.PRICE_DUMP_RISK_USDC)
     token_risk_option = _payment_option(settings.PRICE_TOKEN_RISK_USDC)
     funding_rate_option = _payment_option(settings.PRICE_FUNDING_RATE_USDC)
+    dex_slippage_option = _payment_option(settings.PRICE_DEX_SLIPPAGE_USDC)
 
     routes: dict[str, RouteConfig] = {
         "GET /v1/market/kimchi-alert": _make_route_config(
@@ -428,6 +431,49 @@ def build_routes(dump_risk_enabled: bool) -> dict[str, RouteConfig]:
             ),
             service_name="AlphaPipeline Funding Rate",
             tags=["crypto", "derivatives", "funding-rate"],
+        ),
+        "GET /v1/dex/liquidity-slippage": _make_route_config(
+            accepts=[dex_slippage_option],
+            mime_type="application/json",
+            description=(
+                "GeckoTerminal-backed DEX pool liquidity and estimated trade slippage - "
+                "size a trade or compare pools before swapping, with a clearly-flagged "
+                "constant-product approximation model."
+            ),
+            resource=_resource_url("/v1/dex/liquidity-slippage"),
+            extensions=_bazaar_extension(
+                input_example={
+                    "network": "base",
+                    "token_address": "0x4200000000000000000000000000000000000006",
+                    "trade_size_usd": 10000,
+                },
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "network": {
+                            "type": "string",
+                            "description": "GeckoTerminal network id, e.g. base, eth. Defaults to base.",
+                        },
+                        "pool_address": {
+                            "type": "string",
+                            "description": "Specific DEX pool contract address (optional if token_address is given).",
+                        },
+                        "token_address": {
+                            "type": "string",
+                            "description": "Token contract address - the most liquid pool is auto-selected (optional if pool_address is given).",
+                        },
+                        "trade_size_usd": {
+                            "type": "number",
+                            "description": "Hypothetical trade size in USD to estimate slippage for.",
+                        },
+                    },
+                    "required": ["trade_size_usd"],
+                },
+                output_example=DEX_SLIPPAGE_EXAMPLE,
+                output_schema=_inline_schema_defs(DexSlippageResponse.model_json_schema()),
+            ),
+            service_name="AlphaPipeline DEX Slippage",
+            tags=["crypto", "dex", "liquidity", "slippage"],
         ),
     }
     if dump_risk_enabled:

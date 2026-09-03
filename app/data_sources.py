@@ -390,3 +390,38 @@ async def get_binance_funding_rate(symbol: str) -> dict:
         r = await client.get(BINANCE_PREMIUM_INDEX_URL, params={"symbol": symbol})
         r.raise_for_status()
         return r.json()
+
+
+
+GECKOTERMINAL_POOL_URL = "https://api.geckoterminal.com/api/v2/networks/{network}/pools/{pool_address}"
+GECKOTERMINAL_TOKEN_POOLS_URL = "https://api.geckoterminal.com/api/v2/networks/{network}/tokens/{token_address}/pools"
+
+
+async def get_geckoterminal_pool(network: str, pool_address: str) -> dict:
+    """
+    GeckoTerminal에서 풀 하나의 데이터를 조회한다 (무료, 키 불필요, ~30req/min).
+    DexScreener는 이용약관상 제3자 재판매/유료 서비스 제공 금지 조항이 있어
+    데이터 소스로 쓰지 않는다 - GeckoTerminal 단독 사용.
+    """
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        r = await client.get(
+            GECKOTERMINAL_POOL_URL.format(network=network, pool_address=pool_address)
+        )
+        r.raise_for_status()
+        body = r.json()
+        data = body.get("data")
+        if not data:
+            raise ValueError(f"GeckoTerminal에서 풀 {pool_address}을(를) 찾지 못했습니다")
+        return data
+
+
+async def get_geckoterminal_pools_for_token(network: str, token_address: str) -> list[dict]:
+    """토큰 주소만 있을 때, 그 토큰이 걸린 풀 목록을 조회한다 (유동성 큰 풀을 고르기 위함)."""
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        r = await client.get(
+            GECKOTERMINAL_TOKEN_POOLS_URL.format(network=network, token_address=token_address),
+            params={"sort": "h24_volume_usd_liquidity_desc"},
+        )
+        r.raise_for_status()
+        body = r.json()
+        return body.get("data") or []

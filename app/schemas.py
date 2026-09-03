@@ -220,3 +220,40 @@ FUNDING_RATE_EXAMPLE = {
         "predicted_rate는 funding_rate와 동일한 값입니다."
     ),
 }
+
+
+
+class DexSlippageResponse(BaseModel):
+    generated_at: TimestampPair
+    network: str
+    pool_address: str | None = None
+    token_address: str | None = None
+    pool_name: str | None = None
+    liquidity_usd: float | None = None
+    volume_24h_usd: float | None = None
+    trade_size_usd: float
+    estimated_slippage_pct: float | None = None
+    price_impact_model: str
+    data_source: str
+    notice: str | None = None
+
+
+DEX_SLIPPAGE_EXAMPLE = {
+    "generated_at": {"utc": "2026-09-04T12:00:00Z", "kst": "2026-09-04 21:00:00 KST"},
+    "network": "base",
+    "pool_address": "0xd0b53d9277642d899df5c87a3966a349a798f224",
+    "token_address": None,
+    "pool_name": "WETH / USDC 0.05%",
+    "liquidity_usd": 25000000.0,
+    "volume_24h_usd": 8500000.0,
+    "trade_size_usd": 10000.0,
+    "estimated_slippage_pct": 0.08,
+    "price_impact_model": "constant_product_50_50_approximation",
+    "data_source": "geckoterminal",
+    "notice": (
+        "슬리피지는 GeckoTerminal이 제공하는 풀의 합산 USD 유동성만으로 계산한 근사치입니다 - "
+        "이 풀이 표준 constant-product(x*y=k) AMM이고 두 토큰이 50:50 비율로 구성되어 있다고 "
+        "가정합니다. Uniswap v3류 집중 유동성 풀이나 스테이블스왑 풀에서는 실제 슬리피지와 "
+        "차이가 클 수 있습니다 - 실제 매매 전 온체인 견적(quote)으로 반드시 재확인하세요."
+    ),
+}
