@@ -187,6 +187,39 @@ def _resource_url(path: str) -> str:
     return f"{settings.PUBLIC_BASE_URL.rstrip('/')}{path}"
 
 
+def _inline_schema_defs(schema: dict) -> dict:
+    """pydantic model_json_schema()가 만든 $defs/$ref를 전부 실제 값으로 풀어서
+    (inline) $defs 없는 자기 완결적 스키마로 만든다.
+
+    x402==2.21.0의 declare_discovery_extension() 내부(_create_query_discovery_extension)는
+    output.schema를 output_schema["properties"]["example"] 위치에 그대로 병합하는데,
+    이러면 pydantic이 스키마 최상위에 넣어둔 "$defs"가 더 이상 최상위가 아니게 되어
+    "#/$defs/..." 형태의 $ref가 깨진다("PointerToNowhere" 에러). 실제 결제 테스트에서
+    Bazaar가 계속 "invalid discovery configuration"으로 거부한 진짜 원인이 이것으로
+    확인됐다(2026-09-03 밤). $ref를 미리 다 풀어버리면 이 문제를 근본적으로 피할 수 있다.
+    """
+    defs = schema.get("$defs", {})
+    if not defs:
+        return schema
+
+    def _resolve(node, _seen=frozenset()):
+        if isinstance(node, dict):
+            ref = node.get("$ref")
+            if isinstance(ref, str) and ref.startswith("#/$defs/"):
+                key = ref.split("/")[-1]
+                if key in _seen:
+                    return {}
+                target = defs.get(key, {})
+                merged = {k: v for k, v in node.items() if k != "$ref"}
+                return _resolve({**target, **merged}, _seen | {key})
+            return {k: _resolve(v, _seen) for k, v in node.items() if k != "$defs"}
+        if isinstance(node, list):
+            return [_resolve(item, _seen) for item in node]
+        return node
+
+    return _resolve(schema)
+
+
 def _bazaar_extension(
     *,
     input_example: dict,
@@ -297,7 +330,7 @@ def build_routes(dump_risk_enabled: bool) -> dict[str, RouteConfig]:
                     "required": [],
                 },
                 output_example=KIMCHI_ALERT_EXAMPLE,
-                output_schema=KimchiAlertResponse.model_json_schema(),
+                output_schema=_inline_schema_defs(KimchiAlertResponse.model_json_schema()),
             ),
             service_name="AlphaPipeline Kimchi Alert",
             tags=["crypto", "arbitrage", "korea", "realtime"],
@@ -324,7 +357,7 @@ def build_routes(dump_risk_enabled: bool) -> dict[str, RouteConfig]:
                     "required": ["url"],
                 },
                 output_example=MARKDOWN_EXAMPLE,
-                output_schema=MarkdownResponse.model_json_schema(),
+                output_schema=_inline_schema_defs(MarkdownResponse.model_json_schema()),
             ),
             service_name="AlphaPipeline AI Markdown",
             tags=["ai-tools", "web-scraping", "markdown", "llm"],
@@ -343,7 +376,7 @@ def build_routes(dump_risk_enabled: bool) -> dict[str, RouteConfig]:
                 input_example={},
                 input_schema={"type": "object", "properties": {}, "required": []},
                 output_example=DUMP_RISK_EXAMPLE,
-                output_schema=DumpRiskResponse.model_json_schema(),
+                output_schema=_inline_schema_defs(DumpRiskResponse.model_json_schema()),
             ),
             service_name="AlphaPipeline Dump Risk",
             tags=["crypto", "token-unlock", "risk"],
