@@ -100,9 +100,11 @@ from app.schemas import (
     DUMP_RISK_EXAMPLE,
     KIMCHI_ALERT_EXAMPLE,
     MARKDOWN_EXAMPLE,
+    TOKEN_RISK_EXAMPLE,
     DumpRiskResponse,
     KimchiAlertResponse,
     MarkdownResponse,
+    TokenRiskResponse,
 )
 
 logger = logging.getLogger("alphapipeline")
@@ -307,6 +309,7 @@ def build_routes(dump_risk_enabled: bool) -> dict[str, RouteConfig]:
     kimchi_option = _payment_option(settings.PRICE_KIMCHI_ALERT_USDC)
     ai_markdown_option = _payment_option(settings.PRICE_AI_MARKDOWN_USDC)
     dump_risk_option = _payment_option(settings.PRICE_DUMP_RISK_USDC)
+    token_risk_option = _payment_option(settings.PRICE_TOKEN_RISK_USDC)
 
     routes: dict[str, RouteConfig] = {
         "GET /v1/market/kimchi-alert": _make_route_config(
@@ -361,6 +364,40 @@ def build_routes(dump_risk_enabled: bool) -> dict[str, RouteConfig]:
             ),
             service_name="AlphaPipeline AI Markdown",
             tags=["ai-tools", "web-scraping", "markdown", "llm"],
+        ),
+        "GET /v1/security/token-risk": _make_route_config(
+            accepts=[token_risk_option],
+            mime_type="application/json",
+            description=(
+                "GoPlus/Honeypot.is-backed token security check - honeypot flag, "
+                "buy/sell tax, mintability, and ownership renouncement for a given "
+                "contract address, so a bot can decide before it buys."
+            ),
+            resource=_resource_url("/v1/security/token-risk"),
+            extensions=_bazaar_extension(
+                input_example={
+                    "chain_id": 8453,
+                    "contract_address": "0x4200000000000000000000000000000000000006",
+                },
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "chain_id": {
+                            "type": "integer",
+                            "description": "EVM chain id, e.g. 8453 for Base.",
+                        },
+                        "contract_address": {
+                            "type": "string",
+                            "description": "Token contract address (0x...).",
+                        },
+                    },
+                    "required": ["chain_id", "contract_address"],
+                },
+                output_example=TOKEN_RISK_EXAMPLE,
+                output_schema=_inline_schema_defs(TokenRiskResponse.model_json_schema()),
+            ),
+            service_name="AlphaPipeline Token Risk Scanner",
+            tags=["crypto", "security", "honeypot", "token-risk"],
         ),
     }
     if dump_risk_enabled:

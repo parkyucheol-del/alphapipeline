@@ -146,3 +146,47 @@ class ComingSoonResponse(BaseModel):
 class ErrorResponse(BaseModel):
     error: str
     message: str
+
+
+
+class TokenRiskResponse(BaseModel):
+    generated_at: TimestampPair
+    chain_id: int
+    contract_address: str
+    token_name: str | None = None
+    token_symbol: str | None = None
+    is_honeypot: bool | None = None
+    buy_tax_pct: float | None = None
+    sell_tax_pct: float | None = None
+    is_mintable: bool | None = None
+    is_open_source: bool | None = None
+    owner_renounced: bool | None = None
+    owner_address: str | None = None
+    holder_count: int | None = None
+    is_in_dex: bool | None = None
+    risk_level: str
+    risk_flags: list[str] = []
+    data_source: str
+    notice: str | None = None
+
+
+TOKEN_RISK_EXAMPLE = {
+    "generated_at": {"utc": "2026-09-04T12:00:00Z", "kst": "2026-09-04 21:00:00 KST"},
+    "chain_id": 8453,
+    "contract_address": "0x4200000000000000000000000000000000000006",
+    "token_name": "Wrapped Ether",
+    "token_symbol": "WETH",
+    "is_honeypot": False,
+    "buy_tax_pct": 0.0,
+    "sell_tax_pct": 0.0,
+    "is_mintable": False,
+    "is_open_source": True,
+    "owner_renounced": True,
+    "owner_address": None,
+    "holder_count": 125000,
+    "is_in_dex": True,
+    "risk_level": "LOW",
+    "risk_flags": [],
+    "data_source": "goplus",
+    "notice": None,
+}

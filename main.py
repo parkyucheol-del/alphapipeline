@@ -11,11 +11,11 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 
 from app.config import settings
 from app.scheduler import start_scheduler
-from app.logic import get_dump_risk, get_kimchi_alert, refresh_unlock_cache
+from app.logic import get_dump_risk, get_kimchi_alert, get_token_risk, refresh_unlock_cache
 from app.llms_txt import build_llms_txt
 from app.markdown_tool import url_to_markdown
 from app.payment import ACTIVE_NETWORK, USE_CDP_FACILITATOR, build_resource_server, build_routes
-from app.schemas import DumpRiskResponse, ErrorResponse, KimchiAlertResponse, MarkdownResponse
+from app.schemas import DumpRiskResponse, ErrorResponse, KimchiAlertResponse, MarkdownResponse, TokenRiskResponse
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("alphapipeline")
@@ -81,6 +81,7 @@ async def root():
             "/v1/market/kimchi-alert": settings.PRICE_KIMCHI_ALERT_USDC,
             "/v1/tools/ai-markdown": settings.PRICE_AI_MARKDOWN_USDC,
             "/v1/unlocks/dump-risk": settings.PRICE_DUMP_RISK_USDC,
+            "/v1/security/token-risk": settings.PRICE_TOKEN_RISK_USDC,
         },
         "payment": {
             "protocol": "x402",
@@ -92,6 +93,7 @@ async def root():
             "/v1/unlocks/dump-risk",
             "/v1/market/kimchi-alert",
             "/v1/tools/ai-markdown",
+            "/v1/security/token-risk",
         ],
         "coming_soon_endpoints": [],
         "docs": "/docs",
@@ -206,6 +208,40 @@ async def ai_markdown_endpoint(url: str = Query(..., description="변환할 웹�
         return JSONResponse(content=data)
     except Exception as e:
         logger.exception("ai-markdown 처리 실패")
+        return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
+
+
+@app.get(
+    "/v1/security/token-risk",
+    tags=["security"],
+    summary="Check a token contract for honeypot/scam risk before buying",
+    description=(
+        "Use this endpoint when you need to know whether a token contract is safe to buy - "
+        "call it right before entering a position on an unfamiliar or newly-listed token. "
+        "Returns is_honeypot, buy/sell tax percentages, mintability, open-source status, "
+        "ownership renouncement, holder count, and a summarized risk_level "
+        "(LOW/MEDIUM/HIGH/UNKNOWN) with risk_flags. Data source is GoPlus Security "
+        "(primary), falling back to Honeypot.is if GoPlus is unavailable - check the "
+        "data_source and notice fields to see which was used. Input: required "
+        "`chain_id` (EVM chain id, e.g. 8453 for Base) and `contract_address` query "
+        "parameters. Do not treat a null field as 'safe' - it means that field could not "
+        "be determined; check risk_level and risk_flags instead."
+    ),
+    responses={
+        200: {"model": TokenRiskResponse, "description": "토큰 보안/허니팟 위험도 데이터"},
+        402: {"description": "x402 결제 필요"},
+        502: {"model": ErrorResponse, "description": "업스트림(GoPlus/Honeypot.is) 오류"},
+    },
+)
+async def token_risk_endpoint(
+    chain_id: int = Query(..., description="EVM chain id, e.g. 8453 for Base"),
+    contract_address: str = Query(..., description="Token contract address (0x...)"),
+):
+    try:
+        data = await get_token_risk(chain_id, contract_address)
+        return JSONResponse(content=data)
+    except Exception as e:
+        logger.exception("token-risk 처리 실패")
         return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
 
 

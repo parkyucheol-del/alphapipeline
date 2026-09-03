@@ -35,6 +35,11 @@ COINGECKO_SIMPLE_PRICE_URL = "https://api.coingecko.com/api/v3/simple/price"
 COINGECKO_COIN_DETAIL_URL = "https://api.coingecko.com/api/v3/coins/{coin_id}"
 COINBASE_SPOT_PRICE_URL = "https://api.coinbase.com/v2/prices/{base}-USD/spot"
 
+# GoPlus Security 토큰 보안/허니팟 체크 (무료, 앱키 불필요 - 커뮤니티 래퍼로 검증됨)
+GOPLUS_TOKEN_SECURITY_URL = "https://api.gopluslabs.io/api/v1/token_security/{chain_id}"
+# Honeypot.is - GoPlus 실패 시 폴백 (공식 문서: API 키 불필요)
+HONEYPOT_IS_URL = "https://api.honeypot.is/v2/IsHoneypot"
+
 # dump-risk 온체인 재설계(Sablier)용 GraphQL 엔드포인트.
 # Envio가 운영하는 무료/무인증 공개 인덱서 - Base + Ethereum 통합.
 # (The Graph의 공식 프로덕션 엔드포인트는 유료/API 키가 필요하고, 무료 "testing"
@@ -197,7 +202,7 @@ async def get_dropstab_token_unlock_detail(coin_slug: str) -> dict:
 # cliff/startTime/endTime 등은 미확인이라 의도적으로 제외했다 - 위 설명 참고.
 _SABLIER_ACTIVE_STREAMS_QUERY = """
 query ActiveStreams($limit: Int!) {
-  lockupStreams(
+  LockupStream(
     where: {canceled: {_eq: false}, intactAmount: {_gt: "0"}}
     limit: $limit
   ) {
@@ -218,7 +223,7 @@ query ActiveStreams($limit: Int!) {
 
 _SABLIER_STREAMS_FOR_TOKEN_QUERY = """
 query StreamsForToken($tokenAddress: String!, $limit: Int!) {
-  lockupStreams(
+  LockupStream(
     where: {
       canceled: {_eq: false}
       intactAmount: {_gt: "0"}
@@ -267,7 +272,7 @@ async def get_sablier_active_streams(limit: int = 200) -> list[dict]:
     (응답에 coverage_notice로 명시함).
     """
     data = await _sablier_graphql(_SABLIER_ACTIVE_STREAMS_QUERY, {"limit": limit})
-    return data.get("lockupStreams", []) or []
+    return data.get("LockupStream", []) or []
 
 
 async def get_sablier_streams_for_token(contract_address: str, limit: int = 200) -> list[dict]:
@@ -280,7 +285,7 @@ async def get_sablier_streams_for_token(contract_address: str, limit: int = 200)
         _SABLIER_STREAMS_FOR_TOKEN_QUERY,
         {"tokenAddress": contract_address.lower(), "limit": limit},
     )
-    return data.get("lockupStreams", []) or []
+    return data.get("LockupStream", []) or []
 
 
 async def get_coingecko_token_contract_and_supply(coin_id: str) -> dict:
@@ -315,3 +320,37 @@ async def get_coingecko_token_contract_and_supply(coin_id: str) -> dict:
         "circulating_supply": market_data.get("circulating_supply"),
         "platforms": platforms,
     }
+
+
+
+async def get_goplus_token_security(chain_id: int, contract_address: str) -> dict:
+    """
+    GoPlus Security의 token_security 엔드포인트를 호출한다. 앱키 없이 동작한다
+    (공식 문서는 Authorization 헤더를 언급하지만, 실사용 커뮤니티 래퍼 기준으로는
+    키 없이도 정상 응답한다 - 2026-09 확인).
+    """
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        r = await client.get(
+            GOPLUS_TOKEN_SECURITY_URL.format(chain_id=chain_id),
+            params={"contract_addresses": contract_address.lower()},
+        )
+        r.raise_for_status()
+        body = r.json()
+        if body.get("code") != 1:
+            raise RuntimeError(f"GoPlus 응답 오류: {body.get('message')}")
+        result = body.get("result") or {}
+        data = result.get(contract_address.lower())
+        if not data:
+            raise ValueError("GoPlus가 이 컨트랙트에 대한 데이터를 반환하지 않았습니다")
+        return data
+
+
+async def get_honeypot_is_check(chain_id: int, contract_address: str) -> dict:
+    """Honeypot.is 폴백 조회. API 키가 필요 없다 (공식 문서 명시)."""
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        r = await client.get(
+            HONEYPOT_IS_URL,
+            params={"address": contract_address, "chainID": chain_id},
+        )
+        r.raise_for_status()
+        return r.json()

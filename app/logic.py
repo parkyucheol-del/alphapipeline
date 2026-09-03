@@ -556,3 +556,114 @@ async def get_kimchi_alert(symbol: str = "BTC") -> dict:
         },
     }
     return payload
+
+
+
+def _bool_or_none(v) -> bool | None:
+    """GoPlus는 불리언을 문자열 "1"/"0"으로 주는 경우가 많아 통일해서 변환한다."""
+    if v is None:
+        return None
+    return str(v) == "1" or v is True
+
+
+async def get_token_risk(chain_id: int, contract_address: str) -> dict:
+    """
+    GoPlus Security를 1순위로, 실패 시 Honeypot.is로 폴백해서 토큰 보안/허니팟
+    위험도를 조회한다. GET /v1/security/token-risk가 사용한다 (main.py 참고).
+    """
+    contract_address = contract_address.lower()
+    owner_address = None
+    data_source = "goplus"
+    notice = None
+
+    try:
+        gp = await ds.get_goplus_token_security(chain_id, contract_address)
+        is_honeypot = _bool_or_none(gp.get("is_honeypot"))
+        buy_tax = float(gp.get("buy_tax") or 0) * 100
+        sell_tax = float(gp.get("sell_tax") or 0) * 100
+        is_mintable = _bool_or_none(gp.get("is_mintable"))
+        is_open_source = _bool_or_none(gp.get("is_open_source"))
+        owner_address = gp.get("owner_address") or None
+        owner_renounced = (
+            owner_address in ("", "0x0000000000000000000000000000000000000000", None)
+            if owner_address is not None
+            else None
+        )
+        holder_count = (
+            int(gp["holder_count"]) if gp.get("holder_count") not in (None, "") else None
+        )
+        is_in_dex = _bool_or_none(gp.get("is_in_dex"))
+        token_name = gp.get("token_name") or None
+        token_symbol = gp.get("token_symbol") or None
+    except Exception as e:
+        logger.warning("GoPlus 조회 실패, Honeypot.is로 폴백합니다: %s", e)
+        try:
+            hp = await ds.get_honeypot_is_check(chain_id, contract_address)
+        except Exception as e2:
+            return {
+                "generated_at": _timestamp_now(),
+                "chain_id": chain_id,
+                "contract_address": contract_address,
+                "risk_level": "UNKNOWN",
+                "risk_flags": ["data_unavailable"],
+                "data_source": "none",
+                "notice": f"GoPlus/Honeypot.is 둘 다 조회 실패: {e2}",
+            }
+        honeypot_result = hp.get("honeypotResult") or {}
+        simulation = hp.get("simulationResult") or {}
+        contract_code = hp.get("contractCode") or {}
+        token_info = hp.get("token") or {}
+        is_honeypot = honeypot_result.get("isHoneypot")
+        buy_tax = simulation.get("buyTax")
+        sell_tax = simulation.get("sellTax")
+        is_mintable = None
+        is_open_source = contract_code.get("openSource")
+        owner_renounced = None
+        holder_count = token_info.get("totalHolders")
+        is_in_dex = None
+        token_name = token_info.get("name")
+        token_symbol = token_info.get("symbol")
+        data_source = "honeypot_is"
+        notice = "GoPlus 조회 실패로 Honeypot.is 폴백 데이터를 사용했습니다 (필드 커버리지가 더 좁습니다)."
+
+    flags = []
+    if is_honeypot:
+        flags.append("honeypot")
+    if is_mintable:
+        flags.append("mintable")
+    if is_open_source is False:
+        flags.append("closed_source")
+    if owner_renounced is False:
+        flags.append("owner_not_renounced")
+    if buy_tax and buy_tax >= 10:
+        flags.append("high_buy_tax")
+    if sell_tax and sell_tax >= 10:
+        flags.append("high_sell_tax")
+
+    if is_honeypot or (sell_tax and sell_tax >= 50):
+        risk_level = "HIGH"
+    elif flags:
+        risk_level = "MEDIUM"
+    else:
+        risk_level = "LOW"
+
+    return {
+        "generated_at": _timestamp_now(),
+        "chain_id": chain_id,
+        "contract_address": contract_address,
+        "token_name": token_name,
+        "token_symbol": token_symbol,
+        "is_honeypot": is_honeypot,
+        "buy_tax_pct": round(buy_tax, 2) if buy_tax is not None else None,
+        "sell_tax_pct": round(sell_tax, 2) if sell_tax is not None else None,
+        "is_mintable": is_mintable,
+        "is_open_source": is_open_source,
+        "owner_renounced": owner_renounced,
+        "owner_address": owner_address if data_source == "goplus" else None,
+        "holder_count": holder_count,
+        "is_in_dex": is_in_dex,
+        "risk_level": risk_level,
+        "risk_flags": flags,
+        "data_source": data_source,
+        "notice": notice,
+    }
