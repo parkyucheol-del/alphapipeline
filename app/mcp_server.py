@@ -298,9 +298,16 @@ async def _call_tool(body: dict, request: Request, client: httpx.AsyncClient) ->
 
     query = {k: v for k, v in arguments.items() if v is not None}
     forward_headers = {}
-    payment_header = request.headers.get("x-payment")
-    if payment_header:
-        forward_headers["X-PAYMENT"] = payment_header
+    # x402 v2(우리 서버가 실제로 쓰는 버전)는 재시도 결제 헤더 이름이
+    # "PAYMENT-SIGNATURE"다 - "X-PAYMENT"는 구버전(v1) 전용이다(설치된
+    # x402==2.21.0의 x402/http/x402_http_client_base.py에서 직접 확인).
+    # 어느 쪽으로 오든 그대로 실어 보내도록 둘 다 확인한다.
+    payment_signature = request.headers.get("payment-signature")
+    if payment_signature:
+        forward_headers["PAYMENT-SIGNATURE"] = payment_signature
+    legacy_x_payment = request.headers.get("x-payment")
+    if legacy_x_payment:
+        forward_headers["X-PAYMENT"] = legacy_x_payment
 
     try:
         upstream = await client.get(tool["path"], params=query, headers=forward_headers)
