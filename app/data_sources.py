@@ -354,3 +354,39 @@ async def get_honeypot_is_check(chain_id: int, contract_address: str) -> dict:
         )
         r.raise_for_status()
         return r.json()
+
+
+
+BYBIT_TICKERS_URL = "https://api.bybit.com/v5/market/tickers"
+BINANCE_PREMIUM_INDEX_URL = "https://fapi.binance.com/fapi/v1/premiumIndex"
+
+
+async def get_bybit_funding_rate(symbol: str) -> dict:
+    """
+    Bybit v5 공개 티커 API에서 무기한 선물 펀딩비를 조회한다 (인증 불필요).
+    category=linear는 USDT 마진 무기한 선물(BTCUSDT 등) 전용이다.
+    """
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        r = await client.get(
+            BYBIT_TICKERS_URL, params={"category": "linear", "symbol": symbol}
+        )
+        r.raise_for_status()
+        body = r.json()
+        if body.get("retCode") != 0:
+            raise RuntimeError(f"Bybit 응답 오류: {body.get('retMsg')}")
+        items = (body.get("result") or {}).get("list") or []
+        if not items:
+            raise ValueError(f"Bybit에서 {symbol} 심볼을 찾지 못했습니다")
+        return items[0]
+
+
+async def get_binance_funding_rate(symbol: str) -> dict:
+    """
+    바이낸스 USDT-M 선물 premiumIndex 폴백 조회. 인증은 불필요하지만, 이 프로젝트가
+    호스팅된 IP 대역에서 451(지역 차단)이 날 가능성이 있어 어디까지나 폴백이다
+    (위 상단 주석의 바이낸스 지역차단/IP밴 이력 참고).
+    """
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        r = await client.get(BINANCE_PREMIUM_INDEX_URL, params={"symbol": symbol})
+        r.raise_for_status()
+        return r.json()

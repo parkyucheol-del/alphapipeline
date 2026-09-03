@@ -190,3 +190,33 @@ TOKEN_RISK_EXAMPLE = {
     "data_source": "goplus",
     "notice": None,
 }
+
+
+
+class FundingRateResponse(BaseModel):
+    generated_at: TimestampPair
+    symbol: str
+    funding_rate: float | None = None
+    funding_rate_percentage: float | None = None
+    predicted_rate: float | None = None
+    next_funding_time: TimestampPair | None = None
+    funding_interval_hours: int | None = None
+    data_source: str
+    notice: str | None = None
+
+
+FUNDING_RATE_EXAMPLE = {
+    "generated_at": {"utc": "2026-09-04T12:00:00Z", "kst": "2026-09-04 21:00:00 KST"},
+    "symbol": "BTCUSDT",
+    "funding_rate": 0.0001,
+    "funding_rate_percentage": 0.01,
+    "predicted_rate": 0.0001,
+    "next_funding_time": {"utc": "2026-09-04T16:00:00Z", "kst": "2026-09-05 01:00:00 KST"},
+    "funding_interval_hours": 8,
+    "data_source": "bybit",
+    "notice": (
+        "펀딩비는 다음 정산 시점(next_funding_time)에 적용될 예정 요율입니다. "
+        "Bybit/바이낸스 둘 다 이와 별개의 '예측' 필드를 제공하지 않으므로 "
+        "predicted_rate는 funding_rate와 동일한 값입니다."
+    ),
+}

@@ -11,11 +11,11 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 
 from app.config import settings
 from app.scheduler import start_scheduler
-from app.logic import get_dump_risk, get_kimchi_alert, get_token_risk, refresh_unlock_cache
+from app.logic import get_dump_risk, get_funding_rate, get_kimchi_alert, get_token_risk, refresh_unlock_cache
 from app.llms_txt import build_llms_txt
 from app.markdown_tool import url_to_markdown
 from app.payment import ACTIVE_NETWORK, USE_CDP_FACILITATOR, build_resource_server, build_routes
-from app.schemas import DumpRiskResponse, ErrorResponse, KimchiAlertResponse, MarkdownResponse, TokenRiskResponse
+from app.schemas import DumpRiskResponse, ErrorResponse, FundingRateResponse, KimchiAlertResponse, MarkdownResponse, TokenRiskResponse
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("alphapipeline")
@@ -82,6 +82,7 @@ async def root():
             "/v1/tools/ai-markdown": settings.PRICE_AI_MARKDOWN_USDC,
             "/v1/unlocks/dump-risk": settings.PRICE_DUMP_RISK_USDC,
             "/v1/security/token-risk": settings.PRICE_TOKEN_RISK_USDC,
+            "/v1/derivatives/funding-rate": settings.PRICE_FUNDING_RATE_USDC,
         },
         "payment": {
             "protocol": "x402",
@@ -94,6 +95,7 @@ async def root():
             "/v1/market/kimchi-alert",
             "/v1/tools/ai-markdown",
             "/v1/security/token-risk",
+            "/v1/derivatives/funding-rate",
         ],
         "coming_soon_endpoints": [],
         "docs": "/docs",
@@ -242,6 +244,37 @@ async def token_risk_endpoint(
         return JSONResponse(content=data)
     except Exception as e:
         logger.exception("token-risk 처리 실패")
+        return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
+
+
+@app.get(
+    "/v1/derivatives/funding-rate",
+    tags=["market"],
+    summary="Get perpetual futures funding rate (Bybit primary, Binance fallback)",
+    description=(
+        "Use this endpoint when you need to gauge long/short crowding in perpetual "
+        "futures before entering or hedging a position, or when asked about funding "
+        "rate arbitrage / carry trade opportunities. Returns the current funding rate "
+        "(as a decimal and as a percentage), the timestamp of the next funding "
+        "settlement, and the funding interval in hours when available. Data source is "
+        "Bybit (primary), falling back to Binance USDT-M futures if Bybit is "
+        "unavailable - check data_source and notice to see which was used and read the "
+        "notice for why predicted_rate equals funding_rate (neither exchange exposes a "
+        "separate forecast field). Input: required `symbol` query parameter (e.g. BTC, "
+        "ETH, or BTCUSDT - non-USDT-suffixed symbols are normalized to USDT pairs)."
+    ),
+    responses={
+        200: {"model": FundingRateResponse, "description": "무기한 선물 펀딩비 데이터"},
+        402: {"description": "x402 결제 필요"},
+        502: {"model": ErrorResponse, "description": "업스트림(Bybit/바이낸스) 오류"},
+    },
+)
+async def funding_rate_endpoint(symbol: str = Query(..., description="e.g. BTC, ETH, or BTCUSDT")):
+    try:
+        data = await get_funding_rate(symbol)
+        return JSONResponse(content=data)
+    except Exception as e:
+        logger.exception("funding-rate 처리 실패")
         return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
 
 

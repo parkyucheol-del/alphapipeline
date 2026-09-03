@@ -667,3 +667,92 @@ async def get_token_risk(chain_id: int, contract_address: str) -> dict:
         "data_source": data_source,
         "notice": notice,
     }
+
+
+
+def _normalize_futures_symbol(symbol: str) -> str:
+    """예: "BTC" -> "BTCUSDT". 이미 USDT로 끝나면 그대로 둔다."""
+    symbol = (symbol or "").upper().strip()
+    if symbol.endswith("USDT"):
+        return symbol
+    return f"{symbol}USDT"
+
+
+def _ms_epoch_to_timestamp_pair(ms) -> dict | None:
+    """Bybit/바이낸스가 주는 밀리초 epoch 타임스탬프를 {utc, kst} 쌍으로 변환한다."""
+    from datetime import datetime, timedelta, timezone
+
+    try:
+        ms = int(ms)
+    except (TypeError, ValueError):
+        return None
+    if not ms:
+        return None
+    kst_tz = timezone(timedelta(hours=9))
+    dt_utc = datetime.fromtimestamp(ms / 1000, tz=timezone.utc)
+    dt_kst = dt_utc.astimezone(kst_tz)
+    return {
+        "utc": dt_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "kst": dt_kst.strftime("%Y-%m-%d %H:%M:%S KST"),
+    }
+
+
+async def get_funding_rate(symbol: str) -> dict:
+    """
+    Bybit(1순위)/바이낸스(폴백) 무기한 선물 펀딩비 조회.
+    GET /v1/derivatives/funding-rate가 사용한다 (main.py 참고).
+
+    predicted_rate에 대한 정직한 설명: Bybit v5/바이낸스 둘 다 "지금 이 순간의
+    펀딩비"와 별개로 "예측 펀딩비"를 따로 제공하지 않는다 - 현재 펀딩비 필드
+    자체가 이미 다음 정산 시점(next_funding_time)에 적용될 요율이다. 그래서
+    predicted_rate는 항상 funding_rate와 같은 값으로 채운다 (틀린 값을 지어내는
+    것보다 정직한 선택).
+    """
+    normalized = _normalize_futures_symbol(symbol)
+    base_notice = (
+        "펀딩비는 다음 정산 시점(next_funding_time)에 적용될 예정 요율입니다. "
+        "Bybit/바이낸스 둘 다 이와 별개의 '예측' 필드를 제공하지 않으므로 "
+        "predicted_rate는 funding_rate와 동일한 값입니다."
+    )
+
+    try:
+        data = await ds.get_bybit_funding_rate(normalized)
+        funding_rate = float(data.get("fundingRate") or 0)
+        next_funding_time = _ms_epoch_to_timestamp_pair(data.get("nextFundingTime"))
+        funding_interval_hours = (
+            int(data["fundingIntervalHour"]) if data.get("fundingIntervalHour") else None
+        )
+        data_source = "bybit"
+        notice = base_notice
+    except Exception as e:
+        logger.warning("Bybit 펀딩비 조회 실패, 바이낸스로 폴백합니다: %s", e)
+        try:
+            data = await ds.get_binance_funding_rate(normalized)
+            funding_rate = float(data.get("lastFundingRate") or 0)
+            next_funding_time = _ms_epoch_to_timestamp_pair(data.get("nextFundingTime"))
+            funding_interval_hours = None
+            data_source = "binance"
+            notice = (
+                base_notice
+                + " (Bybit 조회 실패로 바이낸스 폴백 데이터를 사용했습니다 - 이 서버의 IP 대역에서 "
+                "바이낸스가 451로 차단될 수 있어 이 값도 항상 성공하지는 않습니다.)"
+            )
+        except Exception as e2:
+            return {
+                "generated_at": _timestamp_now(),
+                "symbol": normalized,
+                "data_source": "none",
+                "notice": f"Bybit/바이낸스 둘 다 조회 실패: {e2}",
+            }
+
+    return {
+        "generated_at": _timestamp_now(),
+        "symbol": normalized,
+        "funding_rate": funding_rate,
+        "funding_rate_percentage": round(funding_rate * 100, 4),
+        "predicted_rate": funding_rate,
+        "next_funding_time": next_funding_time,
+        "funding_interval_hours": funding_interval_hours,
+        "data_source": data_source,
+        "notice": notice,
+    }

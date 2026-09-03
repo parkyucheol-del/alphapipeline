@@ -98,10 +98,12 @@ from x402.server import x402ResourceServer
 from app.config import settings
 from app.schemas import (
     DUMP_RISK_EXAMPLE,
+    FUNDING_RATE_EXAMPLE,
     KIMCHI_ALERT_EXAMPLE,
     MARKDOWN_EXAMPLE,
     TOKEN_RISK_EXAMPLE,
     DumpRiskResponse,
+    FundingRateResponse,
     KimchiAlertResponse,
     MarkdownResponse,
     TokenRiskResponse,
@@ -310,6 +312,7 @@ def build_routes(dump_risk_enabled: bool) -> dict[str, RouteConfig]:
     ai_markdown_option = _payment_option(settings.PRICE_AI_MARKDOWN_USDC)
     dump_risk_option = _payment_option(settings.PRICE_DUMP_RISK_USDC)
     token_risk_option = _payment_option(settings.PRICE_TOKEN_RISK_USDC)
+    funding_rate_option = _payment_option(settings.PRICE_FUNDING_RATE_USDC)
 
     routes: dict[str, RouteConfig] = {
         "GET /v1/market/kimchi-alert": _make_route_config(
@@ -398,6 +401,33 @@ def build_routes(dump_risk_enabled: bool) -> dict[str, RouteConfig]:
             ),
             service_name="AlphaPipeline Token Risk Scanner",
             tags=["crypto", "security", "honeypot", "token-risk"],
+        ),
+        "GET /v1/derivatives/funding-rate": _make_route_config(
+            accepts=[funding_rate_option],
+            mime_type="application/json",
+            description=(
+                "Bybit (primary) / Binance (fallback) perpetual futures funding rate - "
+                "the key signal for long/short crowding that traders use to time or hedge "
+                "positions before the next funding settlement."
+            ),
+            resource=_resource_url("/v1/derivatives/funding-rate"),
+            extensions=_bazaar_extension(
+                input_example={"symbol": "BTC"},
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "symbol": {
+                            "type": "string",
+                            "description": "Ticker symbol, e.g. BTC, ETH, or BTCUSDT.",
+                        }
+                    },
+                    "required": ["symbol"],
+                },
+                output_example=FUNDING_RATE_EXAMPLE,
+                output_schema=_inline_schema_defs(FundingRateResponse.model_json_schema()),
+            ),
+            service_name="AlphaPipeline Funding Rate",
+            tags=["crypto", "derivatives", "funding-rate"],
         ),
     }
     if dump_risk_enabled:
