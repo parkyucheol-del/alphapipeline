@@ -1,4 +1,4 @@
-"""
+﻿"""
 API에게 결제 신호를 보내는 예제 클라이언트 (x402 공식 SDK 사용).
 
 이 스크립트는 x402 프로토콜을 통해 AlphaPipeline의 유료 엔드포인트를 실제로
@@ -36,7 +36,7 @@ from x402.mechanisms.evm import EthAccountSigner
 from x402.mechanisms.evm.exact.register import register_exact_evm_client
 
 API_BASE = os.getenv("ALPHAPIPELINE_API_BASE", "http://localhost:8000")
-ENDPOINT = "/v1/market/kimchi-alert?symbol=BTC"
+ENDPOINT = "/v1/calendar/macro-dday"
 
 MNEMONIC_HD_PATH = "m/44'/60'/0'/0/0"
 

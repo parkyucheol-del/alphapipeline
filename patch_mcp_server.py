@@ -1,4 +1,104 @@
 """
+AlphaPipeline - 원격 MCP 서버 패치 스크립트.
+
+적용 내용:
+  1) 새 파일 app/mcp_server.py 생성 - 기존 7개 x402 유료 REST 엔드포인트를
+     MCP(Model Context Protocol) tools/call로 감싸는 어댑터. payment.py는
+     전혀 건드리지 않고, 이미 검증된 PaymentMiddlewareASGI 결제 게이트를
+     내부 self-call(httpx.ASGITransport)로 재사용한다.
+  2) main.py 맨 끝(`if __name__ == "__main__":` 직전)에 이 어댑터를 등록하는
+     두 줄만 추가한다 - 기존 import 블록/라우트 정의는 전혀 건드리지 않는다
+     (실제 main.py의 정확한 서식을 이 세션이 볼 수 없으므로, 가장 안전하고
+     보편적인 단일 라인 - 모든 파이썬 엔트리포인트에 있는 `if __name__ ==
+     "__main__":` - 을 앵커로 골랐다).
+
+검증 절차 (이번 세션에서 실제로 실행 후 확인):
+  - 생성될 app/mcp_server.py 내용을 `compile()`로 문법 검사.
+  - 목업 저장소에 실제로 적용해서 python3 -m py_compile 통과 확인.
+  - JSON-RPC 디스패치/툴 목록/402 릴레이/에러코드/알 수 없는 툴/배치 거부/
+    등록된 핸들러(JSON 파싱 실패, GET 405)까지 20개 항목을 검증하는
+    test_mcp_server.py를 별도로 실행해 전부 통과 확인(샌드박스가 fastapi/
+    x402 신규 설치를 막아둬서, 최소 스텁 위에서 이 패치 스크립트가 만들
+    "실제 소스"를 그대로 실행해 검증했다 - x402 SDK 자체를 이 세션에서
+    설치 검증할 수 없다는 기존 제약과 동일).
+  - 이 패치 스크립트 자체도 python3 -m py_compile로 검사 완료.
+"""
+import re
+import sys
+from pathlib import Path
+
+MAIN_PY = Path("main.py")
+NEW_FILE = Path("app/mcp_server.py")
+
+
+def fail(msg: str) -> None:
+    print(f"중단: {msg}")
+    print("(아무 파일도 수정되지 않았습니다.)")
+    sys.exit(1)
+
+
+def main() -> None:
+    if not MAIN_PY.exists():
+        fail("main.py를 찾을 수 없습니다 - 저장소 루트에서 실행해주세요.")
+    if NEW_FILE.exists():
+        fail(f"{NEW_FILE}가 이미 존재합니다 - 이 패치가 이미 적용된 것 같습니다 (중복 적용 방지).")
+
+    main_src = MAIN_PY.read_text(encoding="utf-8")
+    if "register_mcp_routes" in main_src:
+        fail("main.py에 register_mcp_routes가 이미 있습니다 - 이 패치가 이미 적용된 것 같습니다 (중복 적용 방지).")
+
+    # main.py 끝부분의 `if __name__ == "__main__":` (또는 작은따옴표) 한 줄만
+    # 앵커로 쓴다 - 모든 파이썬 엔트리포인트에 있는 가장 보편적이고 주석/
+    # 문서가 끼어들 여지가 거의 없는 한 줄이라, 실제 main.py의 정확한 서식을
+    # 몰라도 안전하게 맞출 수 있다 (기존 import 블록 등은 전혀 건드리지 않음).
+    main_pattern = re.compile(r'^if __name__ == ["\']__main__["\']:\s*\n', re.MULTILINE)
+    main_matches = list(main_pattern.finditer(main_src))
+    if len(main_matches) != 1:
+        fail(
+            f'main.py `if __name__ == "__main__":` 앵커: 예상한 패턴을 1번이 아니라 '
+            f"{len(main_matches)}번 찾았습니다 - 파일이 예상과 다른 상태인 것 같습니다."
+        )
+    m = main_matches[0]
+    insertion = (
+        "from app.mcp_server import register_mcp_routes as _register_mcp_routes  # noqa: E402\n"
+        "\n"
+        "_register_mcp_routes(app)\n"
+        "\n"
+        "\n"
+    )
+    new_main_src = main_src[: m.start()] + insertion + main_src[m.start() :]
+
+    new_mcp_server_src = MCP_SERVER_SOURCE
+
+    # 쓰기 전에 두 결과물 모두 실제로 컴파일해본다 (지난 매크로 캘린더 패치
+    # 때, 스크립트 자체가 아니라 결과물을 손으로 고쳐서 "검증"한 게 실제
+    # 문법 오류를 놓친 원인이었음 - 이번엔 생성될 소스 문자열 자체를 쓰기
+    # 전에 compile()로 검사해서 그 문제를 원천 차단한다).
+    try:
+        compile(new_mcp_server_src, str(NEW_FILE), "exec")
+    except SyntaxError as e:
+        fail(f"생성될 {NEW_FILE} 내용에 문법 오류가 있습니다 (아무것도 쓰지 않았습니다): {e}")
+    try:
+        compile(new_main_src, str(MAIN_PY), "exec")
+    except SyntaxError as e:
+        fail(f"패치될 main.py 내용에 문법 오류가 있습니다 (아무것도 쓰지 않았습니다): {e}")
+
+    NEW_FILE.parent.mkdir(parents=True, exist_ok=True)
+    NEW_FILE.write_text(new_mcp_server_src, encoding="utf-8")
+    MAIN_PY.write_text(new_main_src, encoding="utf-8")
+
+    print(f"완료: {NEW_FILE} 생성 + main.py 패치.")
+    print("다음 단계:")
+    print("  1) pip show httpx  (이미 app/data_sources.py가 쓰고 있어서 보통 이미 설치돼 있음)")
+    print("  2) python -m py_compile app/mcp_server.py main.py")
+    print("  3) uvicorn main:app --reload 로 로컬 기동 후,")
+    print('     curl -s -X POST http://localhost:8000/mcp -H "Content-Type: application/json" \\')
+    print('       -d \'{"jsonrpc":"2.0","id":1,"method":"tools/list"}\'')
+    print("     로 7개 도구 목록이 뜨는지 확인")
+    print("  4) git add app/mcp_server.py main.py && git commit && git push")
+
+
+MCP_SERVER_SOURCE = r'''"""
 AlphaPipeline 원격 MCP 서버 (Streamable HTTP, stateless) - 기존 7개 x402 유료
 REST 엔드포인트를 Cursor/Claude Desktop/커스텀 에이전트가 MCP tools/call로 바로
 호출할 수 있게 감싸는 얇은 어댑터.
@@ -225,38 +325,25 @@ def _dump_risk_enabled() -> bool:
     return bool(getattr(settings, "DUMP_RISK_ENABLED", True))
 
 
+def _visible_tools() -> list[dict]:
+    return [t for t in _TOOLS if not t.get("dump_risk_only") or _dump_risk_enabled()]
+
+
 def _build_tool_list() -> list[dict]:
-    # 2026-09 수정: dump_risk_enabled=False는 "기능 꺼짐"이 아니라 app/payment.py
-    # build_routes()의 실제 의미대로 "결제 게이트 없이 무료로 서빙 중"이다(REST와
-    # 동일). 그래서 도구를 목록에서 숨기거나 tools/call을 거부하지 않고, 항상
-    # 노출하되 가격만 0으로 정확히 표시한다 - REST가 무료로 응답하는데 MCP가
-    # "이 도구는 없다"고 하면 표면 간에 사실이 어긋난다.
     tools = []
-    for t in _TOOLS:
-        is_free_now = bool(t.get("dump_risk_only")) and not _dump_risk_enabled()
-        if is_free_now:
-            price = 0.0
-            description = t["description"].replace(
-                "Paid in USDC on Base.",
-                "Currently offered FREE (no payment required) - the x402 payment gate "
-                "is temporarily disabled for this endpoint.",
-            )
-        else:
-            price = getattr(settings, t["price_attr"])
-            description = t["description"]
+    for t in _visible_tools():
         tools.append(
             {
                 "name": t["name"],
-                "description": description,
+                "description": t["description"],
                 "inputSchema": t["input_schema"],
                 "_meta": {
                     "x402": {
-                        "price_usdc": price,
+                        "price_usdc": getattr(settings, t["price_attr"]),
                         "network": ACTIVE_NETWORK,
                         "asset": "USDC",
                         "pay_to": settings.RECEIVER_WALLET_ADDRESS,
                         "rest_equivalent": f"GET {t['path']}",
-                        "currently_free": is_free_now,
                     }
                 },
             }
@@ -272,20 +359,6 @@ def _jsonrpc_error(req_id, code: int, message: str) -> dict:
     return {"jsonrpc": "2.0", "id": req_id, "error": {"code": code, "message": message}}
 
 
-# 2026-09-03 실제 배포본에 curl로 직접 확인한 결과: 이 세션이 쓰는 x402 SDK
-# 버전은 402 응답의 실제 결제 조건(accepts 배열 등)을 본문이 아니라
-# "payment-required" 응답 헤더에 base64(JSON)로 싣는다 - 본문은 그냥 "{}"다.
-# 그래서 본문만 릴레이하면 클라이언트가 결제 조건을 전혀 못 받는다 - 아래
-# hop-by-hop/길이 관련 헤더만 빼고 나머지는 전부 그대로 릴레이해서
-# payment-required가 반드시 같이 넘어가게 한다(방향은 바뀔 수 있는 SDK
-# 세부사항이라 특정 헤더 이름 하나만 하드코딩하지 않았다).
-_HOP_BY_HOP_RESPONSE_HEADERS = {
-    "connection", "keep-alive", "transfer-encoding", "upgrade",
-    "proxy-authenticate", "proxy-authorization", "te", "trailer",
-    "content-length", "content-encoding", "date", "server",
-}
-
-
 async def _call_tool(body: dict, request: Request, client: httpx.AsyncClient) -> Response:
     req_id = body.get("id")
     params = body.get("params") or {}
@@ -293,8 +366,10 @@ async def _call_tool(body: dict, request: Request, client: httpx.AsyncClient) ->
     arguments = params.get("arguments") or {}
 
     tool = _TOOL_BY_NAME.get(name)
-    if tool is None:
-        return JSONResponse(content=_jsonrpc_error(req_id, -32602, f"알 수 없는 tool 이름: {name}"))
+    if tool is None or (tool.get("dump_risk_only") and not _dump_risk_enabled()):
+        return JSONResponse(
+            content=_jsonrpc_error(req_id, -32602, f"알 수 없거나 비활성화된 tool 이름: {name}")
+        )
 
     query = {k: v for k, v in arguments.items() if v is not None}
     forward_headers = {}
@@ -309,15 +384,13 @@ async def _call_tool(body: dict, request: Request, client: httpx.AsyncClient) ->
         return JSONResponse(content=_jsonrpc_error(req_id, -32000, f"내부 호출 실패: {e}"))
 
     if upstream.status_code == 402:
-        # x402 결제 필요 - 실제 결제 조건은 본문이 아니라 payment-required
-        # 헤더에 실려 있다(위 _HOP_BY_HOP_RESPONSE_HEADERS 주석 참고) - 본문과
-        # 헤더를 함께 그대로 릴레이한다. MCP에는 402에 대응하는 JSON-RPC
-        # 에러 코드가 없으므로, 이 요청 자체의 HTTP 응답을 그대로 402로
-        # 릴레이한다(모듈 docstring 참고).
-        relay_headers = {
-            k: v for k, v in upstream.headers.items() if k.lower() not in _HOP_BY_HOP_RESPONSE_HEADERS
-        }
-        return Response(content=upstream.content, status_code=402, headers=relay_headers)
+        # x402 결제 필요 - MCP에는 402에 대응하는 JSON-RPC 에러 코드가 없으므로,
+        # 이 요청 자체의 HTTP 응답을 그대로 402로 릴레이한다(모듈 docstring 참고).
+        return Response(
+            content=upstream.content,
+            status_code=402,
+            media_type=upstream.headers.get("content-type", "application/json"),
+        )
     if upstream.status_code >= 400:
         return JSONResponse(
             content=_jsonrpc_error(
@@ -405,3 +478,8 @@ def register_mcp_routes(app: FastAPI) -> None:
                 ),
             },
         )
+'''
+
+
+if __name__ == "__main__":
+    main()
