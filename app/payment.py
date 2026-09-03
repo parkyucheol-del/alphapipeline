@@ -115,10 +115,11 @@ try:
     from x402.extensions.bazaar import OutputConfig, declare_discovery_extension
 
     _HAS_DISCOVERY_HELPER = True
-except ImportError:
+except ImportError as e:
     OutputConfig = None
     declare_discovery_extension = None
     _HAS_DISCOVERY_HELPER = False
+    logger.warning("bazaar 헬퍼 임포트 실패 - 실제 원인: %r", e)
     logger.warning(
         "x402.extensions.bazaar.declare_discovery_extension을 임포트하지 못했습니다 "
         "(설치된 x402 버전이 이 헬퍼를 지원하지 않을 수 있음) - 수동으로 구성한 "
