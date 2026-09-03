@@ -871,3 +871,136 @@ async def get_dex_liquidity_slippage(
         "data_source": "geckoterminal",
         "notice": _DEX_SLIPPAGE_NOTICE,
     }
+# 2026년 FOMC(연준 금리 결정) / CPI(미국 소비자물가지수) /
+# NFP(미국 고용지표, Employment Situation) 정적 일정표.
+# 출처: federalreserve.gov/monetarypolicy/fomccalendars.htm (FOMC),
+#       bls.gov/schedule/news_release/cpi.htm (CPI),
+#       bls.gov/schedule/news_release/empsit.htm (NFP/Employment Situation).
+# 발표 시각: FOMC 성명서는 회의 마지막날 미동부 시간 오후 2시(ET),
+# CPI/NFP는 미동부 시간 오전 8시 30분(ET)이며, 아래 utc_iso는 2026년
+# 미국 서머타임(DST, 3월 8일~11월 1일) 적용 여부를 이미 반영해 UTC로
+# 미리 계산해둔 값이다 (정적 데이터라서 실행 시점에 DST를 다시 계산하지 않음).
+_MACRO_EVENTS_2026 = [
+    {"event_name": "FOMC 금리 결정 (1월)", "event_type": "FOMC", "utc_iso": "2026-01-28T19:00:00Z", "impact_level": "HIGH", "tags": ["rate-decision", "fomc", "interest-rates"], "description": "Federal Reserve interest rate decision and policy statement."},
+    {"event_name": "NFP (2025년 12월 기준)", "event_type": "NFP", "utc_iso": "2026-01-09T13:30:00Z", "impact_level": "HIGH", "tags": ["employment", "nfp", "jobs-report"], "description": "US Employment Situation report (nonfarm payrolls, unemployment rate)."},
+    {"event_name": "CPI (2025년 12월 기준)", "event_type": "CPI", "utc_iso": "2026-01-13T13:30:00Z", "impact_level": "HIGH", "tags": ["inflation", "cpi", "cpi-report"], "description": "US Consumer Price Index (CPI) inflation report release."},
+    {"event_name": "NFP (2026년 1월 기준)", "event_type": "NFP", "utc_iso": "2026-02-11T13:30:00Z", "impact_level": "HIGH", "tags": ["employment", "nfp", "jobs-report"], "description": "US Employment Situation report (nonfarm payrolls, unemployment rate)."},
+    {"event_name": "CPI (2026년 1월 기준)", "event_type": "CPI", "utc_iso": "2026-02-13T13:30:00Z", "impact_level": "HIGH", "tags": ["inflation", "cpi", "cpi-report"], "description": "US Consumer Price Index (CPI) inflation report release."},
+    {"event_name": "NFP (2026년 2월 기준)", "event_type": "NFP", "utc_iso": "2026-03-06T13:30:00Z", "impact_level": "HIGH", "tags": ["employment", "nfp", "jobs-report"], "description": "US Employment Situation report (nonfarm payrolls, unemployment rate)."},
+    {"event_name": "CPI (2026년 2월 기준)", "event_type": "CPI", "utc_iso": "2026-03-11T12:30:00Z", "impact_level": "HIGH", "tags": ["inflation", "cpi", "cpi-report"], "description": "US Consumer Price Index (CPI) inflation report release."},
+    {"event_name": "FOMC 금리 결정 (3월, SEP 포함)", "event_type": "FOMC", "utc_iso": "2026-03-18T18:00:00Z", "impact_level": "HIGH", "tags": ["rate-decision", "fomc", "interest-rates", "sep"], "description": "Federal Reserve interest rate decision, policy statement, and Summary of Economic Projections (dot plot)."},
+    {"event_name": "NFP (2026년 3월 기준)", "event_type": "NFP", "utc_iso": "2026-04-03T12:30:00Z", "impact_level": "HIGH", "tags": ["employment", "nfp", "jobs-report"], "description": "US Employment Situation report (nonfarm payrolls, unemployment rate)."},
+    {"event_name": "CPI (2026년 3월 기준)", "event_type": "CPI", "utc_iso": "2026-04-10T12:30:00Z", "impact_level": "HIGH", "tags": ["inflation", "cpi", "cpi-report"], "description": "US Consumer Price Index (CPI) inflation report release."},
+    {"event_name": "FOMC 금리 결정 (4월)", "event_type": "FOMC", "utc_iso": "2026-04-29T18:00:00Z", "impact_level": "HIGH", "tags": ["rate-decision", "fomc", "interest-rates"], "description": "Federal Reserve interest rate decision and policy statement."},
+    {"event_name": "NFP (2026년 4월 기준)", "event_type": "NFP", "utc_iso": "2026-05-08T12:30:00Z", "impact_level": "HIGH", "tags": ["employment", "nfp", "jobs-report"], "description": "US Employment Situation report (nonfarm payrolls, unemployment rate)."},
+    {"event_name": "CPI (2026년 4월 기준)", "event_type": "CPI", "utc_iso": "2026-05-12T12:30:00Z", "impact_level": "HIGH", "tags": ["inflation", "cpi", "cpi-report"], "description": "US Consumer Price Index (CPI) inflation report release."},
+    {"event_name": "NFP (2026년 5월 기준)", "event_type": "NFP", "utc_iso": "2026-06-05T12:30:00Z", "impact_level": "HIGH", "tags": ["employment", "nfp", "jobs-report"], "description": "US Employment Situation report (nonfarm payrolls, unemployment rate)."},
+    {"event_name": "CPI (2026년 5월 기준)", "event_type": "CPI", "utc_iso": "2026-06-10T12:30:00Z", "impact_level": "HIGH", "tags": ["inflation", "cpi", "cpi-report"], "description": "US Consumer Price Index (CPI) inflation report release."},
+    {"event_name": "FOMC 금리 결정 (6월, SEP 포함)", "event_type": "FOMC", "utc_iso": "2026-06-17T18:00:00Z", "impact_level": "HIGH", "tags": ["rate-decision", "fomc", "interest-rates", "sep"], "description": "Federal Reserve interest rate decision, policy statement, and Summary of Economic Projections (dot plot)."},
+    {"event_name": "NFP (2026년 6월 기준)", "event_type": "NFP", "utc_iso": "2026-07-02T12:30:00Z", "impact_level": "HIGH", "tags": ["employment", "nfp", "jobs-report"], "description": "US Employment Situation report (nonfarm payrolls, unemployment rate)."},
+    {"event_name": "CPI (2026년 6월 기준)", "event_type": "CPI", "utc_iso": "2026-07-14T12:30:00Z", "impact_level": "HIGH", "tags": ["inflation", "cpi", "cpi-report"], "description": "US Consumer Price Index (CPI) inflation report release."},
+    {"event_name": "FOMC 금리 결정 (7월)", "event_type": "FOMC", "utc_iso": "2026-07-29T18:00:00Z", "impact_level": "HIGH", "tags": ["rate-decision", "fomc", "interest-rates"], "description": "Federal Reserve interest rate decision and policy statement."},
+    {"event_name": "NFP (2026년 7월 기준)", "event_type": "NFP", "utc_iso": "2026-08-07T12:30:00Z", "impact_level": "HIGH", "tags": ["employment", "nfp", "jobs-report"], "description": "US Employment Situation report (nonfarm payrolls, unemployment rate)."},
+    {"event_name": "CPI (2026년 7월 기준)", "event_type": "CPI", "utc_iso": "2026-08-12T12:30:00Z", "impact_level": "HIGH", "tags": ["inflation", "cpi", "cpi-report"], "description": "US Consumer Price Index (CPI) inflation report release."},
+    {"event_name": "NFP (2026년 8월 기준)", "event_type": "NFP", "utc_iso": "2026-09-04T12:30:00Z", "impact_level": "HIGH", "tags": ["employment", "nfp", "jobs-report"], "description": "US Employment Situation report (nonfarm payrolls, unemployment rate)."},
+    {"event_name": "CPI (2026년 8월 기준)", "event_type": "CPI", "utc_iso": "2026-09-11T12:30:00Z", "impact_level": "HIGH", "tags": ["inflation", "cpi", "cpi-report"], "description": "US Consumer Price Index (CPI) inflation report release."},
+    {"event_name": "FOMC 금리 결정 (9월, SEP 포함)", "event_type": "FOMC", "utc_iso": "2026-09-16T18:00:00Z", "impact_level": "HIGH", "tags": ["rate-decision", "fomc", "interest-rates", "sep"], "description": "Federal Reserve interest rate decision, policy statement, and Summary of Economic Projections (dot plot)."},
+    {"event_name": "NFP (2026년 9월 기준)", "event_type": "NFP", "utc_iso": "2026-10-02T12:30:00Z", "impact_level": "HIGH", "tags": ["employment", "nfp", "jobs-report"], "description": "US Employment Situation report (nonfarm payrolls, unemployment rate)."},
+    {"event_name": "CPI (2026년 9월 기준)", "event_type": "CPI", "utc_iso": "2026-10-14T12:30:00Z", "impact_level": "HIGH", "tags": ["inflation", "cpi", "cpi-report"], "description": "US Consumer Price Index (CPI) inflation report release."},
+    {"event_name": "FOMC 금리 결정 (10월)", "event_type": "FOMC", "utc_iso": "2026-10-28T18:00:00Z", "impact_level": "HIGH", "tags": ["rate-decision", "fomc", "interest-rates"], "description": "Federal Reserve interest rate decision and policy statement."},
+    {"event_name": "NFP (2026년 10월 기준)", "event_type": "NFP", "utc_iso": "2026-11-06T13:30:00Z", "impact_level": "HIGH", "tags": ["employment", "nfp", "jobs-report"], "description": "US Employment Situation report (nonfarm payrolls, unemployment rate)."},
+    {"event_name": "CPI (2026년 10월 기준)", "event_type": "CPI", "utc_iso": "2026-11-10T13:30:00Z", "impact_level": "HIGH", "tags": ["inflation", "cpi", "cpi-report"], "description": "US Consumer Price Index (CPI) inflation report release."},
+    {"event_name": "NFP (2026년 11월 기준)", "event_type": "NFP", "utc_iso": "2026-12-04T13:30:00Z", "impact_level": "HIGH", "tags": ["employment", "nfp", "jobs-report"], "description": "US Employment Situation report (nonfarm payrolls, unemployment rate)."},
+    {"event_name": "FOMC 금리 결정 (12월, SEP 포함)", "event_type": "FOMC", "utc_iso": "2026-12-09T19:00:00Z", "impact_level": "HIGH", "tags": ["rate-decision", "fomc", "interest-rates", "sep"], "description": "Federal Reserve interest rate decision, policy statement, and Summary of Economic Projections (dot plot)."},
+    {"event_name": "CPI (2026년 11월 기준)", "event_type": "CPI", "utc_iso": "2026-12-10T13:30:00Z", "impact_level": "HIGH", "tags": ["inflation", "cpi", "cpi-report"], "description": "US Consumer Price Index (CPI) inflation report release."},
+]
+
+_MACRO_CALENDAR_NOTICE = (
+    "이 캘린더는 2026년 FOMC 금리 결정, 미국 CPI, 미국 고용지표(NFP) 일정을 공식 "
+    "연준(Fed)/BLS 발표 기준으로 정적으로 내장한 것입니다 - 실시간 외부 API를 호출하지 "
+    "않습니다. 일정은 연준/BLS가 추후 변경할 수 있고 2027년 일정은 아직 포함되어 있지 "
+    "않으니, 중요한 의사결정 전에는 공식 소스(federalreserve.gov, bls.gov)로 재확인하세요."
+)
+
+
+def _utc_iso_to_timestamp_pair(utc_iso: str) -> dict:
+    '"...Z" 형식의 UTC ISO 문자열을 {utc, kst} 쌍으로 변환한다.'
+    from datetime import datetime, timedelta, timezone
+
+    dt_utc = datetime.fromisoformat(utc_iso.replace("Z", "+00:00"))
+    kst_tz = timezone(timedelta(hours=9))
+    dt_kst = dt_utc.astimezone(kst_tz)
+    return {
+        "utc": dt_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "kst": dt_kst.strftime("%Y-%m-%d %H:%M:%S KST"),
+    }
+
+
+async def get_macro_calendar_dday() -> dict:
+    """
+    2026년 FOMC/CPI/NFP 일정을 정적으로 내장해 가장 가까운
+    이벤트까지의 D-Day를 계산한다. 외부 API 호출 없음.
+    GET /v1/calendar/macro-dday가 사용한다 (main.py 참고).
+    """
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc)
+    parsed = [
+        (datetime.fromisoformat(ev["utc_iso"].replace("Z", "+00:00")), ev)
+        for ev in _MACRO_EVENTS_2026
+    ]
+    upcoming_all = sorted((item for item in parsed if item[0] >= now), key=lambda x: x[0])
+
+    if not upcoming_all:
+        return {
+            "generated_at": _timestamp_now(),
+            "event_name": None,
+            "event_type": None,
+            "event_datetime": None,
+            "d_day": None,
+            "time_remaining": None,
+            "impact_level": None,
+            "tags": [],
+            "description": None,
+            "upcoming_events": [],
+            "data_source": "static_2026_macro_calendar",
+            "notice": _MACRO_CALENDAR_NOTICE
+            + " 2026년 내장 일정이 모두 지났습니다 - 다음 세션에서 갱신이 필요합니다.",
+        }
+
+    nearest_dt, nearest_ev = upcoming_all[0]
+    total_seconds = max((nearest_dt - now).total_seconds(), 0)
+    days_remaining = int(total_seconds // 86400)
+    hours_remaining = int((total_seconds % 86400) // 3600)
+    minutes_remaining = int((total_seconds % 3600) // 60)
+    d_day = (nearest_dt.date() - now.date()).days
+
+    upcoming_brief = [
+        {
+            "event_name": ev["event_name"],
+            "event_type": ev["event_type"],
+            "event_datetime": _utc_iso_to_timestamp_pair(ev["utc_iso"]),
+            "impact_level": ev["impact_level"],
+            "tags": ev["tags"],
+        }
+        for _, ev in upcoming_all[1:4]
+    ]
+
+    return {
+        "generated_at": _timestamp_now(),
+        "event_name": nearest_ev["event_name"],
+        "event_type": nearest_ev["event_type"],
+        "event_datetime": _utc_iso_to_timestamp_pair(nearest_ev["utc_iso"]),
+        "d_day": d_day,
+        "time_remaining": {
+            "days": days_remaining,
+            "hours": hours_remaining,
+            "minutes": minutes_remaining,
+        },
+        "impact_level": nearest_ev["impact_level"],
+        "tags": nearest_ev["tags"],
+        "description": nearest_ev["description"],
+        "upcoming_events": upcoming_brief,
+        "data_source": "static_2026_macro_calendar",
+        "notice": _MACRO_CALENDAR_NOTICE,
+    }

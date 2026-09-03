@@ -16,6 +16,7 @@ from app.logic import (
     get_dump_risk,
     get_funding_rate,
     get_kimchi_alert,
+    get_macro_calendar_dday,
     get_token_risk,
     refresh_unlock_cache,
 )
@@ -28,6 +29,7 @@ from app.schemas import (
     ErrorResponse,
     FundingRateResponse,
     KimchiAlertResponse,
+    MacroDdayResponse,
     MarkdownResponse,
     TokenRiskResponse,
 )
@@ -99,6 +101,7 @@ async def root():
             "/v1/security/token-risk": settings.PRICE_TOKEN_RISK_USDC,
             "/v1/derivatives/funding-rate": settings.PRICE_FUNDING_RATE_USDC,
             "/v1/dex/liquidity-slippage": settings.PRICE_DEX_SLIPPAGE_USDC,
+            "/v1/calendar/macro-dday": settings.PRICE_MACRO_DDAY_USDC,
         },
         "payment": {
             "protocol": "x402",
@@ -113,6 +116,7 @@ async def root():
             "/v1/security/token-risk",
             "/v1/derivatives/funding-rate",
             "/v1/dex/liquidity-slippage",
+            "/v1/calendar/macro-dday",
         ],
         "coming_soon_endpoints": [],
         "docs": "/docs",
@@ -337,6 +341,36 @@ async def dex_liquidity_slippage_endpoint(
     except Exception as e:
         logger.exception("dex-liquidity-slippage 처리 실패")
         return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
+
+
+@app.get(
+    "/v1/calendar/macro-dday",
+    tags=["market"],
+    summary="Countdown to the nearest major US macro event (FOMC/CPI/NFP)",
+    description=(
+        "Use this endpoint when you need to know how much time is left before the next "
+        "market-moving US macro release - a Fed interest rate decision (FOMC), CPI inflation "
+        "report, or nonfarm payrolls (NFP) release - to plan position sizing or avoid holding "
+        "risk into a high-impact print. Returns the nearest event's name, exact date/time (UTC "
+        "and KST), a D-Day countdown, exact time remaining (days/hours/minutes), an impact "
+        "level, and the next few upcoming events for context. Data is a static, pre-loaded "
+        "2026 calendar sourced from official Federal Reserve and BLS release schedules - no "
+        "live external API call is made, so this endpoint is fast and never fails on an "
+        "upstream outage. No input parameters required."
+    ),
+    responses={
+        200: {"model": MacroDdayResponse, "description": "매크로 이벤트 D-Day 캘린더 데이터"},
+        402: {"description": "x402 결제 필요"},
+        500: {"model": ErrorResponse, "description": "내부 처리 오류"},
+    },
+)
+async def macro_dday_endpoint():
+    try:
+        data = await get_macro_calendar_dday()
+        return JSONResponse(content=data)
+    except Exception as e:
+        logger.exception("macro-dday 처리 실패")
+        return JSONResponse(status_code=500, content={"error": "internal_error", "message": str(e)})
 
 
 if __name__ == "__main__":

@@ -40,6 +40,7 @@ class Settings:
     PRICE_DUMP_RISK_USDC: float = float(os.getenv("PRICE_DUMP_RISK_USDC", "0.03"))
     PRICE_FUNDING_RATE_USDC: float = float(os.getenv("PRICE_FUNDING_RATE_USDC", "0.01"))
     PRICE_DEX_SLIPPAGE_USDC: float = float(os.getenv("PRICE_DEX_SLIPPAGE_USDC", "0.02"))
+    PRICE_MACRO_DDAY_USDC: float = float(os.getenv("PRICE_MACRO_DDAY_USDC", "0.01"))
     PRICE_TOKEN_RISK_USDC: float = float(os.getenv("PRICE_TOKEN_RISK_USDC", "0.02"))
 
     # ===== x402 공식 결제 레이어 (Coinbase CDP Facilitator) =====

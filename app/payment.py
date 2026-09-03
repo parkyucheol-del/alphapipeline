@@ -101,12 +101,14 @@ from app.schemas import (
     DUMP_RISK_EXAMPLE,
     FUNDING_RATE_EXAMPLE,
     KIMCHI_ALERT_EXAMPLE,
+    MACRO_DDAY_EXAMPLE,
     MARKDOWN_EXAMPLE,
     TOKEN_RISK_EXAMPLE,
     DexSlippageResponse,
     DumpRiskResponse,
     FundingRateResponse,
     KimchiAlertResponse,
+    MacroDdayResponse,
     MarkdownResponse,
     TokenRiskResponse,
 )
@@ -317,13 +319,35 @@ def build_routes(dump_risk_enabled: bool) -> dict[str, RouteConfig]:
     funding_rate_option = _payment_option(settings.PRICE_FUNDING_RATE_USDC)
     dex_slippage_option = _payment_option(settings.PRICE_DEX_SLIPPAGE_USDC)
 
+    macro_dday_option = _payment_option(settings.PRICE_MACRO_DDAY_USDC)
     routes: dict[str, RouteConfig] = {
+        "GET /v1/calendar/macro-dday": _make_route_config(
+            accepts=[macro_dday_option],
+            mime_type="application/json",
+            description=(
+                "Static 2026 macro calendar - countdown to the nearest FOMC rate "
+                "decision, US CPI, or US Employment Situation (NFP) release, with "
+                "impact tags and the next few upcoming events. No live external API "
+                "call is made; dates are pre-loaded from official Fed/BLS schedules. "
+                "Paid in USDC on Base."
+            ),
+            resource=_resource_url("/v1/calendar/macro-dday"),
+            extensions=_bazaar_extension(
+                input_example={},
+                input_schema={"type": "object", "properties": {}, "required": []},
+                output_example=MACRO_DDAY_EXAMPLE,
+                output_schema=_inline_schema_defs(MacroDdayResponse.model_json_schema()),
+            ),
+            service_name="AlphaPipeline Macro Calendar",
+            tags=["macro", "calendar", "fomc", "cpi", "nfp"],
+        ),
         "GET /v1/market/kimchi-alert": _make_route_config(
             accepts=[kimchi_option],
             mime_type="application/json",
             description=(
                 "Real-time Korea (Upbit) vs global crypto price premium - the "
-                "'kimchi premium' - with reverse-premium and 1h-surge alerts."
+                "'kimchi premium' - with reverse-premium and 1h-surge alerts. "
+                "Paid in USDC on Base."
             ),
             resource=_resource_url("/v1/market/kimchi-alert"),
             extensions=_bazaar_extension(
@@ -349,7 +373,7 @@ def build_routes(dump_risk_enabled: bool) -> dict[str, RouteConfig]:
             mime_type="application/json",
             description=(
                 "Convert any webpage URL into clean, ad-free Markdown text "
-                "optimized for LLM context windows."
+                "optimized for LLM context windows. Paid in USDC on Base."
             ),
             resource=_resource_url("/v1/tools/ai-markdown"),
             extensions=_bazaar_extension(
@@ -377,7 +401,8 @@ def build_routes(dump_risk_enabled: bool) -> dict[str, RouteConfig]:
             description=(
                 "GoPlus/Honeypot.is-backed token security check - honeypot flag, "
                 "buy/sell tax, mintability, and ownership renouncement for a given "
-                "contract address, so a bot can decide before it buys."
+                "contract address, so a bot can decide before it buys. Paid in "
+                "USDC on Base."
             ),
             resource=_resource_url("/v1/security/token-risk"),
             extensions=_bazaar_extension(
@@ -411,7 +436,7 @@ def build_routes(dump_risk_enabled: bool) -> dict[str, RouteConfig]:
             description=(
                 "Bybit (primary) / Binance (fallback) perpetual futures funding rate - "
                 "the key signal for long/short crowding that traders use to time or hedge "
-                "positions before the next funding settlement."
+                "positions before the next funding settlement. Paid in USDC on Base."
             ),
             resource=_resource_url("/v1/derivatives/funding-rate"),
             extensions=_bazaar_extension(
@@ -438,7 +463,7 @@ def build_routes(dump_risk_enabled: bool) -> dict[str, RouteConfig]:
             description=(
                 "GeckoTerminal-backed DEX pool liquidity and estimated trade slippage - "
                 "size a trade or compare pools before swapping, with a clearly-flagged "
-                "constant-product approximation model."
+                "constant-product approximation model. Paid in USDC on Base."
             ),
             resource=_resource_url("/v1/dex/liquidity-slippage"),
             extensions=_bazaar_extension(
@@ -482,7 +507,8 @@ def build_routes(dump_risk_enabled: bool) -> dict[str, RouteConfig]:
             mime_type="application/json",
             description=(
                 "Tokens with large amounts of currently-locked or vesting supply "
-                "relative to circulating supply - a proxy for future sell/dump pressure."
+                "relative to circulating supply - a proxy for future sell/dump pressure. "
+                "Paid in USDC on Base."
             ),
             resource=_resource_url("/v1/unlocks/dump-risk"),
             extensions=_bazaar_extension(

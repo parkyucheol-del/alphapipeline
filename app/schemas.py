@@ -257,3 +257,66 @@ DEX_SLIPPAGE_EXAMPLE = {
         "차이가 클 수 있습니다 - 실제 매매 전 온체인 견적(quote)으로 반드시 재확인하세요."
     ),
 }
+class TimeRemaining(BaseModel):
+    days: int
+    hours: int
+    minutes: int
+
+
+class MacroCalendarEventBrief(BaseModel):
+    event_name: str
+    event_type: str
+    event_datetime: TimestampPair
+    impact_level: str
+    tags: list[str] = []
+
+
+class MacroDdayResponse(BaseModel):
+    generated_at: TimestampPair
+    event_name: str | None = None
+    event_type: str | None = None
+    event_datetime: TimestampPair | None = None
+    d_day: int | None = None
+    time_remaining: TimeRemaining | None = None
+    impact_level: str | None = None
+    tags: list[str] = []
+    description: str | None = None
+    upcoming_events: list[MacroCalendarEventBrief] = []
+    data_source: str
+    notice: str | None = None
+
+
+MACRO_DDAY_EXAMPLE = {
+    "generated_at": {"utc": "2026-09-03T12:00:00Z", "kst": "2026-09-03 21:00:00 KST"},
+    "event_name": "FOMC 금리 결정 (9월, SEP 포함)",
+    "event_type": "FOMC",
+    "event_datetime": {"utc": "2026-09-16T18:00:00Z", "kst": "2026-09-17 03:00:00 KST"},
+    "d_day": 13,
+    "time_remaining": {"days": 13, "hours": 6, "minutes": 0},
+    "impact_level": "HIGH",
+    "tags": ["rate-decision", "fomc", "interest-rates"],
+    "description": "Federal Reserve interest rate decision and policy statement.",
+    "upcoming_events": [
+        {
+            "event_name": "CPI (2026년 9월 기준)",
+            "event_type": "CPI",
+            "event_datetime": {"utc": "2026-10-14T12:30:00Z", "kst": "2026-10-14 21:30:00 KST"},
+            "impact_level": "HIGH",
+            "tags": ["inflation", "cpi", "cpi-report"],
+        },
+        {
+            "event_name": "NFP (2026년 9월 기준)",
+            "event_type": "NFP",
+            "event_datetime": {"utc": "2026-10-02T12:30:00Z", "kst": "2026-10-02 21:30:00 KST"},
+            "impact_level": "HIGH",
+            "tags": ["employment", "nfp", "jobs-report"],
+        },
+    ],
+    "data_source": "static_2026_macro_calendar",
+    "notice": (
+        "이 캘린더는 2026년 FOMC 금리 결정, 미국 CPI, 미국 고용지표(NFP) 일정을 공식 "
+        "연준(Fed)/BLS 발표 기준으로 정적으로 내장한 것입니다 - 실시간 외부 API를 호출하지 "
+        "않습니다. 일정은 연준/BLS가 추후 변경할 수 있고 2027년 일정은 아직 포함되어 있지 "
+        "않으니, 중요한 의사결정 전에는 공식 소스(federalreserve.gov, bls.gov)로 재확인하세요."
+    ),
+}
