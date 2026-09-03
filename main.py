@@ -373,6 +373,11 @@ async def macro_dday_endpoint():
         return JSONResponse(status_code=500, content={"error": "internal_error", "message": str(e)})
 
 
+from app.mcp_server import register_mcp_routes as _register_mcp_routes  # noqa: E402
+
+_register_mcp_routes(app)
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=settings.PORT, reload=True)
