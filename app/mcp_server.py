@@ -81,8 +81,11 @@ _TOOLS: list[dict] = [
         "path": "/v1/market/kimchi-alert",
         "price_attr": "PRICE_KIMCHI_ALERT_USDC",
         "description": (
-            "Real-time Korea (Upbit) vs global crypto price premium - the 'kimchi "
-            "premium' - with reverse-premium and 1h-surge alerts. Paid in USDC on Base."
+            "Use this tool when evaluating Korean exchange price premiums, the 'kimchi "
+            "premium', Upbit price gaps vs Binance/OKX, cross-border crypto arbitrage, or "
+            "sudden Korea-specific price anomalies. Real-time Upbit vs global price "
+            "spread with reverse-premium and surge alerts. Do not use for general USD "
+            "spot prices or on-chain DEX swaps. Paid in USDC on Base."
         ),
         "input_schema": {
             "type": "object",
@@ -100,8 +103,11 @@ _TOOLS: list[dict] = [
         "path": "/v1/tools/ai-markdown",
         "price_attr": "PRICE_AI_MARKDOWN_USDC",
         "description": (
-            "Convert any webpage URL into clean, ad-free Markdown text optimized for "
-            "LLM context windows. Paid in USDC on Base."
+            "Use this tool when an agent needs to parse clean webpage article content "
+            "without wasting context tokens on ads, scripts, navigation, and HTML "
+            "boilerplate, or when summarizing a specific URL. Converts any URL into "
+            "clean Markdown optimized for LLM context windows. Do not use for raw API "
+            "endpoints or binary files (PDF/images). Paid in USDC on Base."
         ),
         "input_schema": {
             "type": "object",
@@ -120,9 +126,11 @@ _TOOLS: list[dict] = [
         "path": "/v1/security/token-risk",
         "price_attr": "PRICE_TOKEN_RISK_USDC",
         "description": (
-            "GoPlus/Honeypot.is-backed token security check - honeypot flag, buy/sell "
-            "tax, mintability, and ownership renouncement for a given contract address, "
-            "so a bot can decide before it buys. Paid in USDC on Base."
+            "Use this tool before executing any on-chain swap to verify if an ERC-20 "
+            "contract is a honeypot, rug-pull risk, or has malicious buy/sell taxes and "
+            "mintability backdoors. GoPlus/Honeypot.is-backed security audit for a given "
+            "contract address. Do not use for market price discovery or liquidity "
+            "depth. Paid in USDC on Base."
         ),
         "input_schema": {
             "type": "object",
@@ -144,9 +152,11 @@ _TOOLS: list[dict] = [
         "path": "/v1/derivatives/funding-rate",
         "price_attr": "PRICE_FUNDING_RATE_USDC",
         "description": (
-            "Bybit (primary) / Binance (fallback) perpetual futures funding rate - the "
-            "key signal for long/short crowding that traders use to time or hedge "
-            "positions before the next funding settlement. Paid in USDC on Base."
+            "Use this tool when analyzing perpetual futures funding rates, long/short "
+            "market sentiment crowding, or timing hedging strategies before settlement "
+            "periods. Aggregates Bybit (primary) and Binance (fallback) perpetual "
+            "funding rates. Do not use for spot market volume or token security "
+            "checks. Paid in USDC on Base."
         ),
         "input_schema": {
             "type": "object",
@@ -164,9 +174,11 @@ _TOOLS: list[dict] = [
         "path": "/v1/dex/liquidity-slippage",
         "price_attr": "PRICE_DEX_SLIPPAGE_USDC",
         "description": (
-            "GeckoTerminal-backed DEX pool liquidity and estimated trade slippage - size "
-            "a trade or compare pools before swapping, with a clearly-flagged "
-            "constant-product approximation model. Paid in USDC on Base."
+            "Use this tool to calculate expected DEX price slippage, pool liquidity "
+            "depth, and optimal routing before executing an on-chain token swap. "
+            "GeckoTerminal-backed pool analytics with constant-product slippage "
+            "estimation. Do not use for centralized exchange (CEX) orderbooks or "
+            "contract risk analysis. Paid in USDC on Base."
         ),
         "input_schema": {
             "type": "object",
@@ -196,10 +208,12 @@ _TOOLS: list[dict] = [
         "path": "/v1/calendar/macro-dday",
         "price_attr": "PRICE_MACRO_DDAY_USDC",
         "description": (
-            "Countdown to the nearest major US macro event (Fed FOMC rate decision, "
-            "CPI, or NFP) from a static, pre-loaded 2026 calendar - no live external API "
-            "call, never fails on an upstream outage. No input parameters. Paid in USDC "
-            "on Base."
+            "Use this tool when an agent plans trading schedules around major US "
+            "macroeconomic volatility, specifically days remaining until FOMC rate "
+            "decisions, CPI prints, or NFP jobs reports. Zero-dependency static 2026 "
+            "macro calendar with 100% uptime and no upstream failure risk. Do not use "
+            "for real-time market price data or economic forecast consensus figures. "
+            "No input parameters. Paid in USDC on Base."
         ),
         "input_schema": {"type": "object", "properties": {}, "required": []},
     },
@@ -208,9 +222,11 @@ _TOOLS: list[dict] = [
         "path": "/v1/unlocks/dump-risk",
         "price_attr": "PRICE_DUMP_RISK_USDC",
         "description": (
-            "Tokens with large amounts of currently-locked or vesting supply relative to "
-            "circulating supply - a proxy for future sell/dump pressure. Paid in USDC on "
-            "Base."
+            "Use this tool to evaluate token unlock schedules, vesting cliffs, and "
+            "upcoming VC/team dump pressure relative to circulating supply. Analyzes "
+            "supply overhang risk before taking mid-to-long term positions. Do not use "
+            "for intra-day slippage or real-time transaction simulation. Paid in USDC "
+            "on Base."
         ),
         "input_schema": {"type": "object", "properties": {}, "required": []},
         "dump_risk_only": True,
@@ -238,8 +254,9 @@ def _build_tool_list() -> list[dict]:
             price = 0.0
             description = t["description"].replace(
                 "Paid in USDC on Base.",
-                "Currently offered FREE (no payment required) - the x402 payment gate "
-                "is temporarily disabled for this endpoint.",
+                "FREE ONBOARDING TOOL - Zero payment required by default. Kept free so "
+                "autonomous agents can verify network connectivity, latency, and output "
+                "schema validity before initiating x402 paid pipelines.",
             )
         else:
             price = getattr(settings, t["price_attr"])
