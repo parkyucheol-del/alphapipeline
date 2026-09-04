@@ -75,6 +75,209 @@ _SERVER_INSTRUCTIONS = (
 # input_schema는 app/payment.py의 build_routes()에 등록된 Bazaar discovery
 # extension의 input_schema와 동일한 내용으로 맞췄다(단가/스펙이 REST와 항상
 # 일치하도록 - 이 파일이 별도로 값을 정의하지 않고 그대로 베낀 이유).
+_TIMESTAMP_PAIR_SCHEMA = {
+    "type": "object",
+    "properties": {"utc": {"type": "string"}, "kst": {"type": "string"}},
+    "required": ["utc", "kst"],
+}
+
+_READ_ONLY_ANNOTATIONS = {"readOnlyHint": True, "destructiveHint": False}
+
+KIMCHI_ALERT_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "generated_at": _TIMESTAMP_PAIR_SCHEMA,
+        "symbol": {"type": "string"},
+        "upbit_price_krw": {"type": "number"},
+        "binance_price_usdt": {"type": "number"},
+        "usdkrw_rate_estimate": {"type": "number"},
+        "kimchi_premium_pct": {"type": "number"},
+        "premium_change_1h_pct": {"type": "number"},
+        "alerts": {
+            "type": "object",
+            "properties": {
+                "reverse_premium": {"type": "boolean"},
+                "premium_surge_1h": {"type": "boolean"},
+            },
+            "required": ["reverse_premium", "premium_surge_1h"],
+        },
+        "thresholds": {
+            "type": "object",
+            "properties": {
+                "reverse_premium_pct": {"type": "number"},
+                "surge_1h_pct": {"type": "number"},
+            },
+            "required": ["reverse_premium_pct", "surge_1h_pct"],
+        },
+    },
+    "required": [
+        "generated_at", "symbol", "upbit_price_krw", "binance_price_usdt",
+        "usdkrw_rate_estimate", "kimchi_premium_pct", "premium_change_1h_pct",
+        "alerts", "thresholds",
+    ],
+}
+
+AI_MARKDOWN_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "url": {"type": "string"},
+        "title": {"type": "string"},
+        "markdown": {"type": "string"},
+        "char_count": {"type": "integer"},
+    },
+    "required": ["url", "title", "markdown", "char_count"],
+}
+
+TOKEN_RISK_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "generated_at": _TIMESTAMP_PAIR_SCHEMA,
+        "chain_id": {"type": "integer"},
+        "contract_address": {"type": "string"},
+        "token_name": {"type": ["string", "null"]},
+        "token_symbol": {"type": ["string", "null"]},
+        "is_honeypot": {"type": ["boolean", "null"]},
+        "buy_tax_pct": {"type": ["number", "null"]},
+        "sell_tax_pct": {"type": ["number", "null"]},
+        "is_mintable": {"type": ["boolean", "null"]},
+        "is_open_source": {"type": ["boolean", "null"]},
+        "owner_renounced": {"type": ["boolean", "null"]},
+        "owner_address": {"type": ["string", "null"]},
+        "holder_count": {"type": ["integer", "null"]},
+        "is_in_dex": {"type": ["boolean", "null"]},
+        "risk_level": {"type": "string"},
+        "risk_flags": {"type": "array", "items": {"type": "string"}},
+        "data_source": {"type": "string"},
+        "notice": {"type": ["string", "null"]},
+    },
+    "required": [
+        "generated_at", "chain_id", "contract_address", "risk_level",
+        "risk_flags", "data_source",
+    ],
+}
+
+FUNDING_RATE_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "generated_at": _TIMESTAMP_PAIR_SCHEMA,
+        "symbol": {"type": "string"},
+        "funding_rate": {"type": ["number", "null"]},
+        "funding_rate_percentage": {"type": ["number", "null"]},
+        "predicted_rate": {"type": ["number", "null"]},
+        "next_funding_time": {"anyOf": [_TIMESTAMP_PAIR_SCHEMA, {"type": "null"}]},
+        "funding_interval_hours": {"type": ["integer", "null"]},
+        "data_source": {"type": "string"},
+        "notice": {"type": ["string", "null"]},
+    },
+    "required": ["generated_at", "symbol", "data_source"],
+}
+
+DEX_SLIPPAGE_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "generated_at": _TIMESTAMP_PAIR_SCHEMA,
+        "network": {"type": "string"},
+        "pool_address": {"type": ["string", "null"]},
+        "token_address": {"type": ["string", "null"]},
+        "pool_name": {"type": ["string", "null"]},
+        "liquidity_usd": {"type": ["number", "null"]},
+        "volume_24h_usd": {"type": ["number", "null"]},
+        "trade_size_usd": {"type": "number"},
+        "estimated_slippage_pct": {"type": ["number", "null"]},
+        "price_impact_model": {"type": "string"},
+        "data_source": {"type": "string"},
+        "notice": {"type": ["string", "null"]},
+    },
+    "required": [
+        "generated_at", "network", "trade_size_usd", "price_impact_model",
+        "data_source",
+    ],
+}
+
+MACRO_DDAY_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "generated_at": _TIMESTAMP_PAIR_SCHEMA,
+        "event_name": {"type": ["string", "null"]},
+        "event_type": {"type": ["string", "null"]},
+        "event_datetime": {"anyOf": [_TIMESTAMP_PAIR_SCHEMA, {"type": "null"}]},
+        "d_day": {"type": ["integer", "null"]},
+        "time_remaining": {
+            "anyOf": [
+                {
+                    "type": "object",
+                    "properties": {
+                        "days": {"type": "integer"},
+                        "hours": {"type": "integer"},
+                        "minutes": {"type": "integer"},
+                    },
+                    "required": ["days", "hours", "minutes"],
+                },
+                {"type": "null"},
+            ],
+        },
+        "impact_level": {"type": ["string", "null"]},
+        "tags": {"type": "array", "items": {"type": "string"}},
+        "description": {"type": ["string", "null"]},
+        "upcoming_events": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "event_name": {"type": "string"},
+                    "event_type": {"type": "string"},
+                    "event_datetime": _TIMESTAMP_PAIR_SCHEMA,
+                    "impact_level": {"type": "string"},
+                    "tags": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["event_name", "event_type", "event_datetime", "impact_level"],
+            },
+        },
+        "data_source": {"type": "string"},
+        "notice": {"type": ["string", "null"]},
+    },
+    "required": ["generated_at", "tags", "upcoming_events", "data_source"],
+}
+
+DUMP_RISK_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "generated_at": _TIMESTAMP_PAIR_SCHEMA,
+        "window_days": {"type": ["integer", "null"]},
+        "supply_pct_threshold": {"type": "number"},
+        "protocols_scanned": {"type": "integer"},
+        "count": {"type": "integer"},
+        "unlocks": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "token": {"type": "string"},
+                    "onchain_contract": {"type": ["string", "null"]},
+                    "unlock_date_utc": {"type": ["string", "null"]},
+                    "days_until_unlock": {"type": ["number", "null"]},
+                    "timing_precision": {"type": ["string", "null"]},
+                    "unlock_supply_pct": {"type": "number"},
+                    "unlock_amount": {"type": ["number", "null"]},
+                    "is_insider_vc_team": {"type": ["boolean", "null"]},
+                    "category": {"type": "string"},
+                    "risk_level": {"type": "string"},
+                    "volume_impact_pct": {"type": ["number", "null"]},
+                    "data_source": {"type": ["string", "null"]},
+                },
+                "required": ["token", "unlock_supply_pct", "category", "risk_level"],
+            },
+        },
+        "notice": {"type": ["string", "null"]},
+        "data_source": {"type": ["string", "null"]},
+        "coverage_notice": {"type": ["string", "null"]},
+    },
+    "required": [
+        "generated_at", "supply_pct_threshold", "protocols_scanned", "count",
+        "unlocks",
+    ],
+}
+
 _TOOLS: list[dict] = [
     {
         "name": "kimchi_alert",
@@ -97,6 +300,8 @@ _TOOLS: list[dict] = [
             },
             "required": [],
         },
+        "output_schema": KIMCHI_ALERT_OUTPUT_SCHEMA,
+        "annotations": _READ_ONLY_ANNOTATIONS,
     },
     {
         "name": "ai_markdown",
@@ -120,6 +325,8 @@ _TOOLS: list[dict] = [
             },
             "required": ["url"],
         },
+        "output_schema": AI_MARKDOWN_OUTPUT_SCHEMA,
+        "annotations": _READ_ONLY_ANNOTATIONS,
     },
     {
         "name": "token_risk",
@@ -146,6 +353,8 @@ _TOOLS: list[dict] = [
             },
             "required": ["chain_id", "contract_address"],
         },
+        "output_schema": TOKEN_RISK_OUTPUT_SCHEMA,
+        "annotations": _READ_ONLY_ANNOTATIONS,
     },
     {
         "name": "funding_rate",
@@ -168,6 +377,8 @@ _TOOLS: list[dict] = [
             },
             "required": ["symbol"],
         },
+        "output_schema": FUNDING_RATE_OUTPUT_SCHEMA,
+        "annotations": _READ_ONLY_ANNOTATIONS,
     },
     {
         "name": "dex_liquidity_slippage",
@@ -202,6 +413,8 @@ _TOOLS: list[dict] = [
             },
             "required": ["trade_size_usd"],
         },
+        "output_schema": DEX_SLIPPAGE_OUTPUT_SCHEMA,
+        "annotations": _READ_ONLY_ANNOTATIONS,
     },
     {
         "name": "macro_dday",
@@ -216,6 +429,8 @@ _TOOLS: list[dict] = [
             "No input parameters. Paid in USDC on Base."
         ),
         "input_schema": {"type": "object", "properties": {}, "required": []},
+        "output_schema": MACRO_DDAY_OUTPUT_SCHEMA,
+        "annotations": _READ_ONLY_ANNOTATIONS,
     },
     {
         "name": "dump_risk",
@@ -229,6 +444,8 @@ _TOOLS: list[dict] = [
             "on Base."
         ),
         "input_schema": {"type": "object", "properties": {}, "required": []},
+        "output_schema": DUMP_RISK_OUTPUT_SCHEMA,
+        "annotations": _READ_ONLY_ANNOTATIONS,
         "dump_risk_only": True,
     },
 ]
@@ -266,6 +483,8 @@ def _build_tool_list() -> list[dict]:
                 "name": t["name"],
                 "description": description,
                 "inputSchema": t["input_schema"],
+                "outputSchema": t["output_schema"],
+                "annotations": t["annotations"],
                 "_meta": {
                     "x402": {
                         "price_usdc": price,
