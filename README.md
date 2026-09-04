@@ -6,6 +6,7 @@
 
 **Pay-per-call ($0.005–$0.03 USDC) market/on-chain data API for AI agents and trading bots — no signup, no API key, no OAuth.** Authenticate and pay in a single request via the [x402 protocol](https://docs.x402.org) (HTTP 402) on Base, or call it as a remote MCP server from Claude Desktop, Cursor, or any MCP client.
 
+[![Smithery](https://smithery.ai/badge/@parkyucheol/alphapipeline)](https://smithery.ai/servers/parkyucheol/alphapipeline)
 [![x402 Bazaar](https://img.shields.io/badge/x402-Bazaar-blue)](https://www.x402bazaar.org/)
 [![Glama](https://img.shields.io/badge/Glama-Listed-green)](https://glama.ai/mcp/servers)
 
