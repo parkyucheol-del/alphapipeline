@@ -1,9 +1,5 @@
 <p align="center">
-  <img src="docs/icon.png" width="120" alt="AlphaPipeline icon">
-</p>
-
-<p align="center">
-  <img src="docs/banner.png" width="800" alt="AlphaPipeline banner">
+  <img src="docs/banner.png" alt="AlphaPipeline banner" width="100%">
 </p>
 
 # AlphaPipeline
