@@ -652,8 +652,11 @@ def register_mcp_routes(app: FastAPI) -> None:
             content={
                 "error": "method_not_allowed",
                 "message": (
-                    "이 MCP 서버는 상태 비저장(stateless) Streamable HTTP - POST만 지원합니다. "
-                    "서버가 먼저 보내는 알림이 없어 SSE 스트리밍(GET)은 제공하지 않습니다."
+                    "This MCP server is stateless Streamable HTTP - POST only. There is no "
+                    "SSE streaming (GET) because the server never sends unsolicited "
+                    "notifications. / 이 MCP 서버는 상태 비저장(stateless) Streamable HTTP - "
+                    "POST만 지원합니다. 서버가 먼저 보내는 알림이 없어 SSE 스트리밍(GET)은 "
+                    "제공하지 않습니다."
                 ),
             },
         )

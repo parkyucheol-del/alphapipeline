@@ -152,8 +152,9 @@ async def _refresh_unlock_cache_dropstab() -> dict:
             "count": 0,
             "unlocks": [],
             "notice": (
-                "DROPSTAB_API_KEY가 설정되지 않아 락업 데이터를 가져오지 않았습니다. "
-                "README의 '락업 데이터 소스 변경 이력'을 참고해 DropsTab API 키를 발급받아 .env에 넣어주세요."
+                "DROPSTAB_API_KEY is not set, so unlock data was not fetched. "
+                "See the README's 'Unlock Data Source Change History' section to get a "
+                "DropsTab API key and add it to .env."
             ),
         }
         unlock_cache["dump_risk"] = payload
@@ -281,11 +282,12 @@ async def _refresh_unlock_cache_onchain() -> dict:
         "unlocks": results,
         "data_source": "onchain_sablier",
         "coverage_notice": (
-            "이 데이터는 Sablier 프로토콜로 온체인 베스팅되는 물량만 스캔한 결과입니다. "
-            "다른 방식(커스텀 컨트랙트, 거래소 자체 락업 등)의 락업은 포함되지 않으므로, "
-            "이 목록에 없다고 해서 해당 토큰에 락업이 없다는 뜻은 아닙니다. "
-            "또한 정확한 해제 시점(D-day)은 아직 제공하지 않으며, '현재 잠겨있는 물량 "
-            "비율'만 계산합니다 (timing_precision=pending_schema_verification)."
+            "This data only covers supply vested on-chain via the Sablier protocol. "
+            "Lockups through other mechanisms (custom vesting contracts, exchange-side "
+            "lockups, etc.) are not covered, so a token's absence from this list does "
+            "not mean it has no lockup. Exact unlock timing (D-day) is not yet "
+            "provided; this only computes the 'currently locked' supply ratio "
+            "(timing_precision=pending_schema_verification)."
         ),
     }
     unlock_cache["dump_risk"] = payload
@@ -329,8 +331,9 @@ async def _get_symbol_dump_risk_onchain(symbol: str) -> dict:
             "symbol": symbol,
             "reason": "symbol_not_mapped",
             "message": (
-                f"{symbol}에 대한 CoinGecko 매핑이 없어 컨트랙트 주소/유통량을 조회할 수 없습니다. "
-                "app/data_sources.py의 _COINGECKO_IDS에 추가하면 지원됩니다."
+                f"No CoinGecko mapping exists for {symbol}, so its contract address/"
+                "circulating supply could not be looked up. Add it to _COINGECKO_IDS "
+                "in app/data_sources.py to support it."
             ),
         }
 
@@ -341,7 +344,7 @@ async def _get_symbol_dump_risk_onchain(symbol: str) -> dict:
             "available": False,
             "symbol": symbol,
             "reason": "upstream_error",
-            "message": f"CoinGecko 조회 실패: {e}",
+            "message": f"CoinGecko lookup failed: {e}",
         }
 
     circulating_supply = info.get("circulating_supply")
@@ -351,7 +354,7 @@ async def _get_symbol_dump_risk_onchain(symbol: str) -> dict:
             "available": False,
             "symbol": symbol,
             "reason": "insufficient_token_metadata",
-            "message": f"{symbol}의 유통량 또는 컨트랙트 주소 정보를 CoinGecko에서 얻지 못했습니다.",
+            "message": f"Could not obtain circulating supply or contract address info for {symbol} from CoinGecko.",
         }
 
     total_locked = 0.0
@@ -381,9 +384,10 @@ async def _get_symbol_dump_risk_onchain(symbol: str) -> dict:
             "symbol": symbol,
             "reason": "no_onchain_vesting_found",
             "message": (
-                f"{symbol}에 대해 Sablier 프로토콜로 베스팅되는 활성 스트림을 찾지 못했습니다. "
-                "이는 '락업이 없다'는 뜻이 아니라 '이 방법으로는 못 찾았다'는 뜻입니다 - "
-                "다른 방식(커스텀 컨트랙트, 거래소 자체 락업)의 베스팅은 이 조회로 잡히지 않습니다."
+                f"No active Sablier vesting streams were found for {symbol}. "
+                "This does not mean there is no lockup - it means this method did not "
+                "find one. Vesting via other mechanisms (custom vesting contracts, "
+                "exchange-side lockups) is not detected by this lookup."
             ),
             "generated_at": _timestamp_now(),
         }
@@ -421,7 +425,7 @@ async def get_symbol_dump_risk(symbol: str) -> dict:
             "available": False,
             "symbol": symbol,
             "reason": "invalid_symbol",
-            "message": "symbol 파라미터가 비어 있습니다. 예: 'ATH', 'AO', 'CPOOL'",
+            "message": "The symbol parameter is empty. Example: 'ATH', 'AO', 'CPOOL'",
         }
 
     if not settings.DROPSTAB_API_KEY:
@@ -434,7 +438,7 @@ async def get_symbol_dump_risk(symbol: str) -> dict:
             "available": False,
             "symbol": symbol,
             "reason": "upstream_error",
-            "message": f"DropsTab 조회 실패: {e}",
+            "message": f"DropsTab lookup failed: {e}",
         }
 
     events = _first(detail, "events", "unlocks", "data", "items") or []
@@ -461,7 +465,7 @@ async def get_symbol_dump_risk(symbol: str) -> dict:
             "available": True,
             "symbol": symbol,
             "reason": "no_upcoming_unlock",
-            "message": f"{symbol}에 대한 예정된 락업 해제 이벤트를 찾지 못했습니다.",
+            "message": f"No upcoming unlock events were found for {symbol}.",
         }
 
     upcoming.sort(key=lambda t: t[0])
@@ -607,7 +611,7 @@ async def get_token_risk(chain_id: int, contract_address: str) -> dict:
                 "risk_level": "UNKNOWN",
                 "risk_flags": ["data_unavailable"],
                 "data_source": "none",
-                "notice": f"GoPlus/Honeypot.is 둘 다 조회 실패: {e2}",
+                "notice": f"Both GoPlus and Honeypot.is lookups failed: {e2}",
             }
         honeypot_result = hp.get("honeypotResult") or {}
         simulation = hp.get("simulationResult") or {}
@@ -624,7 +628,7 @@ async def get_token_risk(chain_id: int, contract_address: str) -> dict:
         token_name = token_info.get("name")
         token_symbol = token_info.get("symbol")
         data_source = "honeypot_is"
-        notice = "GoPlus 조회 실패로 Honeypot.is 폴백 데이터를 사용했습니다 (필드 커버리지가 더 좁습니다)."
+        notice = "GoPlus lookup failed; using Honeypot.is fallback data (narrower field coverage)."
 
     flags = []
     if is_honeypot:
@@ -710,9 +714,9 @@ async def get_funding_rate(symbol: str) -> dict:
     """
     normalized = _normalize_futures_symbol(symbol)
     base_notice = (
-        "펀딩비는 다음 정산 시점(next_funding_time)에 적용될 예정 요율입니다. "
-        "Bybit/바이낸스 둘 다 이와 별개의 '예측' 필드를 제공하지 않으므로 "
-        "predicted_rate는 funding_rate와 동일한 값입니다."
+        "The funding rate is the rate that will apply at the next settlement "
+        "(next_funding_time). Neither Bybit nor Binance provides a separate "
+        "'predicted' field, so predicted_rate is always the same value as funding_rate."
     )
 
     try:
@@ -734,15 +738,16 @@ async def get_funding_rate(symbol: str) -> dict:
             data_source = "binance"
             notice = (
                 base_notice
-                + " (Bybit 조회 실패로 바이낸스 폴백 데이터를 사용했습니다 - 이 서버의 IP 대역에서 "
-                "바이낸스가 451로 차단될 수 있어 이 값도 항상 성공하지는 않습니다.)"
+                + " (Bybit lookup failed; using Binance fallback data - Binance may "
+                "return a 451 block on this server's IP range, so this value does "
+                "not always succeed either.)"
             )
         except Exception as e2:
             return {
                 "generated_at": _timestamp_now(),
                 "symbol": normalized,
                 "data_source": "none",
-                "notice": f"Bybit/바이낸스 둘 다 조회 실패: {e2}",
+                "notice": f"Both Bybit and Binance lookups failed: {e2}",
             }
 
     return {
@@ -776,10 +781,12 @@ def _pick_most_liquid_pool(pools: list[dict]) -> dict | None:
 
 
 _DEX_SLIPPAGE_NOTICE = (
-    "슬리피지는 GeckoTerminal이 제공하는 풀의 합산 USD 유동성만으로 계산한 근사치입니다 - "
-    "이 풀이 표준 constant-product(x*y=k) AMM이고 두 토큰이 50:50 비율로 구성되어 있다고 "
-    "가정합니다. Uniswap v3류 집중 유동성 풀이나 스테이블스왑 풀에서는 실제 슬리피지와 "
-    "차이가 클 수 있습니다 - 실제 매매 전 온체인 견적(quote)으로 반드시 재확인하세요."
+    "Slippage is an approximation computed only from the pool's aggregate USD "
+    "liquidity as reported by GeckoTerminal - it assumes the pool is a standard "
+    "constant-product (x*y=k) AMM with the two tokens in a 50:50 ratio. Actual "
+    "slippage can differ significantly for Uniswap v3-style concentrated-liquidity "
+    "pools or stableswap pools - always re-verify with an on-chain quote before "
+    "trading."
 )
 
 
@@ -815,7 +822,7 @@ async def get_dex_liquidity_slippage(
                 "trade_size_usd": trade_size_usd,
                 "price_impact_model": "constant_product_50_50_approximation",
                 "data_source": "none",
-                "notice": f"GeckoTerminal에서 {network}의 {token_address} 토큰에 연결된 풀을 찾지 못했습니다.",
+                "notice": f"No pool linked to token {token_address} on {network} was found on GeckoTerminal.",
             }
         pool_data = best_pool
         resolved_pool_address = (pool_data.get("attributes") or {}).get("address")
@@ -851,7 +858,7 @@ async def get_dex_liquidity_slippage(
             "estimated_slippage_pct": None,
             "price_impact_model": "constant_product_50_50_approximation",
             "data_source": "geckoterminal",
-            "notice": _DEX_SLIPPAGE_NOTICE + " (이 풀의 유동성 데이터를 확인할 수 없어 슬리피지를 계산하지 못했습니다.)",
+            "notice": _DEX_SLIPPAGE_NOTICE + " (Could not compute slippage because this pool's liquidity data is unavailable.)",
         }
 
     half_liquidity_usd = liquidity_usd / 2
@@ -916,10 +923,11 @@ _MACRO_EVENTS_2026 = [
 ]
 
 _MACRO_CALENDAR_NOTICE = (
-    "이 캘린더는 2026년 FOMC 금리 결정, 미국 CPI, 미국 고용지표(NFP) 일정을 공식 "
-    "연준(Fed)/BLS 발표 기준으로 정적으로 내장한 것입니다 - 실시간 외부 API를 호출하지 "
-    "않습니다. 일정은 연준/BLS가 추후 변경할 수 있고 2027년 일정은 아직 포함되어 있지 "
-    "않으니, 중요한 의사결정 전에는 공식 소스(federalreserve.gov, bls.gov)로 재확인하세요."
+    "This calendar statically embeds the 2026 FOMC rate-decision, US CPI, and US "
+    "employment (NFP) schedule based on official Fed/BLS releases - it makes no "
+    "live external API calls. The Fed/BLS may still change these dates, and 2027 "
+    "dates are not yet included, so re-verify with the official sources "
+    "(federalreserve.gov, bls.gov) before any important decision."
 )
 
 
@@ -965,7 +973,8 @@ async def get_macro_calendar_dday() -> dict:
             "upcoming_events": [],
             "data_source": "static_2026_macro_calendar",
             "notice": _MACRO_CALENDAR_NOTICE
-            + " 2026년 내장 일정이 모두 지났습니다 - 다음 세션에서 갱신이 필요합니다.",
+            + " All embedded 2026 events have passed - this calendar needs to be "
+            "updated with next year's schedule.",
         }
 
     nearest_dt, nearest_ev = upcoming_all[0]
