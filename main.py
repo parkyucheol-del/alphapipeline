@@ -97,7 +97,12 @@ async def root():
         "price_per_call_usdc": {
             "/v1/market/kimchi-alert": settings.PRICE_KIMCHI_ALERT_USDC,
             "/v1/tools/ai-markdown": settings.PRICE_AI_MARKDOWN_USDC,
-            "/v1/unlocks/dump-risk": settings.PRICE_DUMP_RISK_USDC,
+            # DUMP_RISK_ENABLED가 실제 과금 여부를 결정하는 것과 동일한 플래그를
+            # 그대로 참조한다 - PRICE_DUMP_RISK_USDC 값과 무관하게 이 필드가 항상
+            # 실제 서빙 상태와 일치하도록 (app/payment.py의 build_routes 참고).
+            "/v1/unlocks/dump-risk": (
+                settings.PRICE_DUMP_RISK_USDC if settings.DUMP_RISK_ENABLED else 0.0
+            ),
             "/v1/security/token-risk": settings.PRICE_TOKEN_RISK_USDC,
             "/v1/derivatives/funding-rate": settings.PRICE_FUNDING_RATE_USDC,
             "/v1/dex/liquidity-slippage": settings.PRICE_DEX_SLIPPAGE_USDC,

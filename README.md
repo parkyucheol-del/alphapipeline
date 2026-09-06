@@ -50,6 +50,10 @@ curl -s https://alphapipeline-eu.onrender.com/v1/market/kimchi-alert?symbol=BTC
 # sign a payment, retry with the PAYMENT-SIGNATURE header attached -> 200 + data
 ```
 
+> **Note for client authors:** this server speaks x402 v2 — the 402 response body is an empty `{}`; the actual payment terms (accepts array, price, asset, pay-to address) are base64-JSON in the `payment-required` response header, not the body. A client written against the older body-shaped convention will get an empty object with no error, not a loud failure. Decode the header instead.
+
+> **Note on `dump_risk`:** it is intentionally free (no x402 payment required) as an onboarding tool. If a third-party discovery catalog (e.g. x402 Bazaar) still shows a stale non-zero price for it from before this change, treat this server's own `/` response and MCP `tools/list` output as the source of truth — they always reflect the live price.
+
 Full protocol reference: [`/llms.txt`](https://alphapipeline-eu.onrender.com/llms.txt) · [x402 docs](https://docs.x402.org)
 
 ---
