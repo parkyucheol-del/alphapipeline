@@ -98,6 +98,7 @@ from x402.server import x402ResourceServer
 from app.config import settings
 from app.schemas import (
     ARB_SPREAD_EXAMPLE,
+    CONTRACT_HEALTH_EXAMPLE,
     DEX_SLIPPAGE_EXAMPLE,
     DUMP_RISK_EXAMPLE,
     FUNDING_APR_EXAMPLE,
@@ -107,6 +108,7 @@ from app.schemas import (
     MARKDOWN_EXAMPLE,
     TOKEN_RISK_EXAMPLE,
     ArbSpreadResponse,
+    ContractHealthAuditResponse,
     DexSlippageResponse,
     DumpRiskResponse,
     FundingAprMatrixResponse,
@@ -320,6 +322,7 @@ def build_routes(dump_risk_enabled: bool) -> dict[str, RouteConfig]:
     ai_markdown_option = _payment_option(settings.PRICE_AI_MARKDOWN_USDC)
     dump_risk_option = _payment_option(settings.PRICE_DUMP_RISK_USDC)
     token_risk_option = _payment_option(settings.PRICE_TOKEN_RISK_USDC)
+    contract_health_option = _payment_option(settings.PRICE_CONTRACT_HEALTH_USDC)
     funding_rate_option = _payment_option(settings.PRICE_FUNDING_RATE_USDC)
     funding_apr_option = _payment_option(settings.PRICE_FUNDING_APR_USDC)
     dex_slippage_option = _payment_option(settings.PRICE_DEX_SLIPPAGE_USDC)
@@ -435,6 +438,42 @@ def build_routes(dump_risk_enabled: bool) -> dict[str, RouteConfig]:
             ),
             service_name="AlphaPipeline Token Risk Scanner",
             tags=["crypto", "security", "honeypot", "token-risk"],
+        ),
+        "GET /v1/security/contract-health-audit": _make_route_config(
+            accepts=[contract_health_option],
+            mime_type="application/json",
+            description=(
+                "LP (liquidity pool) lock/burn audit reusing the same GoPlus data as "
+                "token-risk - checks whether liquidity is locked, burned, or freely "
+                "held by a single wallet, a rug-pull signal token-risk does not cover. "
+                "No qualitative judgment, only GoPlus's own lock/burn numbers. Paid in "
+                "USDC on Base."
+            ),
+            resource=_resource_url("/v1/security/contract-health-audit"),
+            extensions=_bazaar_extension(
+                input_example={
+                    "chain_id": 8453,
+                    "contract_address": "0x532f27101965dd16442e59d40670faf5ebb142e",
+                },
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "chain_id": {
+                            "type": "integer",
+                            "description": "EVM chain id, e.g. 8453 for Base.",
+                        },
+                        "contract_address": {
+                            "type": "string",
+                            "description": "Token contract address (0x...).",
+                        },
+                    },
+                    "required": ["chain_id", "contract_address"],
+                },
+                output_example=CONTRACT_HEALTH_EXAMPLE,
+                output_schema=_inline_schema_defs(ContractHealthAuditResponse.model_json_schema()),
+            ),
+            service_name="AlphaPipeline Contract Health Audit",
+            tags=["crypto", "security", "liquidity", "lp-lock"],
         ),
         "GET /v1/derivatives/funding-rate": _make_route_config(
             accepts=[funding_rate_option],

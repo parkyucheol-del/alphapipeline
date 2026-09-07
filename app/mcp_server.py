@@ -156,6 +156,30 @@ TOKEN_RISK_OUTPUT_SCHEMA = {
     ],
 }
 
+CONTRACT_HEALTH_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "generated_at": _TIMESTAMP_PAIR_SCHEMA,
+        "chain_id": {"type": "integer"},
+        "contract_address": {"type": "string"},
+        "token_name": {"type": ["string", "null"]},
+        "token_symbol": {"type": ["string", "null"]},
+        "lp_total_supply": {"type": ["number", "null"]},
+        "lp_holder_count": {"type": ["integer", "null"]},
+        "lp_locked_pct": {"type": ["number", "null"]},
+        "lp_burned_pct": {"type": ["number", "null"]},
+        "top_unlocked_holder_pct": {"type": ["number", "null"]},
+        "liquidity_health": {"type": "string"},
+        "risk_flags": {"type": "array", "items": {"type": "string"}},
+        "data_source": {"type": "string"},
+        "notice": {"type": ["string", "null"]},
+    },
+    "required": [
+        "generated_at", "chain_id", "contract_address", "liquidity_health",
+        "risk_flags", "data_source",
+    ],
+}
+
 FUNDING_RATE_OUTPUT_SCHEMA = {
     "type": "object",
     "properties": {
@@ -412,6 +436,38 @@ _TOOLS: list[dict] = [
             "required": ["chain_id", "contract_address"],
         },
         "output_schema": TOKEN_RISK_OUTPUT_SCHEMA,
+        "annotations": _READ_ONLY_ANNOTATIONS,
+    },
+    {
+        "name": "security.contract_health_audit",
+        "path": "/v1/security/contract-health-audit",
+        "price_attr": "PRICE_CONTRACT_HEALTH_USDC",
+        "description": (
+            "Use this tool to check whether a token's liquidity pool is locked, "
+            "burned, or freely held by a single wallet before trusting its liquidity - "
+            "a rug-pull signal that security.token_risk does not cover. Reuses the "
+            "same GoPlus data as token_risk (no extra upstream call) and rolls it up "
+            "into a liquidity_health category (LOCKED/PARTIALLY_LOCKED/UNLOCKED/"
+            "NO_LP_DATA). Does not include any qualitative 'suspicious transaction' "
+            "judgment - only GoPlus's own lock/burn numbers. Do not use for honeypot "
+            "or tax checks (use security.token_risk) or market price data. Paid in "
+            "USDC on Base."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "chain_id": {
+                    "type": "integer",
+                    "description": "EVM chain id, e.g. 8453 for Base.",
+                },
+                "contract_address": {
+                    "type": "string",
+                    "description": "Token contract address (0x...).",
+                },
+            },
+            "required": ["chain_id", "contract_address"],
+        },
+        "output_schema": CONTRACT_HEALTH_OUTPUT_SCHEMA,
         "annotations": _READ_ONLY_ANNOTATIONS,
     },
     {

@@ -192,6 +192,51 @@ TOKEN_RISK_EXAMPLE = {
 }
 
 
+class ContractHealthAuditResponse(BaseModel):
+    generated_at: TimestampPair
+    chain_id: int
+    contract_address: str
+    token_name: str | None = None
+    token_symbol: str | None = None
+    lp_total_supply: float | None = None
+    lp_holder_count: int | None = None
+    lp_locked_pct: float | None = None
+    lp_burned_pct: float | None = None
+    top_unlocked_holder_pct: float | None = None
+    liquidity_health: str
+    risk_flags: list[str] = []
+    data_source: str
+    notice: str | None = None
+
+
+CONTRACT_HEALTH_EXAMPLE = {
+    "generated_at": {"utc": "2026-09-07T12:00:00Z", "kst": "2026-09-07 21:00:00 KST"},
+    "chain_id": 8453,
+    "contract_address": "0x532f27101965dd16442e59d40670faf5ebb142e",
+    "token_name": "Example Token",
+    "token_symbol": "EXTKN",
+    "lp_total_supply": 128500.42,
+    "lp_holder_count": 3,
+    "lp_locked_pct": 0.0,
+    "lp_burned_pct": 98.7,
+    "top_unlocked_holder_pct": 1.1,
+    "liquidity_health": "LOCKED",
+    "risk_flags": [],
+    "data_source": "goplus",
+    "notice": (
+        "LP lock/burn detection comes from GoPlus Security's lp_holders field, which "
+        "flags an address as is_locked only when GoPlus recognizes it as a known "
+        "third-party locker contract (e.g. Unicrypt, Team.Finance) - coverage varies by "
+        "chain and is generally weaker outside Ethereum/BSC, so a low lp_locked_pct can "
+        "mean 'actually unlocked' or just 'GoPlus doesn't recognize this locker'. Burn "
+        "addresses are matched against a small known list and are always counted as "
+        "permanently secured. This tool checks LP lock/burn status only - it does not "
+        "re-run the honeypot/tax checks from security.token_risk, and it does not "
+        "evaluate transaction history for suspicious activity. Always cross-verify on a "
+        "block explorer before trusting liquidity as safe."
+    ),
+}
+
 
 class FundingRateResponse(BaseModel):
     generated_at: TimestampPair

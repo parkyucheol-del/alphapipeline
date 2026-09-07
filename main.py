@@ -13,6 +13,7 @@ from app.config import settings
 from app.scheduler import start_scheduler
 from app.logic import (
     get_arb_spread_matrix,
+    get_contract_health_audit,
     get_dex_liquidity_slippage,
     get_dump_risk,
     get_funding_apr_matrix,
@@ -27,6 +28,7 @@ from app.markdown_tool import url_to_markdown
 from app.payment import ACTIVE_NETWORK, USE_CDP_FACILITATOR, build_resource_server, build_routes
 from app.schemas import (
     ArbSpreadResponse,
+    ContractHealthAuditResponse,
     DexSlippageResponse,
     DumpRiskResponse,
     ErrorResponse,
@@ -108,6 +110,7 @@ async def root():
                 settings.PRICE_DUMP_RISK_USDC if settings.DUMP_RISK_ENABLED else 0.0
             ),
             "/v1/security/token-risk": settings.PRICE_TOKEN_RISK_USDC,
+            "/v1/security/contract-health-audit": settings.PRICE_CONTRACT_HEALTH_USDC,
             "/v1/derivatives/funding-rate": settings.PRICE_FUNDING_RATE_USDC,
             "/v1/derivatives/funding-apr-matrix": settings.PRICE_FUNDING_APR_USDC,
             "/v1/dex/liquidity-slippage": settings.PRICE_DEX_SLIPPAGE_USDC,
@@ -125,6 +128,7 @@ async def root():
             "/v1/market/kimchi-alert",
             "/v1/tools/ai-markdown",
             "/v1/security/token-risk",
+            "/v1/security/contract-health-audit",
             "/v1/derivatives/funding-rate",
             "/v1/derivatives/funding-apr-matrix",
             "/v1/dex/liquidity-slippage",
@@ -278,6 +282,41 @@ async def token_risk_endpoint(
         return JSONResponse(content=data)
     except Exception as e:
         logger.exception("token-risk 처리 실패")
+        return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
+
+
+@app.get(
+    "/v1/security/contract-health-audit",
+    tags=["market"],
+    summary="Audit LP lock/burn status for a token contract (GoPlus)",
+    description=(
+        "Use this endpoint to check whether a token's liquidity pool tokens are locked, "
+        "burned, or freely held by a single wallet before trusting its liquidity - a key "
+        "rug-pull signal that security.token_risk does not cover. Reuses the same GoPlus "
+        "Security data as token-risk (no extra upstream call): lp_locked_pct (recognized "
+        "third-party lockers), lp_burned_pct (sent to a known burn address), and "
+        "top_unlocked_holder_pct (largest single non-locked LP holder), rolled up into a "
+        "liquidity_health category (LOCKED / PARTIALLY_LOCKED / UNLOCKED / NO_LP_DATA). "
+        "Deliberately does not include any qualitative 'suspicious transaction' judgment - "
+        "only GoPlus's own numbers. Input: `chain_id` (e.g. 8453 for Base) and "
+        "`contract_address` (required). Has no fallback if GoPlus fails, since Honeypot.is "
+        "does not expose LP lock data."
+    ),
+    responses={
+        200: {"model": ContractHealthAuditResponse, "description": "LP 락업/소각 감사 결과"},
+        402: {"description": "x402 결제 필요"},
+        502: {"model": ErrorResponse, "description": "업스트림(GoPlus) 오류"},
+    },
+)
+async def contract_health_audit_endpoint(
+    chain_id: int = Query(..., description="EVM chain id, e.g. 8453 for Base"),
+    contract_address: str = Query(..., description="Token contract address (0x...)"),
+):
+    try:
+        data = await get_contract_health_audit(chain_id, contract_address)
+        return JSONResponse(content=data)
+    except Exception as e:
+        logger.exception("contract-health-audit 처리 실패")
         return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
 
 

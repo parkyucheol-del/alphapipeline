@@ -673,6 +673,114 @@ async def get_token_risk(chain_id: int, contract_address: str) -> dict:
     }
 
 
+_LP_BURN_ADDRESSES = {
+    "0x0000000000000000000000000000000000dead",
+    "0x000000000000000000000000000000000000dead",
+    "0x0000000000000000000000000000000000000000",
+}
+
+_CONTRACT_HEALTH_NOTICE = (
+    "LP lock/burn detection comes from GoPlus Security's lp_holders field, which "
+    "flags an address as is_locked only when GoPlus recognizes it as a known "
+    "third-party locker contract (e.g. Unicrypt, Team.Finance) - coverage varies by "
+    "chain and is generally weaker outside Ethereum/BSC, so a low lp_locked_pct can "
+    "mean 'actually unlocked' or just 'GoPlus doesn't recognize this locker'. Burn "
+    "addresses are matched against a small known list and are always counted as "
+    "permanently secured. This tool checks LP lock/burn status only - it does not "
+    "re-run the honeypot/tax checks from security.token_risk, and it does not "
+    "evaluate transaction history for suspicious activity. Always cross-verify on a "
+    "block explorer before trusting liquidity as safe."
+)
+
+
+async def get_contract_health_audit(chain_id: int, contract_address: str) -> dict:
+    """
+    token_risk와 동일한 GoPlus Security token_security 응답(추가 업스트림 호출
+    없음)에서 LP(유동성 풀) 보유자의 잠금(is_locked)/소각(burn address) 비율만
+    뽑아서 계산하는 경량 감사 도구. GET /v1/security/contract-health-audit가
+    사용한다 (main.py 참고).
+
+    의도적으로 하지 않는 것: "의심스러운 트랜잭션" 같은 정성적 판단은 절대 하지
+    않는다 - GoPlus가 준 숫자(잠금/소각 비율)만 그대로 계산해서 보여준다.
+    Honeypot.is는 LP 락업 데이터를 제공하지 않으므로 이 도구는 GoPlus 실패 시
+    폴백이 없다.
+    """
+    contract_address = contract_address.lower()
+
+    try:
+        gp = await ds.get_goplus_token_security(chain_id, contract_address)
+    except Exception as e:
+        return {
+            "generated_at": _timestamp_now(),
+            "chain_id": chain_id,
+            "contract_address": contract_address,
+            "liquidity_health": "UNKNOWN",
+            "risk_flags": ["data_unavailable"],
+            "data_source": "none",
+            "notice": f"GoPlus lookup failed (this tool has no fallback source for LP lock data): {e}",
+        }
+
+    token_name = gp.get("token_name") or None
+    token_symbol = gp.get("token_symbol") or None
+
+    try:
+        lp_total_supply = float(gp.get("lp_total_supply") or 0) or None
+    except (TypeError, ValueError):
+        lp_total_supply = None
+
+    lp_holders_raw = gp.get("lp_holders") or []
+    lp_holder_count = len(lp_holders_raw) if lp_holders_raw else None
+
+    locked_pct = 0.0
+    burned_pct = 0.0
+    top_unlocked_holder_pct = 0.0
+    for h in lp_holders_raw:
+        addr = (h.get("address") or "").lower()
+        try:
+            pct = float(h.get("percent") or 0) * 100
+        except (TypeError, ValueError):
+            pct = 0.0
+        is_locked_flag = str(h.get("is_locked")) in ("1", "true", "True")
+        if addr in _LP_BURN_ADDRESSES:
+            burned_pct += pct
+        elif is_locked_flag:
+            locked_pct += pct
+        else:
+            top_unlocked_holder_pct = max(top_unlocked_holder_pct, pct)
+
+    risk_flags: list[str] = []
+    if not lp_holders_raw:
+        liquidity_health = "NO_LP_DATA"
+        risk_flags.append("lp_data_unavailable")
+    else:
+        secured_pct = locked_pct + burned_pct
+        if secured_pct >= 95:
+            liquidity_health = "LOCKED"
+        elif secured_pct >= 50:
+            liquidity_health = "PARTIALLY_LOCKED"
+        else:
+            liquidity_health = "UNLOCKED"
+            risk_flags.append("lp_mostly_unlocked")
+        if top_unlocked_holder_pct >= 50:
+            risk_flags.append("single_holder_concentration")
+
+    return {
+        "generated_at": _timestamp_now(),
+        "chain_id": chain_id,
+        "contract_address": contract_address,
+        "token_name": token_name,
+        "token_symbol": token_symbol,
+        "lp_total_supply": lp_total_supply,
+        "lp_holder_count": lp_holder_count,
+        "lp_locked_pct": round(locked_pct, 2) if lp_holders_raw else None,
+        "lp_burned_pct": round(burned_pct, 2) if lp_holders_raw else None,
+        "top_unlocked_holder_pct": round(top_unlocked_holder_pct, 2) if lp_holders_raw else None,
+        "liquidity_health": liquidity_health,
+        "risk_flags": risk_flags,
+        "data_source": "goplus",
+        "notice": _CONTRACT_HEALTH_NOTICE,
+    }
+
 
 def _normalize_futures_symbol(symbol: str) -> str:
     """예: "BTC" -> "BTCUSDT". 이미 USDT로 끝나면 그대로 둔다."""
