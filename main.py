@@ -125,18 +125,12 @@ async def root():
             "/v1/derivatives/funding-rate",
             "/v1/dex/liquidity-slippage",
             "/v1/calendar/macro-dday",
+            "/v1/arb/spread-matrix",
         ],
         "coming_soon_endpoints": [],
         "docs": "/docs",
         "openapi_spec": "/openapi.json",
         "agent_spec": "/llms.txt",
-    }
-
-@app.get("/.well-known/glama.json")
-async def glama_ownership_claim():
-    return {
-        "$schema": "https://glama.ai/mcp/schemas/connector.json",
-        "claim": "glama_claim_M21at8rE1D9IcJCwgzNUJYhlfxPoXNL8",
     }
 
 
