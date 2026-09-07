@@ -262,6 +262,26 @@ FUNDING_APR_EXAMPLE = {
 
 
 
+class SlippageTier(BaseModel):
+    trade_size_usd: float = Field(
+        description="Fixed hypothetical trade size in USD for this tier ($1,000 / $5,000 / $10,000)."
+    )
+    estimated_price_impact_pct: float | None = Field(
+        default=None,
+        description=(
+            "Estimated price impact percentage at this trade size, using the same "
+            "constant-product (x*y=k) 50:50 approximation as estimated_slippage_pct."
+        ),
+    )
+    warning_level: str | None = Field(
+        default=None,
+        description=(
+            "Heuristic risk label for this tier: LOW (<1% impact), MEDIUM (1-3%), or "
+            "HIGH (>3%). This is AlphaPipeline's own threshold, not an industry standard."
+        ),
+    )
+
+
 class DexSlippageResponse(BaseModel):
     generated_at: TimestampPair
     network: str
@@ -273,6 +293,14 @@ class DexSlippageResponse(BaseModel):
     trade_size_usd: float
     estimated_slippage_pct: float | None = None
     price_impact_model: str
+    slippage_tiers: list[SlippageTier] | None = Field(
+        default=None,
+        description=(
+            "Fixed $1,000/$5,000/$10,000 price-impact tiers computed from the same pool "
+            "liquidity data, independent of the trade_size_usd query parameter - lets an "
+            "agent gauge depth at a glance without multiple calls."
+        ),
+    )
     data_source: str
     notice: str | None = None
 
@@ -288,12 +316,22 @@ DEX_SLIPPAGE_EXAMPLE = {
     "trade_size_usd": 10000.0,
     "estimated_slippage_pct": 0.08,
     "price_impact_model": "constant_product_50_50_approximation",
+    "slippage_tiers": [
+        {"trade_size_usd": 1000.0, "estimated_price_impact_pct": 0.008, "warning_level": "LOW"},
+        {"trade_size_usd": 5000.0, "estimated_price_impact_pct": 0.04, "warning_level": "LOW"},
+        {"trade_size_usd": 10000.0, "estimated_price_impact_pct": 0.08, "warning_level": "LOW"},
+    ],
     "data_source": "geckoterminal",
     "notice": (
-        "슬리피지는 GeckoTerminal이 제공하는 풀의 합산 USD 유동성만으로 계산한 근사치입니다 - "
-        "이 풀이 표준 constant-product(x*y=k) AMM이고 두 토큰이 50:50 비율로 구성되어 있다고 "
-        "가정합니다. Uniswap v3류 집중 유동성 풀이나 스테이블스왑 풀에서는 실제 슬리피지와 "
-        "차이가 클 수 있습니다 - 실제 매매 전 온체인 견적(quote)으로 반드시 재확인하세요."
+        "Slippage is an approximation computed only from the pool's aggregate USD "
+        "liquidity as reported by GeckoTerminal - it assumes the pool is a standard "
+        "constant-product (x*y=k) AMM with the two tokens in a 50:50 ratio. Actual "
+        "slippage can differ significantly for Uniswap v3-style concentrated-liquidity "
+        "pools or stableswap pools - always re-verify with an on-chain quote before "
+        "trading. slippage_tiers uses the same approximation at three fixed sizes "
+        "regardless of the trade_size_usd you passed in; warning_level thresholds (LOW "
+        "<1%, MEDIUM 1-3%, HIGH >3%) are AlphaPipeline's own heuristic, not an industry "
+        "standard."
     ),
 }
 

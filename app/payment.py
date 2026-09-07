@@ -502,7 +502,8 @@ def build_routes(dump_risk_enabled: bool) -> dict[str, RouteConfig]:
             accepts=[dex_slippage_option],
             mime_type="application/json",
             description=(
-                "GeckoTerminal-backed DEX pool liquidity and estimated trade slippage - "
+                "GeckoTerminal-backed DEX pool liquidity and estimated trade slippage, "
+                "plus fixed $1k/$5k/$10k slippage_tiers for at-a-glance depth checks - "
                 "size a trade or compare pools before swapping, with a clearly-flagged "
                 "constant-product approximation model. Paid in USDC on Base."
             ),

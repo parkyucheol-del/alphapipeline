@@ -337,7 +337,7 @@ async def funding_rate_endpoint(symbol: str = Query(..., description="e.g. BTC, 
 async def funding_apr_matrix_endpoint(
     symbol: str = Query(..., description="e.g. BTC, ETH, or BTCUSDT"),
     assumed_round_trip_cost_pct: float = Query(
-        0.2, description="Combined entry+exit trading fee %% across both legs, used for breakeven_days"
+        0.2, description="Combined entry+exit trading fee % across both legs, used for breakeven_days"
     ),
 ):
     try:
@@ -356,14 +356,17 @@ async def funding_apr_matrix_endpoint(
         "Use this endpoint when you need to size a trade or check whether a DEX pool has "
         "enough depth before swapping - call it before executing a swap to estimate price "
         "impact, or when comparing pools for a given token. Returns the pool's total USD "
-        "liquidity, 24h volume, and an ESTIMATED slippage percentage for a given trade size, "
-        "computed under a documented approximation (see notice) since GeckoTerminal's free "
+        "liquidity, 24h volume, an ESTIMATED slippage percentage for the given trade size, "
+        "and a slippage_tiers array with the same estimate at fixed $1,000/$5,000/$10,000 "
+        "sizes (independent of trade_size_usd) so an agent can gauge depth at a glance. "
+        "Computed under a documented approximation (see notice) since GeckoTerminal's free "
         "API only exposes combined USD liquidity, not per-token reserve amounts. Input: "
         "`network` (e.g. base, eth - default base), `trade_size_usd` (required), and either "
         "`pool_address` (a specific pool) or `token_address` (the most liquid pool for that "
         "token is selected automatically) - one of the two is required. Do not treat "
-        "estimated_slippage_pct as an exact on-chain quote - always re-verify with a live "
-        "quote before executing, especially for concentrated-liquidity or stableswap pools."
+        "estimated_slippage_pct or slippage_tiers as an exact on-chain quote - always "
+        "re-verify with a live quote before executing, especially for concentrated-liquidity "
+        "or stableswap pools."
     ),
     responses={
         200: {"model": DexSlippageResponse, "description": "DEX 유동성/슬리피지 추정 데이터"},

@@ -69,7 +69,7 @@ Full protocol reference: [`/llms.txt`](https://alphapipeline-eu.onrender.com/llm
 | `security.token_risk` | `GET /v1/security/token-risk` | $0.02 | GoPlus/Honeypot.is-backed contract security check — honeypot flag, buy/sell tax, mintability, ownership renouncement. |
 | `derivatives.funding_rate` | `GET /v1/derivatives/funding-rate` | $0.01 | Bybit (primary) / Binance (fallback) perpetual futures funding rate. |
 | `derivatives.funding_apr_matrix` | `GET /v1/derivatives/funding-apr-matrix` | $0.01 | Annualizes the current funding rate into an APR and computes carry-trade breakeven days against an assumed round-trip trading cost. |
-| `dex.liquidity_slippage` | `GET /v1/dex/liquidity-slippage` | $0.02 | GeckoTerminal-backed DEX pool liquidity and estimated trade slippage. |
+| `dex.liquidity_slippage` | `GET /v1/dex/liquidity-slippage` | $0.02 | GeckoTerminal-backed DEX pool liquidity and estimated trade slippage, plus fixed $1k/$5k/$10k `slippage_tiers` for at-a-glance depth checks. |
 | `arb.spread_matrix` | `GET /v1/arb/spread-matrix` | $0.02 | CEX (Coinbase spot) vs DEX (GeckoTerminal) spread calculator with gas-adjusted profitability flag. |
 | `calendar.macro_dday` | `GET /v1/calendar/macro-dday` | $0.01 | Countdown to the nearest major US macro event (FOMC, CPI, NFP) from a static, pre-loaded calendar — no external API call, never fails on an upstream outage. |
 | `unlocks.dump_risk` | `GET /v1/unlocks/dump-risk` | **Free** | On-chain (Sablier) proxy for token unlock/vesting dump risk. Kept free by default as an onboarding tool so agents can verify the service before paying for the rest. |

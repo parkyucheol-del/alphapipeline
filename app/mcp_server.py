@@ -204,6 +204,18 @@ DEX_SLIPPAGE_OUTPUT_SCHEMA = {
         "trade_size_usd": {"type": "number"},
         "estimated_slippage_pct": {"type": ["number", "null"]},
         "price_impact_model": {"type": "string"},
+        "slippage_tiers": {
+            "type": ["array", "null"],
+            "items": {
+                "type": "object",
+                "properties": {
+                    "trade_size_usd": {"type": "number"},
+                    "estimated_price_impact_pct": {"type": ["number", "null"]},
+                    "warning_level": {"type": ["string", "null"]},
+                },
+                "required": ["trade_size_usd"],
+            },
+        },
         "data_source": {"type": "string"},
         "notice": {"type": ["string", "null"]},
     },
@@ -467,8 +479,11 @@ _TOOLS: list[dict] = [
             "Use this tool to calculate expected DEX price slippage, pool liquidity "
             "depth, and optimal routing before executing an on-chain token swap. "
             "GeckoTerminal-backed pool analytics with constant-product slippage "
-            "estimation. Do not use for centralized exchange (CEX) orderbooks or "
-            "contract risk analysis. Paid in USDC on Base."
+            "estimation for the requested trade_size_usd, plus a slippage_tiers array "
+            "with the same estimate at fixed $1,000/$5,000/$10,000 sizes so an agent "
+            "can gauge depth at a glance without extra calls. Do not use for "
+            "centralized exchange (CEX) orderbooks or contract risk analysis. Paid in "
+            "USDC on Base."
         ),
         "input_schema": {
             "type": "object",

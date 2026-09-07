@@ -876,8 +876,35 @@ _DEX_SLIPPAGE_NOTICE = (
     "constant-product (x*y=k) AMM with the two tokens in a 50:50 ratio. Actual "
     "slippage can differ significantly for Uniswap v3-style concentrated-liquidity "
     "pools or stableswap pools - always re-verify with an on-chain quote before "
-    "trading."
+    "trading. slippage_tiers uses the same approximation at three fixed trade sizes "
+    "regardless of the trade_size_usd you passed in; warning_level thresholds (LOW "
+    "<1%, MEDIUM 1-3%, HIGH >3%) are AlphaPipeline's own heuristic, not an industry "
+    "standard."
 )
+
+_SLIPPAGE_TIER_SIZES_USD = (1000.0, 5000.0, 10000.0)
+
+
+def _compute_slippage_tiers(half_liquidity_usd: float) -> list[dict]:
+    """고정 $1k/$5k/$10k 구간에 대해 동일한 constant-product 근사로 가격 충격을
+    계산하고, 자체 휴리스틱(LOW<1%/MEDIUM<3%/HIGH>=3%) 경고 등급을 붙인다."""
+    tiers = []
+    for size in _SLIPPAGE_TIER_SIZES_USD:
+        impact_pct = (size / (half_liquidity_usd + size)) * 100
+        if impact_pct < 1:
+            warning_level = "LOW"
+        elif impact_pct < 3:
+            warning_level = "MEDIUM"
+        else:
+            warning_level = "HIGH"
+        tiers.append(
+            {
+                "trade_size_usd": size,
+                "estimated_price_impact_pct": round(impact_pct, 4),
+                "warning_level": warning_level,
+            }
+        )
+    return tiers
 
 
 async def get_dex_liquidity_slippage(
@@ -911,6 +938,7 @@ async def get_dex_liquidity_slippage(
                 "token_address": token_address,
                 "trade_size_usd": trade_size_usd,
                 "price_impact_model": "constant_product_50_50_approximation",
+                "slippage_tiers": None,
                 "data_source": "none",
                 "notice": f"No pool linked to token {token_address} on {network} was found on GeckoTerminal.",
             }
@@ -947,6 +975,7 @@ async def get_dex_liquidity_slippage(
             "trade_size_usd": trade_size_usd,
             "estimated_slippage_pct": None,
             "price_impact_model": "constant_product_50_50_approximation",
+            "slippage_tiers": None,
             "data_source": "geckoterminal",
             "notice": _DEX_SLIPPAGE_NOTICE + " (Could not compute slippage because this pool's liquidity data is unavailable.)",
         }
@@ -965,6 +994,7 @@ async def get_dex_liquidity_slippage(
         "trade_size_usd": trade_size_usd,
         "estimated_slippage_pct": round(estimated_slippage_pct, 4),
         "price_impact_model": "constant_product_50_50_approximation",
+        "slippage_tiers": _compute_slippage_tiers(half_liquidity_usd),
         "data_source": "geckoterminal",
         "notice": _DEX_SLIPPAGE_NOTICE,
     }
