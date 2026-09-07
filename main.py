@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from app.config import settings
 from app.scheduler import start_scheduler
 from app.logic import (
+    get_arb_spread_matrix,
     get_dex_liquidity_slippage,
     get_dump_risk,
     get_funding_rate,
@@ -24,6 +25,7 @@ from app.llms_txt import build_llms_txt
 from app.markdown_tool import url_to_markdown
 from app.payment import ACTIVE_NETWORK, USE_CDP_FACILITATOR, build_resource_server, build_routes
 from app.schemas import (
+    ArbSpreadResponse,
     DexSlippageResponse,
     DumpRiskResponse,
     ErrorResponse,
@@ -107,6 +109,7 @@ async def root():
             "/v1/derivatives/funding-rate": settings.PRICE_FUNDING_RATE_USDC,
             "/v1/dex/liquidity-slippage": settings.PRICE_DEX_SLIPPAGE_USDC,
             "/v1/calendar/macro-dday": settings.PRICE_MACRO_DDAY_USDC,
+            "/v1/arb/spread-matrix": settings.PRICE_ARB_SPREAD_USDC,
         },
         "payment": {
             "protocol": "x402",
@@ -352,6 +355,56 @@ async def dex_liquidity_slippage_endpoint(
         return JSONResponse(content=data)
     except Exception as e:
         logger.exception("dex-liquidity-slippage 처리 실패")
+        return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
+
+
+@app.get(
+    "/v1/arb/spread-matrix",
+    tags=["market"],
+    summary="CEX-DEX arbitrage spread calculator",
+    description=(
+        "Use this endpoint before executing a cross-venue arbitrage trade to check "
+        "whether a global reference price (Coinbase spot, CoinGecko fallback - NOT a "
+        "specific exchange orderbook) and a DEX pool price (GeckoTerminal) diverge enough "
+        "to be worth trading after an assumed flat gas cost. Returns gross/net spread "
+        "percentages, a direction flag, and an is_profitable boolean against your "
+        "min_spread_threshold_pct. Input: `symbol` (required), `network` (default base), "
+        "`trade_size_usd` (default 1000), `min_spread_threshold_pct` (default 0.8), and "
+        "either `pool_address` or `token_address` (most liquid pool auto-selected) - one "
+        "of the two is required. Does not account for CEX deposit/withdrawal "
+        "availability, trading fees, or slippage beyond trade_size_usd - always "
+        "re-verify with live quotes before executing."
+    ),
+    responses={
+        200: {"model": ArbSpreadResponse, "description": "차익거래 스프레드 계산 결과"},
+        402: {"description": "x402 결제 필요"},
+        502: {"model": ErrorResponse, "description": "업스트림(Coinbase/CoinGecko/GeckoTerminal) 오류 또는 입력 오류"},
+    },
+)
+async def arb_spread_matrix_endpoint(
+    symbol: str = Query(..., description="Ticker symbol, e.g. SUI, BTC, ETH"),
+    network: str = Query("base", description="GeckoTerminal network id, e.g. base, eth"),
+    trade_size_usd: float = Query(1000.0, description="Hypothetical trade size in USD"),
+    min_spread_threshold_pct: float = Query(
+        0.8, description="Net spread threshold (%) above which is_profitable is true"
+    ),
+    pool_address: str | None = Query(None, description="Specific DEX pool contract address"),
+    token_address: str | None = Query(
+        None, description="Token contract address (picks the most liquid pool automatically)"
+    ),
+):
+    try:
+        data = await get_arb_spread_matrix(
+            symbol=symbol,
+            network=network,
+            trade_size_usd=trade_size_usd,
+            pool_address=pool_address,
+            token_address=token_address,
+            min_spread_threshold_pct=min_spread_threshold_pct,
+        )
+        return JSONResponse(content=data)
+    except Exception as e:
+        logger.exception("arb-spread-matrix 처리 실패")
         return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
 
 

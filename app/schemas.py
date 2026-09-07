@@ -257,6 +257,54 @@ DEX_SLIPPAGE_EXAMPLE = {
         "차이가 클 수 있습니다 - 실제 매매 전 온체인 견적(quote)으로 반드시 재확인하세요."
     ),
 }
+
+
+class ArbSpreadResponse(BaseModel):
+    generated_at: TimestampPair
+    symbol: str
+    network: str
+    pool_address: str | None = None
+    status_message: str
+    is_profitable: bool
+    gross_spread_pct: float | None = None
+    net_spread_pct: float | None = None
+    direction: str | None = None
+    cex_price_usd: float | None = None
+    dex_price_usd: float | None = None
+    trade_size_usd: float
+    assumed_gas_cost_usd: float
+    min_spread_threshold_pct: float
+    data_source: str
+    notice: str | None = None
+
+
+ARB_SPREAD_EXAMPLE = {
+    "generated_at": {"utc": "2026-09-07T12:00:00Z", "kst": "2026-09-07 21:00:00 KST"},
+    "symbol": "SUI",
+    "network": "base",
+    "pool_address": "0x4a3636608d7bc5776cb19eb72caa36ebb9bd9e5b",
+    "status_message": "Spread is 0.45%, below 0.8% threshold (Unprofitable).",
+    "is_profitable": False,
+    "gross_spread_pct": 0.52,
+    "net_spread_pct": 0.45,
+    "direction": "DEX_TO_CEX",
+    "cex_price_usd": 3.521,
+    "dex_price_usd": 3.503,
+    "trade_size_usd": 1000.0,
+    "assumed_gas_cost_usd": 0.05,
+    "min_spread_threshold_pct": 0.8,
+    "data_source": "coinbase+geckoterminal",
+    "notice": (
+        "CEX-side price is Coinbase spot (CoinGecko fallback), not a specific exchange "
+        "orderbook - it does not reflect actual tradable depth on any single exchange. "
+        "DEX-side price is read from GeckoTerminal's pool price fields. net_spread_pct "
+        "only subtracts an assumed flat gas cost - it excludes CEX deposit/withdrawal "
+        "availability, trading fees, and slippage beyond trade_size_usd. Re-verify with "
+        "live quotes before executing a real trade."
+    ),
+}
+
+
 class TimeRemaining(BaseModel):
     days: int
     hours: int

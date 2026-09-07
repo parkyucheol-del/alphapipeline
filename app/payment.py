@@ -97,6 +97,7 @@ from x402.server import x402ResourceServer
 
 from app.config import settings
 from app.schemas import (
+    ARB_SPREAD_EXAMPLE,
     DEX_SLIPPAGE_EXAMPLE,
     DUMP_RISK_EXAMPLE,
     FUNDING_RATE_EXAMPLE,
@@ -104,6 +105,7 @@ from app.schemas import (
     MACRO_DDAY_EXAMPLE,
     MARKDOWN_EXAMPLE,
     TOKEN_RISK_EXAMPLE,
+    ArbSpreadResponse,
     DexSlippageResponse,
     DumpRiskResponse,
     FundingRateResponse,
@@ -318,6 +320,7 @@ def build_routes(dump_risk_enabled: bool) -> dict[str, RouteConfig]:
     token_risk_option = _payment_option(settings.PRICE_TOKEN_RISK_USDC)
     funding_rate_option = _payment_option(settings.PRICE_FUNDING_RATE_USDC)
     dex_slippage_option = _payment_option(settings.PRICE_DEX_SLIPPAGE_USDC)
+    arb_spread_option = _payment_option(settings.PRICE_ARB_SPREAD_USDC)
 
     macro_dday_option = _payment_option(settings.PRICE_MACRO_DDAY_USDC)
     routes: dict[str, RouteConfig] = {
@@ -499,6 +502,59 @@ def build_routes(dump_risk_enabled: bool) -> dict[str, RouteConfig]:
             ),
             service_name="AlphaPipeline DEX Slippage",
             tags=["crypto", "dex", "liquidity", "slippage"],
+        ),
+        "GET /v1/arb/spread-matrix": _make_route_config(
+            accepts=[arb_spread_option],
+            mime_type="application/json",
+            description=(
+                "CEX-DEX arbitrage spread calculator - compares a global reference price "
+                "(Coinbase spot, CoinGecko fallback) against a DEX pool price and returns "
+                "gross/net spread and an is_profitable flag after an assumed gas cost. "
+                "Paid in USDC on Base."
+            ),
+            resource=_resource_url("/v1/arb/spread-matrix"),
+            extensions=_bazaar_extension(
+                input_example={
+                    "symbol": "SUI",
+                    "network": "base",
+                    "token_address": "0x0000000000000000000000000000000000000000",
+                    "trade_size_usd": 1000,
+                },
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "symbol": {
+                            "type": "string",
+                            "description": "Ticker symbol, e.g. SUI, BTC, ETH.",
+                        },
+                        "network": {
+                            "type": "string",
+                            "description": "GeckoTerminal network id, e.g. base, eth. Defaults to base.",
+                        },
+                        "trade_size_usd": {
+                            "type": "number",
+                            "description": "Hypothetical trade size in USD. Defaults to 1000.",
+                        },
+                        "min_spread_threshold_pct": {
+                            "type": "number",
+                            "description": "Net spread threshold (%) above which is_profitable is true. Defaults to 0.8.",
+                        },
+                        "pool_address": {
+                            "type": "string",
+                            "description": "Specific DEX pool contract address (optional if token_address is given).",
+                        },
+                        "token_address": {
+                            "type": "string",
+                            "description": "Token contract address - the most liquid pool is auto-selected (optional if pool_address is given).",
+                        },
+                    },
+                    "required": ["symbol"],
+                },
+                output_example=ARB_SPREAD_EXAMPLE,
+                output_schema=_inline_schema_defs(ArbSpreadResponse.model_json_schema()),
+            ),
+            service_name="AlphaPipeline Arb Spread",
+            tags=["crypto", "arbitrage", "cex", "dex"],
         ),
     }
     if dump_risk_enabled:

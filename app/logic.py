@@ -878,6 +878,178 @@ async def get_dex_liquidity_slippage(
         "data_source": "geckoterminal",
         "notice": _DEX_SLIPPAGE_NOTICE,
     }
+
+
+_ARB_SPREAD_NOTICE = (
+    "CEX-side price is Coinbase spot (CoinGecko fallback), not a specific exchange "
+    "orderbook - it does not reflect actual tradable depth on any single exchange. "
+    "DEX-side price is read from GeckoTerminal's pool price fields. net_spread_pct "
+    "only subtracts an assumed flat gas cost - it excludes CEX deposit/withdrawal "
+    "availability, trading fees, and slippage beyond trade_size_usd. Re-verify with "
+    "live quotes before executing a real trade."
+)
+
+# 체인별 표준 스왑 1회 가스비 추정치(USD). base가 기본이고, 그 외 체인은
+# 보수적으로 더 높은 기본값을 쓴다 - 나중에 체인이 늘어나면 이 딕셔너리에
+# 추가하기만 하면 된다 (다른 로직 변경 불필요).
+_ASSUMED_GAS_COST_USD = {"base": 0.05}
+_DEFAULT_GAS_COST_USD = 0.5
+
+
+def _extract_dex_token_price_usd(pool_data: dict, token_address: str | None) -> float | None:
+    """
+    GeckoTerminal 풀 데이터에서 우리가 원하는 토큰 쪽의 USD 가격을 뽑아낸다.
+
+    GeckoTerminal 풀 응답은 토큰을 base/quote 두 역할로 나눠서 각각의 가격을
+    attributes.base_token_price_usd / quote_token_price_usd에 담아준다. 어느 쪽이
+    우리가 찾는 token_address인지는 relationships.base_token/quote_token.data.id
+    (형식: "{network}_{address}")를 target 주소와 대소문자 무시 비교해서 판별한다.
+    token_address가 없을 때(pool_address로 직접 조회한 경우)는 base_token 가격을
+    기본값으로 쓴다 - 어느 쪽이 우리가 원하는 토큰인지 알 방법이 없기 때문이다.
+    """
+    attrs = pool_data.get("attributes") or {}
+    relationships = pool_data.get("relationships") or {}
+
+    if token_address:
+        target = token_address.lower()
+        base_id = ((relationships.get("base_token") or {}).get("data") or {}).get("id", "") or ""
+        quote_id = ((relationships.get("quote_token") or {}).get("data") or {}).get("id", "") or ""
+        if target in base_id.lower():
+            price = attrs.get("base_token_price_usd")
+        elif target in quote_id.lower():
+            price = attrs.get("quote_token_price_usd")
+        else:
+            price = attrs.get("base_token_price_usd")
+    else:
+        price = attrs.get("base_token_price_usd")
+
+    try:
+        price = float(price)
+    except (TypeError, ValueError):
+        return None
+    return price if price > 0 else None
+
+
+async def get_arb_spread_matrix(
+    symbol: str,
+    network: str = "base",
+    trade_size_usd: float = 1000.0,
+    pool_address: str | None = None,
+    token_address: str | None = None,
+    min_spread_threshold_pct: float = 0.8,
+) -> dict:
+    """
+    글로벌 기준가(Coinbase 현물, CoinGecko 폴백) vs DEX 풀 가격의 차익거래
+    스프레드를 계산한다. GET /v1/arb/spread-matrix가 사용한다 (main.py 참고).
+
+    dex_liquidity_slippage와 동일한 패턴으로 pool_address 또는 token_address
+    중 하나만 받고, token_address만 주어지면 가장 유동성 큰 풀을 자동으로
+    고른다(_pick_most_liquid_pool 재사용).
+
+    정직하게 밝혀둘 한계: "CEX 가격"은 특정 거래소 오더북이 아니라 코인베이스
+    현물가(폴백: CoinGecko)다 - get_binance_price_usdt라는 함수명과 달리 실제
+    바이낸스를 호출하지 않는다(과거 바이낸스 지역차단(451) 이슈로 코인베이스로
+    전환됨, app/data_sources.py 참고). 그래서 이 스프레드는 "실제로 특정
+    거래소에 지금 이 가격에 넣을 수 있는 주문이 있다"는 보장이 아니라 참고용
+    기준가 차이일 뿐이다 - notice 필드에 이 사실을 항상 명시한다.
+    """
+    if not pool_address and not token_address:
+        raise ValueError("pool_address 또는 token_address 중 하나는 반드시 필요합니다")
+
+    symbol_upper = symbol.upper().strip()
+
+    try:
+        cex_price_usd = await ds.get_binance_price_usdt(f"{symbol_upper}USDT")
+    except Exception as e:
+        return {
+            "generated_at": _timestamp_now(),
+            "symbol": symbol_upper,
+            "network": network,
+            "pool_address": pool_address,
+            "status_message": f"Could not fetch CEX-side price for {symbol_upper}: {e}",
+            "is_profitable": False,
+            "trade_size_usd": trade_size_usd,
+            "assumed_gas_cost_usd": _ASSUMED_GAS_COST_USD.get(network, _DEFAULT_GAS_COST_USD),
+            "min_spread_threshold_pct": min_spread_threshold_pct,
+            "data_source": "none",
+            "notice": _ARB_SPREAD_NOTICE,
+        }
+
+    resolved_pool_address = pool_address
+    if not pool_address:
+        pools = await ds.get_geckoterminal_pools_for_token(network, token_address)
+        best_pool = _pick_most_liquid_pool(pools)
+        if not best_pool:
+            return {
+                "generated_at": _timestamp_now(),
+                "symbol": symbol_upper,
+                "network": network,
+                "pool_address": None,
+                "status_message": f"No DEX pool linked to token {token_address} on {network} was found on GeckoTerminal.",
+                "is_profitable": False,
+                "trade_size_usd": trade_size_usd,
+                "assumed_gas_cost_usd": _ASSUMED_GAS_COST_USD.get(network, _DEFAULT_GAS_COST_USD),
+                "min_spread_threshold_pct": min_spread_threshold_pct,
+                "data_source": "none",
+                "notice": _ARB_SPREAD_NOTICE,
+            }
+        pool_data = best_pool
+        resolved_pool_address = (pool_data.get("attributes") or {}).get("address")
+    else:
+        pool_data = await ds.get_geckoterminal_pool(network, pool_address)
+
+    dex_price_usd = _extract_dex_token_price_usd(pool_data, token_address)
+    gas_cost_usd = _ASSUMED_GAS_COST_USD.get(network, _DEFAULT_GAS_COST_USD)
+
+    if not dex_price_usd or not cex_price_usd or cex_price_usd <= 0:
+        return {
+            "generated_at": _timestamp_now(),
+            "symbol": symbol_upper,
+            "network": network,
+            "pool_address": resolved_pool_address,
+            "status_message": "Could not compute spread - DEX pool price data is unavailable.",
+            "is_profitable": False,
+            "cex_price_usd": cex_price_usd or None,
+            "dex_price_usd": dex_price_usd,
+            "trade_size_usd": trade_size_usd,
+            "assumed_gas_cost_usd": gas_cost_usd,
+            "min_spread_threshold_pct": min_spread_threshold_pct,
+            "data_source": "geckoterminal" if dex_price_usd is None else "coinbase+geckoterminal",
+            "notice": _ARB_SPREAD_NOTICE,
+        }
+
+    gross_spread_pct = ((cex_price_usd - dex_price_usd) / dex_price_usd) * 100
+    direction = "DEX_TO_CEX" if gross_spread_pct >= 0 else "CEX_TO_DEX"
+    gas_cost_pct = (gas_cost_usd / trade_size_usd) * 100 if trade_size_usd > 0 else 0.0
+    net_spread_pct = abs(gross_spread_pct) - gas_cost_pct
+    is_profitable = net_spread_pct >= min_spread_threshold_pct
+
+    status_message = (
+        f"Spread is {net_spread_pct:.2f}%, "
+        f"{'meets' if is_profitable else 'below'} {min_spread_threshold_pct}% threshold "
+        f"({'Profitable' if is_profitable else 'Unprofitable'})."
+    )
+
+    return {
+        "generated_at": _timestamp_now(),
+        "symbol": symbol_upper,
+        "network": network,
+        "pool_address": resolved_pool_address,
+        "status_message": status_message,
+        "is_profitable": is_profitable,
+        "gross_spread_pct": round(gross_spread_pct, 4),
+        "net_spread_pct": round(net_spread_pct, 4),
+        "direction": direction,
+        "cex_price_usd": round(cex_price_usd, 8),
+        "dex_price_usd": round(dex_price_usd, 8),
+        "trade_size_usd": trade_size_usd,
+        "assumed_gas_cost_usd": gas_cost_usd,
+        "min_spread_threshold_pct": min_spread_threshold_pct,
+        "data_source": "coinbase+geckoterminal",
+        "notice": _ARB_SPREAD_NOTICE,
+    }
+
+
 # 2026년 FOMC(연준 금리 결정) / CPI(미국 소비자물가지수) /
 # NFP(미국 고용지표, Employment Situation) 정적 일정표.
 # 출처: federalreserve.gov/monetarypolicy/fomccalendars.htm (FOMC),

@@ -42,6 +42,7 @@ class Settings:
     PRICE_DEX_SLIPPAGE_USDC: float = float(os.getenv("PRICE_DEX_SLIPPAGE_USDC", "0.02"))
     PRICE_MACRO_DDAY_USDC: float = float(os.getenv("PRICE_MACRO_DDAY_USDC", "0.01"))
     PRICE_TOKEN_RISK_USDC: float = float(os.getenv("PRICE_TOKEN_RISK_USDC", "0.02"))
+    PRICE_ARB_SPREAD_USDC: float = float(os.getenv("PRICE_ARB_SPREAD_USDC", "0.02"))
 
     # ===== x402 공식 결제 레이어 (Coinbase CDP Facilitator) =====
     # Coinbase Developer Platform(https://portal.cdp.coinbase.com)에서 발급받는 API 키.

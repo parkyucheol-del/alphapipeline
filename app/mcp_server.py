@@ -194,6 +194,33 @@ DEX_SLIPPAGE_OUTPUT_SCHEMA = {
     ],
 }
 
+ARB_SPREAD_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "generated_at": _TIMESTAMP_PAIR_SCHEMA,
+        "symbol": {"type": "string"},
+        "network": {"type": "string"},
+        "pool_address": {"type": ["string", "null"]},
+        "status_message": {"type": "string"},
+        "is_profitable": {"type": "boolean"},
+        "gross_spread_pct": {"type": ["number", "null"]},
+        "net_spread_pct": {"type": ["number", "null"]},
+        "direction": {"type": ["string", "null"]},
+        "cex_price_usd": {"type": ["number", "null"]},
+        "dex_price_usd": {"type": ["number", "null"]},
+        "trade_size_usd": {"type": "number"},
+        "assumed_gas_cost_usd": {"type": "number"},
+        "min_spread_threshold_pct": {"type": "number"},
+        "data_source": {"type": "string"},
+        "notice": {"type": ["string", "null"]},
+    },
+    "required": [
+        "generated_at", "symbol", "network", "status_message", "is_profitable",
+        "trade_size_usd", "assumed_gas_cost_usd", "min_spread_threshold_pct",
+        "data_source",
+    ],
+}
+
 MACRO_DDAY_OUTPUT_SCHEMA = {
     "type": "object",
     "properties": {
@@ -414,6 +441,51 @@ _TOOLS: list[dict] = [
             "required": ["trade_size_usd"],
         },
         "output_schema": DEX_SLIPPAGE_OUTPUT_SCHEMA,
+        "annotations": _READ_ONLY_ANNOTATIONS,
+    },
+    {
+        "name": "arb_spread_matrix",
+        "path": "/v1/arb/spread-matrix",
+        "price_attr": "PRICE_ARB_SPREAD_USDC",
+        "description": (
+            "Use this tool before executing a cross-venue arbitrage trade to check "
+            "whether a global reference price (Coinbase spot, CoinGecko fallback - not a "
+            "specific exchange orderbook) and a DEX pool price diverge enough to be "
+            "worth trading after an assumed flat gas cost. Returns gross/net spread "
+            "percentages and an is_profitable boolean. Do not use for DEX-only liquidity "
+            "depth checks or contract security. Paid in USDC on Base."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": {
+                    "type": "string",
+                    "description": "Ticker symbol, e.g. SUI, BTC, ETH.",
+                },
+                "network": {
+                    "type": "string",
+                    "description": "GeckoTerminal network id, e.g. base, eth. Defaults to base.",
+                },
+                "trade_size_usd": {
+                    "type": "number",
+                    "description": "Hypothetical trade size in USD. Defaults to 1000.",
+                },
+                "min_spread_threshold_pct": {
+                    "type": "number",
+                    "description": "Net spread threshold (%) above which is_profitable is true. Defaults to 0.8.",
+                },
+                "pool_address": {
+                    "type": "string",
+                    "description": "Specific DEX pool contract address (optional if token_address is given).",
+                },
+                "token_address": {
+                    "type": "string",
+                    "description": "Token contract address - the most liquid pool is auto-selected (optional if pool_address is given).",
+                },
+            },
+            "required": ["symbol"],
+        },
+        "output_schema": ARB_SPREAD_OUTPUT_SCHEMA,
         "annotations": _READ_ONLY_ANNOTATIONS,
     },
     {
