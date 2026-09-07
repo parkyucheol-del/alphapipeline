@@ -172,6 +172,25 @@ FUNDING_RATE_OUTPUT_SCHEMA = {
     "required": ["generated_at", "symbol", "data_source"],
 }
 
+FUNDING_APR_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "generated_at": _TIMESTAMP_PAIR_SCHEMA,
+        "symbol": {"type": "string"},
+        "funding_rate_percentage": {"type": ["number", "null"]},
+        "funding_interval_hours": {"type": ["integer", "null"]},
+        "periods_per_year": {"type": ["integer", "null"]},
+        "annualized_rate_pct": {"type": ["number", "null"]},
+        "funding_collector_side": {"type": ["string", "null"]},
+        "daily_funding_income_pct": {"type": ["number", "null"]},
+        "assumed_round_trip_cost_pct": {"type": "number"},
+        "breakeven_days": {"type": ["number", "null"]},
+        "data_source": {"type": "string"},
+        "notice": {"type": ["string", "null"]},
+    },
+    "required": ["generated_at", "symbol", "assumed_round_trip_cost_pct", "data_source"],
+}
+
 DEX_SLIPPAGE_OUTPUT_SCHEMA = {
     "type": "object",
     "properties": {
@@ -405,6 +424,39 @@ _TOOLS: list[dict] = [
             "required": ["symbol"],
         },
         "output_schema": FUNDING_RATE_OUTPUT_SCHEMA,
+        "annotations": _READ_ONLY_ANNOTATIONS,
+    },
+    {
+        "name": "derivatives.funding_apr_matrix",
+        "path": "/v1/derivatives/funding-apr-matrix",
+        "price_attr": "PRICE_FUNDING_APR_USDC",
+        "description": (
+            "Use this tool to evaluate a spot+perpetual carry trade: annualizes the "
+            "current perpetual funding rate into an APR, flags which side (SHORT or "
+            "LONG perp) currently collects funding, and computes how many days of that "
+            "funding income it takes to recoup an assumed round-trip trading cost. "
+            "Pure calculation on top of funding_rate data - no extra upstream call. "
+            "Do not use for the raw current funding rate alone (use "
+            "derivatives.funding_rate) or for spot price data. Paid in USDC on Base."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": {
+                    "type": "string",
+                    "description": "Ticker symbol, e.g. BTC, ETH, or BTCUSDT.",
+                },
+                "assumed_round_trip_cost_pct": {
+                    "type": "number",
+                    "description": (
+                        "Combined entry+exit trading fee percentage across both the "
+                        "spot and perpetual legs. Defaults to 0.2."
+                    ),
+                },
+            },
+            "required": ["symbol"],
+        },
+        "output_schema": FUNDING_APR_OUTPUT_SCHEMA,
         "annotations": _READ_ONLY_ANNOTATIONS,
     },
     {

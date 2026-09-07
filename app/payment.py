@@ -100,6 +100,7 @@ from app.schemas import (
     ARB_SPREAD_EXAMPLE,
     DEX_SLIPPAGE_EXAMPLE,
     DUMP_RISK_EXAMPLE,
+    FUNDING_APR_EXAMPLE,
     FUNDING_RATE_EXAMPLE,
     KIMCHI_ALERT_EXAMPLE,
     MACRO_DDAY_EXAMPLE,
@@ -108,6 +109,7 @@ from app.schemas import (
     ArbSpreadResponse,
     DexSlippageResponse,
     DumpRiskResponse,
+    FundingAprMatrixResponse,
     FundingRateResponse,
     KimchiAlertResponse,
     MacroDdayResponse,
@@ -319,6 +321,7 @@ def build_routes(dump_risk_enabled: bool) -> dict[str, RouteConfig]:
     dump_risk_option = _payment_option(settings.PRICE_DUMP_RISK_USDC)
     token_risk_option = _payment_option(settings.PRICE_TOKEN_RISK_USDC)
     funding_rate_option = _payment_option(settings.PRICE_FUNDING_RATE_USDC)
+    funding_apr_option = _payment_option(settings.PRICE_FUNDING_APR_USDC)
     dex_slippage_option = _payment_option(settings.PRICE_DEX_SLIPPAGE_USDC)
     arb_spread_option = _payment_option(settings.PRICE_ARB_SPREAD_USDC)
 
@@ -459,6 +462,41 @@ def build_routes(dump_risk_enabled: bool) -> dict[str, RouteConfig]:
             ),
             service_name="AlphaPipeline Funding Rate",
             tags=["crypto", "derivatives", "funding-rate"],
+        ),
+        "GET /v1/derivatives/funding-apr-matrix": _make_route_config(
+            accepts=[funding_apr_option],
+            mime_type="application/json",
+            description=(
+                "Annualizes the current perpetual funding rate into an APR, flags which "
+                "side (SHORT or LONG perp) currently collects funding, and computes "
+                "carry-trade breakeven days against an assumed round-trip trading cost. "
+                "Pure calculation on top of funding-rate data. Paid in USDC on Base."
+            ),
+            resource=_resource_url("/v1/derivatives/funding-apr-matrix"),
+            extensions=_bazaar_extension(
+                input_example={"symbol": "BTC", "assumed_round_trip_cost_pct": 0.2},
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "symbol": {
+                            "type": "string",
+                            "description": "Ticker symbol, e.g. BTC, ETH, or BTCUSDT.",
+                        },
+                        "assumed_round_trip_cost_pct": {
+                            "type": "number",
+                            "description": (
+                                "Combined entry+exit trading fee percentage across both "
+                                "the spot and perpetual legs. Defaults to 0.2."
+                            ),
+                        },
+                    },
+                    "required": ["symbol"],
+                },
+                output_example=FUNDING_APR_EXAMPLE,
+                output_schema=_inline_schema_defs(FundingAprMatrixResponse.model_json_schema()),
+            ),
+            service_name="AlphaPipeline Funding APR Matrix",
+            tags=["crypto", "derivatives", "funding-rate", "carry-trade"],
         ),
         "GET /v1/dex/liquidity-slippage": _make_route_config(
             accepts=[dex_slippage_option],

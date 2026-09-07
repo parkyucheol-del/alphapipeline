@@ -222,6 +222,45 @@ FUNDING_RATE_EXAMPLE = {
 }
 
 
+class FundingAprMatrixResponse(BaseModel):
+    generated_at: TimestampPair
+    symbol: str
+    funding_rate_percentage: float | None = None
+    funding_interval_hours: int | None = None
+    periods_per_year: int | None = None
+    annualized_rate_pct: float | None = None
+    funding_collector_side: str | None = None
+    daily_funding_income_pct: float | None = None
+    assumed_round_trip_cost_pct: float
+    breakeven_days: float | None = None
+    data_source: str
+    notice: str | None = None
+
+
+FUNDING_APR_EXAMPLE = {
+    "generated_at": {"utc": "2026-09-07T12:00:00Z", "kst": "2026-09-07 21:00:00 KST"},
+    "symbol": "BTCUSDT",
+    "funding_rate_percentage": 0.01,
+    "funding_interval_hours": 8,
+    "periods_per_year": 1095,
+    "annualized_rate_pct": 10.95,
+    "funding_collector_side": "SHORT",
+    "daily_funding_income_pct": 0.03,
+    "assumed_round_trip_cost_pct": 0.2,
+    "breakeven_days": 6.67,
+    "data_source": "bybit",
+    "notice": (
+        "annualized_rate_pct is a flat extrapolation of the CURRENT funding rate "
+        "(periods_per_year x current rate) - it assumes the rate stays constant, which "
+        "funding rates rarely do over a full year. breakeven_days assumes a constant "
+        "funding_collector_side position and a flat assumed_round_trip_cost_pct covering "
+        "entry+exit trading fees on both the spot and perpetual legs - it excludes margin "
+        "borrow cost, spot-perp basis risk, and perp liquidation risk. Re-verify with your "
+        "actual exchange fee tier before sizing a real carry trade."
+    ),
+}
+
+
 
 class DexSlippageResponse(BaseModel):
     generated_at: TimestampPair

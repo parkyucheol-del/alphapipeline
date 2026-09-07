@@ -15,6 +15,7 @@ from app.logic import (
     get_arb_spread_matrix,
     get_dex_liquidity_slippage,
     get_dump_risk,
+    get_funding_apr_matrix,
     get_funding_rate,
     get_kimchi_alert,
     get_macro_calendar_dday,
@@ -29,6 +30,7 @@ from app.schemas import (
     DexSlippageResponse,
     DumpRiskResponse,
     ErrorResponse,
+    FundingAprMatrixResponse,
     FundingRateResponse,
     KimchiAlertResponse,
     MacroDdayResponse,
@@ -107,6 +109,7 @@ async def root():
             ),
             "/v1/security/token-risk": settings.PRICE_TOKEN_RISK_USDC,
             "/v1/derivatives/funding-rate": settings.PRICE_FUNDING_RATE_USDC,
+            "/v1/derivatives/funding-apr-matrix": settings.PRICE_FUNDING_APR_USDC,
             "/v1/dex/liquidity-slippage": settings.PRICE_DEX_SLIPPAGE_USDC,
             "/v1/calendar/macro-dday": settings.PRICE_MACRO_DDAY_USDC,
             "/v1/arb/spread-matrix": settings.PRICE_ARB_SPREAD_USDC,
@@ -123,6 +126,7 @@ async def root():
             "/v1/tools/ai-markdown",
             "/v1/security/token-risk",
             "/v1/derivatives/funding-rate",
+            "/v1/derivatives/funding-apr-matrix",
             "/v1/dex/liquidity-slippage",
             "/v1/calendar/macro-dday",
             "/v1/arb/spread-matrix",
@@ -305,6 +309,42 @@ async def funding_rate_endpoint(symbol: str = Query(..., description="e.g. BTC, 
         return JSONResponse(content=data)
     except Exception as e:
         logger.exception("funding-rate 처리 실패")
+        return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
+
+
+@app.get(
+    "/v1/derivatives/funding-apr-matrix",
+    tags=["market"],
+    summary="Annualize a perpetual funding rate into APR + carry-trade breakeven days",
+    description=(
+        "Use this endpoint to evaluate a spot+perpetual carry trade (cash-and-carry): it "
+        "takes the current funding rate (same data as funding-rate) and annualizes it into "
+        "an APR, tells you which side (SHORT or LONG perp) currently collects funding, and "
+        "computes how many days of that funding income it takes to recoup an assumed "
+        "round-trip trading cost. This is a pure calculation layer on top of funding-rate - "
+        "no extra upstream API call. Input: required `symbol` (e.g. BTC, ETH, or BTCUSDT) "
+        "and optional `assumed_round_trip_cost_pct` (default 0.2 - the combined entry+exit "
+        "trading fee percentage across both the spot and perpetual legs; pass your own "
+        "actual fee tier for an accurate breakeven_days). Does not account for margin "
+        "borrow cost, spot-perp basis risk, or perp liquidation risk."
+    ),
+    responses={
+        200: {"model": FundingAprMatrixResponse, "description": "펀딩비 연환산 APR 및 캐리 트레이드 손익분기일"},
+        402: {"description": "x402 결제 필요"},
+        502: {"model": ErrorResponse, "description": "업스트림(Bybit/바이낸스) 오류"},
+    },
+)
+async def funding_apr_matrix_endpoint(
+    symbol: str = Query(..., description="e.g. BTC, ETH, or BTCUSDT"),
+    assumed_round_trip_cost_pct: float = Query(
+        0.2, description="Combined entry+exit trading fee %% across both legs, used for breakeven_days"
+    ),
+):
+    try:
+        data = await get_funding_apr_matrix(symbol, assumed_round_trip_cost_pct=assumed_round_trip_cost_pct)
+        return JSONResponse(content=data)
+    except Exception as e:
+        logger.exception("funding-apr-matrix 처리 실패")
         return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
 
 

@@ -763,6 +763,96 @@ async def get_funding_rate(symbol: str) -> dict:
     }
 
 
+_FUNDING_APR_NOTICE = (
+    "annualized_rate_pct is a flat extrapolation of the CURRENT funding rate "
+    "(periods_per_year x current rate) - it assumes the rate stays constant, which "
+    "funding rates rarely do over a full year. breakeven_days assumes a constant "
+    "funding_collector_side position and a flat assumed_round_trip_cost_pct covering "
+    "entry+exit trading fees on both the spot and perpetual legs - it excludes margin "
+    "borrow cost, spot-perp basis risk, and perp liquidation risk. Re-verify with your "
+    "actual exchange fee tier before sizing a real carry trade."
+)
+
+_DEFAULT_FUNDING_INTERVAL_HOURS = 8
+
+
+async def get_funding_apr_matrix(
+    symbol: str,
+    assumed_round_trip_cost_pct: float = 0.2,
+) -> dict:
+    """
+    기존 get_funding_rate() 결과에 연환산 APR과 캐리 트레이드(현물+반대 방향
+    무기한선물 헤지) 손익분기일(breakeven_days)을 계산해서 얹는 순수 계산
+    레이어 - 별도 외부 API 호출 없음. GET /v1/derivatives/funding-apr-matrix가
+    사용한다 (main.py 참고).
+    """
+    underlying = await get_funding_rate(symbol)
+    symbol_out = underlying.get("symbol", symbol.upper())
+    funding_rate_percentage = underlying.get("funding_rate_percentage")
+    funding_interval_hours = underlying.get("funding_interval_hours")
+    data_source = underlying.get("data_source", "none")
+
+    if funding_rate_percentage is None or data_source == "none":
+        return {
+            "generated_at": _timestamp_now(),
+            "symbol": symbol_out,
+            "funding_rate_percentage": None,
+            "funding_interval_hours": funding_interval_hours,
+            "periods_per_year": None,
+            "annualized_rate_pct": None,
+            "funding_collector_side": None,
+            "daily_funding_income_pct": None,
+            "assumed_round_trip_cost_pct": assumed_round_trip_cost_pct,
+            "breakeven_days": None,
+            "data_source": data_source,
+            "notice": underlying.get("notice")
+            or "Could not compute APR - underlying funding rate lookup failed.",
+        }
+
+    interval_hours = funding_interval_hours or _DEFAULT_FUNDING_INTERVAL_HOURS
+    interval_assumed = funding_interval_hours is None
+    periods_per_year = round((365 * 24) / interval_hours)
+    periods_per_day = 24 / interval_hours
+
+    annualized_rate_pct = round(funding_rate_percentage * periods_per_year, 4)
+    daily_funding_income_pct = round(abs(funding_rate_percentage) * periods_per_day, 4)
+
+    if funding_rate_percentage > 0:
+        funding_collector_side = "SHORT"
+    elif funding_rate_percentage < 0:
+        funding_collector_side = "LONG"
+    else:
+        funding_collector_side = "NEUTRAL"
+
+    breakeven_days = (
+        round(assumed_round_trip_cost_pct / daily_funding_income_pct, 2)
+        if daily_funding_income_pct > 0
+        else None
+    )
+
+    notice = _FUNDING_APR_NOTICE
+    if interval_assumed:
+        notice += (
+            " funding_interval_hours was unavailable from the underlying data source "
+            f"(fallback exchange), so a standard {_DEFAULT_FUNDING_INTERVAL_HOURS}h "
+            "settlement interval was assumed for this calculation."
+        )
+
+    return {
+        "generated_at": _timestamp_now(),
+        "symbol": symbol_out,
+        "funding_rate_percentage": funding_rate_percentage,
+        "funding_interval_hours": interval_hours,
+        "periods_per_year": periods_per_year,
+        "annualized_rate_pct": annualized_rate_pct,
+        "funding_collector_side": funding_collector_side,
+        "daily_funding_income_pct": daily_funding_income_pct,
+        "assumed_round_trip_cost_pct": assumed_round_trip_cost_pct,
+        "breakeven_days": breakeven_days,
+        "data_source": data_source,
+        "notice": notice,
+    }
+
 
 def _pick_most_liquid_pool(pools: list[dict]) -> dict | None:
     """토큰의 풀 목록 중 reserve_in_usd(합산 USD 유동성)가 가장 큰 풀을 고른다."""
