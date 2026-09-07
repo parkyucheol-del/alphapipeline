@@ -238,6 +238,83 @@ CONTRACT_HEALTH_EXAMPLE = {
 }
 
 
+class WhalePosition(BaseModel):
+    coin: str
+    side: str = Field(description="LONG or SHORT, derived from the sign of Hyperliquid's szi (signed size).")
+    size: float
+    entry_price: float
+    mark_price: float | None = Field(
+        default=None,
+        description=(
+            "Derived as position_value_usd / size, since clearinghouseState does not "
+            "return a live mark price directly. Not a separately-fetched live quote."
+        ),
+    )
+    position_value_usd: float
+    leverage: float
+    leverage_type: str = Field(description="cross or isolated, as reported by Hyperliquid.")
+    unrealized_pnl_usd: float
+    liquidation_price: float | None = None
+    distance_to_liquidation_pct: float | None = Field(
+        default=None,
+        description="abs(mark_price - liquidation_price) / mark_price * 100. Null when Hyperliquid reports no liquidation price for this position.",
+    )
+
+
+class WhalePositionAuditResponse(BaseModel):
+    generated_at: TimestampPair
+    wallet_address: str
+    account_value_usd: float | None = None
+    total_margin_used_usd: float | None = None
+    total_notional_position_usd: float | None = None
+    withdrawable_usd: float | None = None
+    margin_usage_pct: float | None = None
+    open_position_count: int
+    positions: list[WhalePosition] = []
+    risk_flags: list[str] = []
+    data_source: str
+    notice: str | None = None
+
+
+WHALE_AUDIT_EXAMPLE = {
+    "generated_at": {"utc": "2026-09-07T12:00:00Z", "kst": "2026-09-07 21:00:00 KST"},
+    "wallet_address": "0x31ca8395cf837de08b24da3f660e77761dfb974",
+    "account_value_usd": 13104.51,
+    "total_margin_used_usd": 4.97,
+    "total_notional_position_usd": 100.03,
+    "withdrawable_usd": 13099.55,
+    "margin_usage_pct": 0.04,
+    "open_position_count": 1,
+    "positions": [
+        {
+            "coin": "ETH",
+            "side": "LONG",
+            "size": 0.0335,
+            "entry_price": 2986.3,
+            "mark_price": 2986.5,
+            "position_value_usd": 100.03,
+            "leverage": 20.0,
+            "leverage_type": "isolated",
+            "unrealized_pnl_usd": -0.0134,
+            "liquidation_price": 2866.27,
+            "distance_to_liquidation_pct": 4.02,
+        }
+    ],
+    "risk_flags": [],
+    "data_source": "Hyperliquid clearinghouseState (official public API)",
+    "notice": (
+        "This tool audits a wallet address you already know - it does not discover or "
+        "rank 'smart money' wallets, because Hyperliquid's public API has no leaderboard "
+        "or large-trader disclosure endpoint. mark_price is derived from "
+        "position_value_usd / size (Hyperliquid does not return a separate live quote in "
+        "this response), so it can lag the true mark price briefly during fast moves. "
+        "risk_flags are computed from fixed numeric thresholds only (leverage >= 20x -> "
+        "HIGH_LEVERAGE, distance_to_liquidation_pct < 15 -> NEAR_LIQUIDATION), not a "
+        "judgment call about the trader."
+    ),
+}
+
+
 class FundingRateResponse(BaseModel):
     generated_at: TimestampPair
     symbol: str

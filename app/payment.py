@@ -107,6 +107,7 @@ from app.schemas import (
     MACRO_DDAY_EXAMPLE,
     MARKDOWN_EXAMPLE,
     TOKEN_RISK_EXAMPLE,
+    WHALE_AUDIT_EXAMPLE,
     ArbSpreadResponse,
     ContractHealthAuditResponse,
     DexSlippageResponse,
@@ -117,6 +118,7 @@ from app.schemas import (
     MacroDdayResponse,
     MarkdownResponse,
     TokenRiskResponse,
+    WhalePositionAuditResponse,
 )
 
 logger = logging.getLogger("alphapipeline")
@@ -364,6 +366,7 @@ def build_routes(dump_risk_enabled: bool) -> dict[str, RouteConfig]:
     funding_apr_option = _payment_option(settings.PRICE_FUNDING_APR_USDC)
     dex_slippage_option = _payment_option(settings.PRICE_DEX_SLIPPAGE_USDC)
     arb_spread_option = _payment_option(settings.PRICE_ARB_SPREAD_USDC)
+    whale_audit_option = _payment_option(settings.PRICE_WHALE_AUDIT_USDC)
 
     macro_dday_option = _payment_option(settings.PRICE_MACRO_DDAY_USDC)
     routes: dict[str, RouteConfig] = {
@@ -670,6 +673,36 @@ def build_routes(dump_risk_enabled: bool) -> dict[str, RouteConfig]:
             ),
             service_name="AlphaPipeline Arb Spread",
             tags=["crypto", "arbitrage", "cex", "dex"],
+        ),
+        "GET /v1/derivatives/whale-position-audit": _make_route_config(
+            accepts=[whale_audit_option],
+            mime_type="application/json",
+            description=(
+                "Audit a Hyperliquid wallet address you already know: every open "
+                "perpetual position with side, size, leverage, unrealized PnL, "
+                "liquidation price, and distance-to-liquidation percentage. Does not "
+                "discover or rank wallets - Hyperliquid's public API has no leaderboard "
+                "endpoint, so this only audits an address you supply. Paid in USDC on "
+                "Base."
+            ),
+            resource=_resource_url("/v1/derivatives/whale-position-audit"),
+            extensions=_bazaar_extension(
+                input_example={"address": "0x31ca8395cf837de08b24da3f660e77761dfb974"},
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "address": {
+                            "type": "string",
+                            "description": "Hyperliquid/EVM wallet address to audit (0x...).",
+                        },
+                    },
+                    "required": ["address"],
+                },
+                output_example=WHALE_AUDIT_EXAMPLE,
+                output_schema=_inline_schema_defs(WhalePositionAuditResponse.model_json_schema()),
+            ),
+            service_name="AlphaPipeline Whale Position Audit",
+            tags=["crypto", "derivatives", "hyperliquid", "risk"],
         ),
     }
     if dump_risk_enabled:

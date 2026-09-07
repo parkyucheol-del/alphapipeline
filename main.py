@@ -21,6 +21,7 @@ from app.logic import (
     get_kimchi_alert,
     get_macro_calendar_dday,
     get_token_risk,
+    get_whale_position_audit,
     refresh_unlock_cache,
 )
 from app.llms_txt import build_llms_txt
@@ -38,6 +39,7 @@ from app.schemas import (
     MacroDdayResponse,
     MarkdownResponse,
     TokenRiskResponse,
+    WhalePositionAuditResponse,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -116,6 +118,7 @@ async def root():
             "/v1/dex/liquidity-slippage": settings.PRICE_DEX_SLIPPAGE_USDC,
             "/v1/calendar/macro-dday": settings.PRICE_MACRO_DDAY_USDC,
             "/v1/arb/spread-matrix": settings.PRICE_ARB_SPREAD_USDC,
+            "/v1/derivatives/whale-position-audit": settings.PRICE_WHALE_AUDIT_USDC,
         },
         "payment": {
             "protocol": "x402",
@@ -134,6 +137,7 @@ async def root():
             "/v1/dex/liquidity-slippage",
             "/v1/calendar/macro-dday",
             "/v1/arb/spread-matrix",
+            "/v1/derivatives/whale-position-audit",
         ],
         "coming_soon_endpoints": [],
         "docs": "/docs",
@@ -317,6 +321,39 @@ async def contract_health_audit_endpoint(
         return JSONResponse(content=data)
     except Exception as e:
         logger.exception("contract-health-audit 처리 실패")
+        return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
+
+
+@app.get(
+    "/v1/derivatives/whale-position-audit",
+    tags=["market"],
+    summary="Audit a Hyperliquid wallet's open perp positions (leverage, liquidation risk, PnL)",
+    description=(
+        "Input a Hyperliquid wallet address you already know (from an explorer, a "
+        "leaderboard screenshot, on-chain sleuthing, etc.) and get back its current "
+        "perpetual futures exposure: every open position with side, size, leverage, "
+        "unrealized PnL, liquidation price, and distance-to-liquidation percentage. "
+        "This is deliberately an audit tool, not a 'smart money' discovery tool - "
+        "Hyperliquid's public API has no leaderboard or large-trader disclosure "
+        "endpoint, so this does not attempt to identify or rank wallets itself. "
+        "risk_flags (HIGH_LEVERAGE, NEAR_LIQUIDATION) are computed from fixed numeric "
+        "thresholds only, never a qualitative judgment. Input: `address` (required, "
+        "Hyperliquid/EVM wallet address, 0x...)."
+    ),
+    responses={
+        200: {"model": WhalePositionAuditResponse, "description": "지갑 포지션 감사 결과"},
+        402: {"description": "x402 결제 필요"},
+        502: {"model": ErrorResponse, "description": "업스트림(Hyperliquid) 오류"},
+    },
+)
+async def whale_position_audit_endpoint(
+    address: str = Query(..., description="Hyperliquid/EVM wallet address to audit (0x...)"),
+):
+    try:
+        data = await get_whale_position_audit(address)
+        return JSONResponse(content=data)
+    except Exception as e:
+        logger.exception("whale-position-audit 처리 실패")
         return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
 
 

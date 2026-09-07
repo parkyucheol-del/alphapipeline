@@ -276,6 +276,47 @@ ARB_SPREAD_OUTPUT_SCHEMA = {
     ],
 }
 
+WHALE_AUDIT_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "generated_at": _TIMESTAMP_PAIR_SCHEMA,
+        "wallet_address": {"type": "string"},
+        "account_value_usd": {"type": ["number", "null"]},
+        "total_margin_used_usd": {"type": ["number", "null"]},
+        "total_notional_position_usd": {"type": ["number", "null"]},
+        "withdrawable_usd": {"type": ["number", "null"]},
+        "margin_usage_pct": {"type": ["number", "null"]},
+        "open_position_count": {"type": "integer"},
+        "positions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "coin": {"type": "string"},
+                    "side": {"type": "string"},
+                    "size": {"type": "number"},
+                    "entry_price": {"type": ["number", "null"]},
+                    "mark_price": {"type": ["number", "null"]},
+                    "position_value_usd": {"type": ["number", "null"]},
+                    "leverage": {"type": ["number", "null"]},
+                    "leverage_type": {"type": "string"},
+                    "unrealized_pnl_usd": {"type": ["number", "null"]},
+                    "liquidation_price": {"type": ["number", "null"]},
+                    "distance_to_liquidation_pct": {"type": ["number", "null"]},
+                },
+                "required": ["coin", "side", "size", "leverage_type"],
+            },
+        },
+        "risk_flags": {"type": "array", "items": {"type": "string"}},
+        "data_source": {"type": "string"},
+        "notice": {"type": ["string", "null"]},
+    },
+    "required": [
+        "generated_at", "wallet_address", "open_position_count", "positions",
+        "risk_flags", "data_source",
+    ],
+}
+
 MACRO_DDAY_OUTPUT_SCHEMA = {
     "type": "object",
     "properties": {
@@ -609,6 +650,33 @@ _TOOLS: list[dict] = [
             "required": ["symbol"],
         },
         "output_schema": ARB_SPREAD_OUTPUT_SCHEMA,
+        "annotations": _READ_ONLY_ANNOTATIONS,
+    },
+    {
+        "name": "derivatives.whale_position_audit",
+        "path": "/v1/derivatives/whale-position-audit",
+        "price_attr": "PRICE_WHALE_AUDIT_USDC",
+        "description": (
+            "Use this tool to audit a Hyperliquid wallet address you already know: "
+            "every open perpetual position with side, size, leverage, unrealized PnL, "
+            "liquidation price, and distance-to-liquidation percentage. This does not "
+            "discover or rank 'smart money' wallets - Hyperliquid's public API has no "
+            "leaderboard or large-trader disclosure endpoint, so it only audits an "
+            "address you supply. risk_flags (HIGH_LEVERAGE, NEAR_LIQUIDATION) come from "
+            "fixed numeric thresholds only. Do not use for spot price data or any "
+            "exchange other than Hyperliquid. Paid in USDC on Base."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "address": {
+                    "type": "string",
+                    "description": "Hyperliquid/EVM wallet address to audit (0x...).",
+                }
+            },
+            "required": ["address"],
+        },
+        "output_schema": WHALE_AUDIT_OUTPUT_SCHEMA,
         "annotations": _READ_ONLY_ANNOTATIONS,
     },
     {

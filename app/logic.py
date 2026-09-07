@@ -782,6 +782,124 @@ async def get_contract_health_audit(chain_id: int, contract_address: str) -> dic
     }
 
 
+_WHALE_AUDIT_NOTICE = (
+    "This tool audits a wallet address you already know - it does not discover or rank "
+    "'smart money' wallets, because Hyperliquid's public API has no leaderboard or "
+    "large-trader disclosure endpoint. mark_price is derived from "
+    "position_value_usd / size (Hyperliquid does not return a separate live quote in "
+    "this response), so it can lag the true mark price briefly during fast moves. "
+    "risk_flags are computed from fixed numeric thresholds only (leverage >= 20x -> "
+    "HIGH_LEVERAGE, distance_to_liquidation_pct < 15 -> NEAR_LIQUIDATION), not a "
+    "judgment call about the trader."
+)
+
+
+async def get_whale_position_audit(address: str) -> dict:
+    """
+    Hyperliquid clearinghouseState 하나만 호출해서 특정 지갑의 현재 무기한 선물
+    포지션 리스크(레버리지/청산가/미실현손익)를 계산한다. GET
+    /v1/derivatives/whale-position-audit가 사용한다 (main.py 참고).
+
+    설계 배경(app/data_sources.py의 get_hyperliquid_clearinghouse_state 주석
+    참고): Hyperliquid 공개 API에는 "대규모 트레이더 발굴/리더보드" 기능이 없어서,
+    이 도구는 "누가 스마트 머니냐"를 판단하지 않고 사용자가 이미 알고 있는 지갑
+    주소 하나를 감사(audit)하는 용도로 설계했다. contract_health_audit와 동일한
+    철학 - 업스트림 숫자를 그대로 계산해서 보여줄 뿐, 정성적 판단 없음.
+    """
+    address = (address or "").strip().lower()
+
+    try:
+        state = await ds.get_hyperliquid_clearinghouse_state(address)
+    except Exception as e:
+        return {
+            "generated_at": _timestamp_now(),
+            "wallet_address": address,
+            "open_position_count": 0,
+            "positions": [],
+            "risk_flags": ["data_unavailable"],
+            "data_source": "none",
+            "notice": f"Hyperliquid lookup failed: {e}",
+        }
+
+    margin_summary = state.get("marginSummary") or {}
+
+    def _f(val, default=None):
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            return default
+
+    account_value = _f(margin_summary.get("accountValue"))
+    total_margin_used = _f(margin_summary.get("totalMarginUsed"))
+    total_notional = _f(margin_summary.get("totalNtlPos"))
+    withdrawable = _f(state.get("withdrawable"))
+    margin_usage_pct = (
+        round(total_margin_used / account_value * 100, 2)
+        if total_margin_used is not None and account_value
+        else None
+    )
+
+    positions: list[dict] = []
+    risk_flags: list[str] = []
+    for entry in state.get("assetPositions") or []:
+        pos = entry.get("position") or {}
+        szi = _f(pos.get("szi"), 0.0) or 0.0
+        size = abs(szi)
+        side = "LONG" if szi >= 0 else "SHORT"
+        entry_price = _f(pos.get("entryPx"))
+        position_value = _f(pos.get("positionValue"))
+        leverage_obj = pos.get("leverage") or {}
+        leverage_value = _f(leverage_obj.get("value"))
+        leverage_type = leverage_obj.get("type") or "unknown"
+        unrealized_pnl = _f(pos.get("unrealizedPnl"))
+        liquidation_price = _f(pos.get("liquidationPx"))
+
+        mark_price = (
+            round(position_value / size, 6) if position_value is not None and size else None
+        )
+        distance_to_liquidation_pct = None
+        if mark_price and liquidation_price is not None:
+            distance_to_liquidation_pct = round(
+                abs(mark_price - liquidation_price) / mark_price * 100, 2
+            )
+
+        if leverage_value is not None and leverage_value >= 20:
+            risk_flags.append(f"HIGH_LEVERAGE:{pos.get('coin')}")
+        if distance_to_liquidation_pct is not None and distance_to_liquidation_pct < 15:
+            risk_flags.append(f"NEAR_LIQUIDATION:{pos.get('coin')}")
+
+        positions.append(
+            {
+                "coin": pos.get("coin"),
+                "side": side,
+                "size": size,
+                "entry_price": entry_price,
+                "mark_price": mark_price,
+                "position_value_usd": position_value,
+                "leverage": leverage_value,
+                "leverage_type": leverage_type,
+                "unrealized_pnl_usd": unrealized_pnl,
+                "liquidation_price": liquidation_price,
+                "distance_to_liquidation_pct": distance_to_liquidation_pct,
+            }
+        )
+
+    return {
+        "generated_at": _timestamp_now(),
+        "wallet_address": address,
+        "account_value_usd": account_value,
+        "total_margin_used_usd": total_margin_used,
+        "total_notional_position_usd": total_notional,
+        "withdrawable_usd": withdrawable,
+        "margin_usage_pct": margin_usage_pct,
+        "open_position_count": len(positions),
+        "positions": positions,
+        "risk_flags": risk_flags,
+        "data_source": "Hyperliquid clearinghouseState (official public API)",
+        "notice": _WHALE_AUDIT_NOTICE,
+    }
+
+
 def _normalize_futures_symbol(symbol: str) -> str:
     """예: "BTC" -> "BTCUSDT". 이미 USDT로 끝나면 그대로 둔다."""
     symbol = (symbol or "").upper().strip()

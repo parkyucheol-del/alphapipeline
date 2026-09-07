@@ -425,3 +425,36 @@ async def get_geckoterminal_pools_for_token(network: str, token_address: str) ->
         r.raise_for_status()
         body = r.json()
         return body.get("data") or []
+
+
+# ============================================================================
+# derivatives.whale_position_audit (2026-09) - Hyperliquid 공식 무료 info API.
+#
+# 왜 "smart money 발굴"이 아니라 "지갑 주소 입력 감사"인가: Hyperliquid 공개 API를
+# 조사해본 결과 리더보드/대규모 트레이더 순위 엔드포인트가 아예 없다 - 특정 지갑
+# 주소를 이미 알고 있어야만 그 지갑의 포지션(clearinghouseState)을 조회할 수 있다.
+# "누가 스마트 머니냐"를 우리가 직접 큐레이션한 지갑 리스트로 정하면 그 자체가
+# 주관적 판단이고 계속 유지보수해야 하는 목록이 되어(이 프로젝트의 "유지보수 0분/
+# 원가 0원" 원칙 위반), 이 프로젝트는 그 방향 대신 "사용자가 이미 알고 있는 지갑
+# 주소를 넣으면, 그 지갑의 현재 리스크(레버리지/청산가/미실현손익)를 계산해서
+# 반환"하는 감사 도구로 설계했다 (contract_health_audit와 동일한 패턴 - 우리가
+# 판단하지 않고, 공식 API의 숫자를 그대로 계산해서 보여줄 뿐).
+# ============================================================================
+HYPERLIQUID_INFO_URL = "https://api.hyperliquid.xyz/info"
+
+
+async def get_hyperliquid_clearinghouse_state(address: str) -> dict:
+    """
+    Hyperliquid의 공식 무료 info API(clearinghouseState)를 호출한다.
+    인증/API 키 불필요, POST 요청에 지갑 주소만 담으면 된다 (공식 문서 기준).
+    존재하지 않는/거래 이력 없는 주소도 에러 없이 빈 포지션 응답을 준다
+    (Hyperliquid는 온체인 컨트랙트가 아니라 자체 오더북이라 "계정이 없다"는
+    개념이 없고, 그냥 잔고/포지션이 전부 0인 상태로 응답한다).
+    """
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        r = await client.post(
+            HYPERLIQUID_INFO_URL,
+            json={"type": "clearinghouseState", "user": address},
+        )
+        r.raise_for_status()
+        return r.json()
