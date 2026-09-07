@@ -307,7 +307,7 @@ DUMP_RISK_OUTPUT_SCHEMA = {
 
 _TOOLS: list[dict] = [
     {
-        "name": "kimchi_alert",
+        "name": "market.kimchi_alert",
         "path": "/v1/market/kimchi-alert",
         "price_attr": "PRICE_KIMCHI_ALERT_USDC",
         "description": (
@@ -331,7 +331,7 @@ _TOOLS: list[dict] = [
         "annotations": _READ_ONLY_ANNOTATIONS,
     },
     {
-        "name": "ai_markdown",
+        "name": "tools.ai_markdown",
         "path": "/v1/tools/ai-markdown",
         "price_attr": "PRICE_AI_MARKDOWN_USDC",
         "description": (
@@ -356,7 +356,7 @@ _TOOLS: list[dict] = [
         "annotations": _READ_ONLY_ANNOTATIONS,
     },
     {
-        "name": "token_risk",
+        "name": "security.token_risk",
         "path": "/v1/security/token-risk",
         "price_attr": "PRICE_TOKEN_RISK_USDC",
         "description": (
@@ -384,7 +384,7 @@ _TOOLS: list[dict] = [
         "annotations": _READ_ONLY_ANNOTATIONS,
     },
     {
-        "name": "funding_rate",
+        "name": "derivatives.funding_rate",
         "path": "/v1/derivatives/funding-rate",
         "price_attr": "PRICE_FUNDING_RATE_USDC",
         "description": (
@@ -408,7 +408,7 @@ _TOOLS: list[dict] = [
         "annotations": _READ_ONLY_ANNOTATIONS,
     },
     {
-        "name": "dex_liquidity_slippage",
+        "name": "dex.liquidity_slippage",
         "path": "/v1/dex/liquidity-slippage",
         "price_attr": "PRICE_DEX_SLIPPAGE_USDC",
         "description": (
@@ -444,7 +444,7 @@ _TOOLS: list[dict] = [
         "annotations": _READ_ONLY_ANNOTATIONS,
     },
     {
-        "name": "arb_spread_matrix",
+        "name": "arb.spread_matrix",
         "path": "/v1/arb/spread-matrix",
         "price_attr": "PRICE_ARB_SPREAD_USDC",
         "description": (
@@ -489,7 +489,7 @@ _TOOLS: list[dict] = [
         "annotations": _READ_ONLY_ANNOTATIONS,
     },
     {
-        "name": "macro_dday",
+        "name": "calendar.macro_dday",
         "path": "/v1/calendar/macro-dday",
         "price_attr": "PRICE_MACRO_DDAY_USDC",
         "description": (
@@ -505,7 +505,7 @@ _TOOLS: list[dict] = [
         "annotations": _READ_ONLY_ANNOTATIONS,
     },
     {
-        "name": "dump_risk",
+        "name": "unlocks.dump_risk",
         "path": "/v1/unlocks/dump-risk",
         "price_attr": "PRICE_DUMP_RISK_USDC",
         "description": (

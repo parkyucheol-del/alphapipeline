@@ -12,8 +12,10 @@ GET/POST 등 메서드에 상관없이 402 -> 서명 -> 재요청 -> 정산 흐�
   pip install "x402[https]" eth_account httpx
   EVM_PRIVATE_KEY 또는 EVM_MNEMONIC 환경변수 중 하나 설정.
   실제 결제는 CDP Facilitator(메인넷, eip155:8453)로 나가므로 진짜 USDC가
-  차감된다 - 기본 대상 도구는 macro_dday($0.01, 가장 저렴하고 외부 API
-  의존이 없어 가장 안정적으로 확인된 도구)로 잡아뒀다.
+  차감된다 - 기본 대상 도구는 calendar.macro_dday($0.01, 가장 저렴하고 외부
+  API 의존이 없어 가장 안정적으로 확인된 도구)로 잡아뒀다. MCP 도구 이름은
+  domain.tool_name 점(dot) 표기를 쓴다 (예: market.kimchi_alert) - REST
+  경로(/v1/<domain>/...)는 이 이름과 무관하게 그대로 유지된다.
 
 로컬(uvicorn)은 PAYMENT_BYPASS_FOR_TESTING=true라 결제 없이 다 통과되므로
 실결제 검증은 반드시 배포된 서버(ALPHAPIPELINE_API_BASE)를 대상으로 해야
@@ -32,7 +34,7 @@ from x402.mechanisms.evm.exact.register import register_exact_evm_client
 
 API_BASE = os.getenv("ALPHAPIPELINE_API_BASE", "https://alphapipeline-eu.onrender.com")
 MCP_ENDPOINT = "/mcp"
-TOOL_NAME = os.getenv("MCP_TOOL_NAME", "macro_dday")
+TOOL_NAME = os.getenv("MCP_TOOL_NAME", "calendar.macro_dday")
 TOOL_ARGUMENTS = json.loads(os.getenv("MCP_TOOL_ARGUMENTS", "{}"))
 MNEMONIC_HD_PATH = "m/44'/60'/0'/0/0"
 
