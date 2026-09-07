@@ -8,7 +8,7 @@
 
 [![Smithery](https://img.shields.io/badge/Smithery-Listed-orange)](https://smithery.ai/servers/parkyucheol/alphapipeline)
 [![x402 Bazaar](https://img.shields.io/badge/x402-Bazaar-blue)](https://www.x402bazaar.org/)
-[![Glama](https://img.shields.io/badge/Glama-Listed-green)](https://glama.ai/mcp/servers)
+[![Glama](https://img.shields.io/badge/Glama-Verified%20A%20(4.4%2F5)-brightgreen)](https://glama.ai/mcp/connectors/com.onrender.alphapipeline/alpha-pipeline-agent-mcp)
 
 ---
 
@@ -85,7 +85,7 @@ Every response is timestamped in both UTC and KST, and every priced endpoint's p
 - Agent-readable spec: https://alphapipeline-eu.onrender.com/llms.txt
 - OpenAPI docs: https://alphapipeline-eu.onrender.com/docs
 - x402 Bazaar listing: https://www.x402bazaar.org/
-- Glama listing: https://glama.ai/mcp/servers
+- Glama listing (verified, TDQS A / 4.4): https://glama.ai/mcp/connectors/com.onrender.alphapipeline/alpha-pipeline-agent-mcp
 - x402 protocol: https://docs.x402.org
 
 ## License
