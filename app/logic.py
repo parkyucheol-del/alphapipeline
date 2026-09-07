@@ -3,6 +3,7 @@
 1) /v1/unlocks/dump-risk : 락업 해제 덤핑 위험도
 2) /v1/market/kimchi-alert : 거래소 간 차익/급변 감지
 """
+import asyncio
 import logging
 import time
 from datetime import datetime, timezone, timedelta
@@ -897,6 +898,65 @@ async def get_whale_position_audit(address: str) -> dict:
         "risk_flags": risk_flags,
         "data_source": "Hyperliquid clearinghouseState (official public API)",
         "notice": _WHALE_AUDIT_NOTICE,
+    }
+
+
+_TOKEN_DIAGNOSTIC_NOTICE = (
+    "This bundles security.token_risk and security.contract_health_audit into one "
+    "call (same underlying GoPlus data, no new upstream calls, no new judgment logic) "
+    "- it does not compute a composite score or letter grade. risk_flags is a plain "
+    "deduped union of both tools' own flags; risk_flags_count is a count, not a "
+    "weighted risk score. Does not cover token unlock/vesting risk - use "
+    "unlocks.dump_risk separately for that (different input: symbol, not "
+    "contract_address)."
+)
+
+
+async def get_token_diagnostic(chain_id: int, contract_address: str) -> dict:
+    """
+    security.token_risk + security.contract_health_audit를 병렬로 그대로 재호출해서
+    하나의 응답으로 합친다. GET /v1/security/token-diagnostic가 사용한다 (main.py
+    참고).
+
+    의도적으로 하지 않는 것: 가중치를 매긴 합성 점수(예: "72/100")나 등급(A~F)을
+    절대 계산하지 않는다 - 두 기존 도구가 이미 계산해둔 필드/플래그를 그대로
+    노출하고, risk_flags는 둘의 합집합(중복 제거)만 낸다. 이건 사용자가 명시적으로
+    요청한 설계 방향("점수 매기지 말고 무주관 집계 진단 도구")을 그대로 따른
+    것이다. 두 하위 함수 다 GoPlus를 각자 호출하므로(중복 호출), 지연시간을
+    줄이기 위해 asyncio.gather로 병렬 실행한다 - GoPlus는 무료라 원가에는 영향 없음.
+    """
+    risk_task = get_token_risk(chain_id, contract_address)
+    health_task = get_contract_health_audit(chain_id, contract_address)
+    risk, health = await asyncio.gather(risk_task, health_task)
+
+    risk_flags = list(dict.fromkeys((risk.get("risk_flags") or []) + (health.get("risk_flags") or [])))
+
+    data_sources = list(dict.fromkeys([risk.get("data_source"), health.get("data_source")]))
+    checks_completed = sum(1 for d in (risk.get("data_source"), health.get("data_source")) if d and d != "none")
+
+    return {
+        "generated_at": _timestamp_now(),
+        "chain_id": chain_id,
+        "contract_address": contract_address.lower(),
+        "token_name": risk.get("token_name") or health.get("token_name"),
+        "token_symbol": risk.get("token_symbol") or health.get("token_symbol"),
+        "is_honeypot": risk.get("is_honeypot"),
+        "buy_tax_pct": risk.get("buy_tax_pct"),
+        "sell_tax_pct": risk.get("sell_tax_pct"),
+        "is_mintable": risk.get("is_mintable"),
+        "is_open_source": risk.get("is_open_source"),
+        "owner_renounced": risk.get("owner_renounced"),
+        "holder_count": risk.get("holder_count"),
+        "liquidity_health": health.get("liquidity_health", "UNKNOWN"),
+        "lp_locked_pct": health.get("lp_locked_pct"),
+        "lp_burned_pct": health.get("lp_burned_pct"),
+        "top_unlocked_holder_pct": health.get("top_unlocked_holder_pct"),
+        "risk_flags": risk_flags,
+        "risk_flags_count": len(risk_flags),
+        "checks_completed": checks_completed,
+        "checks_total": 2,
+        "data_sources": data_sources,
+        "notice": _TOKEN_DIAGNOSTIC_NOTICE,
     }
 
 

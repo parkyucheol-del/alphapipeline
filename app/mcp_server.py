@@ -180,6 +180,39 @@ CONTRACT_HEALTH_OUTPUT_SCHEMA = {
     ],
 }
 
+TOKEN_DIAGNOSTIC_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "generated_at": _TIMESTAMP_PAIR_SCHEMA,
+        "chain_id": {"type": "integer"},
+        "contract_address": {"type": "string"},
+        "token_name": {"type": ["string", "null"]},
+        "token_symbol": {"type": ["string", "null"]},
+        "is_honeypot": {"type": ["boolean", "null"]},
+        "buy_tax_pct": {"type": ["number", "null"]},
+        "sell_tax_pct": {"type": ["number", "null"]},
+        "is_mintable": {"type": ["boolean", "null"]},
+        "is_open_source": {"type": ["boolean", "null"]},
+        "owner_renounced": {"type": ["boolean", "null"]},
+        "holder_count": {"type": ["integer", "null"]},
+        "liquidity_health": {"type": "string"},
+        "lp_locked_pct": {"type": ["number", "null"]},
+        "lp_burned_pct": {"type": ["number", "null"]},
+        "top_unlocked_holder_pct": {"type": ["number", "null"]},
+        "risk_flags": {"type": "array", "items": {"type": "string"}},
+        "risk_flags_count": {"type": "integer"},
+        "checks_completed": {"type": "integer"},
+        "checks_total": {"type": "integer"},
+        "data_sources": {"type": "array", "items": {"type": "string"}},
+        "notice": {"type": ["string", "null"]},
+    },
+    "required": [
+        "generated_at", "chain_id", "contract_address", "liquidity_health",
+        "risk_flags", "risk_flags_count", "checks_completed", "checks_total",
+        "data_sources",
+    ],
+}
+
 FUNDING_RATE_OUTPUT_SCHEMA = {
     "type": "object",
     "properties": {
@@ -509,6 +542,38 @@ _TOOLS: list[dict] = [
             "required": ["chain_id", "contract_address"],
         },
         "output_schema": CONTRACT_HEALTH_OUTPUT_SCHEMA,
+        "annotations": _READ_ONLY_ANNOTATIONS,
+    },
+    {
+        "name": "security.token_diagnostic",
+        "path": "/v1/security/token-diagnostic",
+        "price_attr": "PRICE_TOKEN_DIAGNOSTIC_USDC",
+        "description": (
+            "Use this tool for a single-call combined security check: runs "
+            "security.token_risk and security.contract_health_audit in parallel "
+            "against the same GoPlus data and returns both, plus a deduped union of "
+            "risk_flags and a plain risk_flags_count. Deliberately does not compute a "
+            "composite score or letter grade - every field is copied unchanged from "
+            "the two underlying tools. Cheaper than calling both separately. Do not "
+            "use for token unlock/vesting risk (use unlocks.dump_risk) or if you only "
+            "need one of the two checks (call that tool directly and pay less). Paid "
+            "in USDC on Base."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "chain_id": {
+                    "type": "integer",
+                    "description": "EVM chain id, e.g. 8453 for Base.",
+                },
+                "contract_address": {
+                    "type": "string",
+                    "description": "Token contract address (0x...).",
+                },
+            },
+            "required": ["chain_id", "contract_address"],
+        },
+        "output_schema": TOKEN_DIAGNOSTIC_OUTPUT_SCHEMA,
         "annotations": _READ_ONLY_ANNOTATIONS,
     },
     {

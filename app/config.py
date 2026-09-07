@@ -46,6 +46,7 @@ class Settings:
     PRICE_FUNDING_APR_USDC: float = float(os.getenv("PRICE_FUNDING_APR_USDC", "0.01"))
     PRICE_CONTRACT_HEALTH_USDC: float = float(os.getenv("PRICE_CONTRACT_HEALTH_USDC", "0.02"))
     PRICE_WHALE_AUDIT_USDC: float = float(os.getenv("PRICE_WHALE_AUDIT_USDC", "0.02"))
+    PRICE_TOKEN_DIAGNOSTIC_USDC: float = float(os.getenv("PRICE_TOKEN_DIAGNOSTIC_USDC", "0.03"))
 
     # ===== x402 공식 결제 레이어 (Coinbase CDP Facilitator) =====
     # Coinbase Developer Platform(https://portal.cdp.coinbase.com)에서 발급받는 API 키.

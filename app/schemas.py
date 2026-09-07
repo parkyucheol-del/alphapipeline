@@ -315,6 +315,68 @@ WHALE_AUDIT_EXAMPLE = {
 }
 
 
+class TokenDiagnosticResponse(BaseModel):
+    generated_at: TimestampPair
+    chain_id: int
+    contract_address: str
+    token_name: str | None = None
+    token_symbol: str | None = None
+    is_honeypot: bool | None = None
+    buy_tax_pct: float | None = None
+    sell_tax_pct: float | None = None
+    is_mintable: bool | None = None
+    is_open_source: bool | None = None
+    owner_renounced: bool | None = None
+    holder_count: int | None = None
+    liquidity_health: str
+    lp_locked_pct: float | None = None
+    lp_burned_pct: float | None = None
+    top_unlocked_holder_pct: float | None = None
+    risk_flags: list[str] = Field(
+        default=[],
+        description="Deduped union of security.token_risk's and security.contract_health_audit's risk_flags - no new flags are computed here.",
+    )
+    risk_flags_count: int = Field(description="len(risk_flags) - a plain count, not a weighted score.")
+    checks_completed: int = Field(description="How many of the 2 underlying checks (token_risk, contract_health_audit) returned real data (data_source != 'none').")
+    checks_total: int = 2
+    data_sources: list[str] = Field(description="Distinct data_source values from the 2 underlying checks, e.g. ['goplus'] or ['goplus', 'honeypot_is'].")
+    notice: str | None = None
+
+
+TOKEN_DIAGNOSTIC_EXAMPLE = {
+    "generated_at": {"utc": "2026-09-07T12:00:00Z", "kst": "2026-09-07 21:00:00 KST"},
+    "chain_id": 8453,
+    "contract_address": "0x4200000000000000000000000000000000000006",
+    "token_name": "Wrapped Ether",
+    "token_symbol": "WETH",
+    "is_honeypot": False,
+    "buy_tax_pct": 0.0,
+    "sell_tax_pct": 0.0,
+    "is_mintable": False,
+    "is_open_source": True,
+    "owner_renounced": True,
+    "holder_count": 125000,
+    "liquidity_health": "LOCKED",
+    "lp_locked_pct": 0.0,
+    "lp_burned_pct": 98.7,
+    "top_unlocked_holder_pct": 1.1,
+    "risk_flags": [],
+    "risk_flags_count": 0,
+    "checks_completed": 2,
+    "checks_total": 2,
+    "data_sources": ["goplus"],
+    "notice": (
+        "This bundles security.token_risk and security.contract_health_audit into one "
+        "call (same underlying GoPlus data, no new upstream calls, no new judgment "
+        "logic) - it does not compute a composite score or letter grade. risk_flags is "
+        "a plain deduped union of both tools' own flags; risk_flags_count is a count, "
+        "not a weighted risk score. Does not cover token unlock/vesting risk - use "
+        "unlocks.dump_risk separately for that (different input: symbol, not "
+        "contract_address)."
+    ),
+}
+
+
 class FundingRateResponse(BaseModel):
     generated_at: TimestampPair
     symbol: str

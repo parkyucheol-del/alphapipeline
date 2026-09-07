@@ -20,6 +20,7 @@ from app.logic import (
     get_funding_rate,
     get_kimchi_alert,
     get_macro_calendar_dday,
+    get_token_diagnostic,
     get_token_risk,
     get_whale_position_audit,
     refresh_unlock_cache,
@@ -38,6 +39,7 @@ from app.schemas import (
     KimchiAlertResponse,
     MacroDdayResponse,
     MarkdownResponse,
+    TokenDiagnosticResponse,
     TokenRiskResponse,
     WhalePositionAuditResponse,
 )
@@ -119,6 +121,7 @@ async def root():
             "/v1/calendar/macro-dday": settings.PRICE_MACRO_DDAY_USDC,
             "/v1/arb/spread-matrix": settings.PRICE_ARB_SPREAD_USDC,
             "/v1/derivatives/whale-position-audit": settings.PRICE_WHALE_AUDIT_USDC,
+            "/v1/security/token-diagnostic": settings.PRICE_TOKEN_DIAGNOSTIC_USDC,
         },
         "payment": {
             "protocol": "x402",
@@ -138,6 +141,7 @@ async def root():
             "/v1/calendar/macro-dday",
             "/v1/arb/spread-matrix",
             "/v1/derivatives/whale-position-audit",
+            "/v1/security/token-diagnostic",
         ],
         "coming_soon_endpoints": [],
         "docs": "/docs",
@@ -321,6 +325,39 @@ async def contract_health_audit_endpoint(
         return JSONResponse(content=data)
     except Exception as e:
         logger.exception("contract-health-audit 처리 실패")
+        return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
+
+
+@app.get(
+    "/v1/security/token-diagnostic",
+    tags=["market"],
+    summary="Bundle token_risk + contract_health_audit into one objective diagnostic report",
+    description=(
+        "Runs security.token_risk (honeypot/tax/mint/ownership) and "
+        "security.contract_health_audit (LP lock/burn) in parallel against the same "
+        "GoPlus data and returns both result sets combined, plus a deduped union of "
+        "their risk_flags and a plain risk_flags_count. Deliberately does NOT compute "
+        "a composite score or letter grade (A-F) - every field here is copied "
+        "unchanged from the two underlying tools, no new weighting or judgment logic. "
+        "Cheaper than calling both separately ($0.03 vs $0.04). Does not cover token "
+        "unlock/vesting risk - use unlocks.dump_risk separately for that. Input: "
+        "`chain_id` (e.g. 8453 for Base) and `contract_address` (required)."
+    ),
+    responses={
+        200: {"model": TokenDiagnosticResponse, "description": "결합 진단 결과 (합성 점수 없음)"},
+        402: {"description": "x402 결제 필요"},
+        502: {"model": ErrorResponse, "description": "업스트림(GoPlus) 오류"},
+    },
+)
+async def token_diagnostic_endpoint(
+    chain_id: int = Query(..., description="EVM chain id, e.g. 8453 for Base"),
+    contract_address: str = Query(..., description="Token contract address (0x...)"),
+):
+    try:
+        data = await get_token_diagnostic(chain_id, contract_address)
+        return JSONResponse(content=data)
+    except Exception as e:
+        logger.exception("token-diagnostic 처리 실패")
         return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
 
 

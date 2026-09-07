@@ -68,6 +68,7 @@ Full protocol reference: [`/llms.txt`](https://alphapipeline-eu.onrender.com/llm
 | `tools.ai_markdown` | `GET /v1/tools/ai-markdown` | $0.005 | Converts any webpage URL into clean, ad-free Markdown optimized for LLM context windows. |
 | `security.token_risk` | `GET /v1/security/token-risk` | $0.02 | GoPlus/Honeypot.is-backed contract security check — honeypot flag, buy/sell tax, mintability, ownership renouncement. |
 | `security.contract_health_audit` | `GET /v1/security/contract-health-audit` | $0.02 | LP (liquidity pool) lock/burn audit reusing the same GoPlus data as token-risk — flags whether liquidity is locked, burned, or freely held by a single wallet. |
+| `security.token_diagnostic` | `GET /v1/security/token-diagnostic` | $0.03 | Bundles token_risk + contract_health_audit into one call (same GoPlus data, no new upstream calls). No composite score or letter grade — just both tools' fields plus a deduped risk_flags union. Cheaper than calling both separately. |
 | `derivatives.funding_rate` | `GET /v1/derivatives/funding-rate` | $0.01 | Bybit (primary) / Binance (fallback) perpetual futures funding rate. |
 | `derivatives.funding_apr_matrix` | `GET /v1/derivatives/funding-apr-matrix` | $0.01 | Annualizes the current funding rate into an APR and computes carry-trade breakeven days against an assumed round-trip trading cost. |
 | `dex.liquidity_slippage` | `GET /v1/dex/liquidity-slippage` | $0.02 | GeckoTerminal-backed DEX pool liquidity and estimated trade slippage, plus fixed $1k/$5k/$10k `slippage_tiers` for at-a-glance depth checks. |

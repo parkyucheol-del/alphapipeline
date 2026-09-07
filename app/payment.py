@@ -106,6 +106,7 @@ from app.schemas import (
     KIMCHI_ALERT_EXAMPLE,
     MACRO_DDAY_EXAMPLE,
     MARKDOWN_EXAMPLE,
+    TOKEN_DIAGNOSTIC_EXAMPLE,
     TOKEN_RISK_EXAMPLE,
     WHALE_AUDIT_EXAMPLE,
     ArbSpreadResponse,
@@ -117,6 +118,7 @@ from app.schemas import (
     KimchiAlertResponse,
     MacroDdayResponse,
     MarkdownResponse,
+    TokenDiagnosticResponse,
     TokenRiskResponse,
     WhalePositionAuditResponse,
 )
@@ -367,6 +369,7 @@ def build_routes(dump_risk_enabled: bool) -> dict[str, RouteConfig]:
     dex_slippage_option = _payment_option(settings.PRICE_DEX_SLIPPAGE_USDC)
     arb_spread_option = _payment_option(settings.PRICE_ARB_SPREAD_USDC)
     whale_audit_option = _payment_option(settings.PRICE_WHALE_AUDIT_USDC)
+    token_diagnostic_option = _payment_option(settings.PRICE_TOKEN_DIAGNOSTIC_USDC)
 
     macro_dday_option = _payment_option(settings.PRICE_MACRO_DDAY_USDC)
     routes: dict[str, RouteConfig] = {
@@ -514,6 +517,42 @@ def build_routes(dump_risk_enabled: bool) -> dict[str, RouteConfig]:
             ),
             service_name="AlphaPipeline Contract Health Audit",
             tags=["crypto", "security", "liquidity", "lp-lock"],
+        ),
+        "GET /v1/security/token-diagnostic": _make_route_config(
+            accepts=[token_diagnostic_option],
+            mime_type="application/json",
+            description=(
+                "Single-call combined security check - runs token-risk and "
+                "contract-health-audit in parallel against the same GoPlus data and "
+                "returns both, plus a deduped union of risk_flags. No composite score "
+                "or letter grade is computed - every field is copied unchanged from "
+                "the two underlying checks. Paid in USDC on Base."
+            ),
+            resource=_resource_url("/v1/security/token-diagnostic"),
+            extensions=_bazaar_extension(
+                input_example={
+                    "chain_id": 8453,
+                    "contract_address": "0x4200000000000000000000000000000000000006",
+                },
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "chain_id": {
+                            "type": "integer",
+                            "description": "EVM chain id, e.g. 8453 for Base.",
+                        },
+                        "contract_address": {
+                            "type": "string",
+                            "description": "Token contract address (0x...).",
+                        },
+                    },
+                    "required": ["chain_id", "contract_address"],
+                },
+                output_example=TOKEN_DIAGNOSTIC_EXAMPLE,
+                output_schema=_inline_schema_defs(TokenDiagnosticResponse.model_json_schema()),
+            ),
+            service_name="AlphaPipeline Token Diagnostic",
+            tags=["crypto", "security", "diagnostic", "no-score"],
         ),
         "GET /v1/derivatives/funding-rate": _make_route_config(
             accepts=[funding_rate_option],
