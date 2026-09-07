@@ -236,6 +236,7 @@ def _inline_schema_defs(schema: dict) -> dict:
 
 def _bazaar_extension(
     *,
+    method: str = "GET",
     input_example: dict,
     input_schema: dict,
     output_example=None,
@@ -243,18 +244,32 @@ def _bazaar_extension(
 ) -> dict:
     """x402 Bazaar 인덱서가 읽는 discovery extension을 만든다.
 
-    2026-09-03 밤, 실제 설치된 x402==2.21.0 패키지 소스를 inspect.getsource()로
-    직접 열어서 확인한 결과, 공식 헬퍼 declare_discovery_extension()의 진짜
-    시그니처는 이전에 참고했던 문서 사이트(docs.x402.org) 설명과 달랐다:
-      - method 파라미터 자체가 없다 (호출부의 라우트 키("GET /v1/...")에서
-        bazaar_resource_server_extension이 런타임에 자동으로 채워 넣는다).
-      - 반환값도 {"bazaar": {"info": {...}}} 한 겹이 아니라
-        {"bazaar": {"info": {...}, "schema": {...}}} 두 겹 구조다.
-    이전의 수동 fallback({"info": {"input": {"type": "http", "method": ...,
-    "queryParams": ...}, "output": {...}}})은 이 실제 구조와 맞지 않아서 매
-    결제마다 "invalid discovery configuration"으로 계속 거부되고 있었다.
-    이제 공식 헬퍼를 있는 그대로 호출해서 이 문제를 해결한다 - 손으로 다시
-    만들지 말 것, 위 버그가 재발한다.
+    2026-09-07 수정: Render 배포 로그에서 실제로 이 경고가 찍히는 걸 확인했다
+    (기존 funding-rate 라우트 포함, 즉 새 라우트만의 문제가 아니라 잠재
+    버그였다): `UserWarning: x402: Route "GET /v1/..." has an invalid bazaar
+    extension: input: 'method' is a required property`.
+
+    원인: docs.x402.org/extensions/bazaar를 다시 정확히 확인한 결과, HTTP
+    리소스의 `info.input` 객체는 그냥 쿼리 파라미터 예시 dict가 아니라
+    `{"type": "http", "method": "GET", "queryParams": {...}}` 형태로 감싸져야
+    한다. 2026-09-03 수정 때 "method는 라우트 키에서 런타임에 자동으로
+    채워진다"고 inspect.getsource()로 확인했다고 적어뒀는데, 이건 틀렸다 -
+    x402 2.12.0부터 추가된 시작 시점(startup-time) JSON-schema 검증은 우리가
+    넘긴 `input` dict를 있는 그대로 검사하고, 자동으로 method를 채워주지
+    않는다. `input=input_example`로 벗겨진 쿼리 파라미터 dict를 그냥 넘기고
+    있었던 게 검증 실패의 진짜 원인이었다.
+
+    수정: `input`을 문서의 HTTP 리소스 예시와 정확히 같은 모양
+    (`type`/`method`/`queryParams`)으로 감싸서 넘긴다. 이 서버의 모든 라우트가
+    GET이라 `method` 기본값을 "GET"으로 둔다 - POST 라우트가 생기면 호출부에서
+    명시적으로 넘겨야 한다.
+
+    **정직하게 밝혀둘 점**: 이 경고는 UserWarning이라 앱 기동 자체를 막지는
+    않는다(Python 경고는 기본적으로 실행을 중단시키지 않음) - 그래서
+    Render의 포트 바인딩 타임아웃과 직접적인 인과관계가 있다고 단정할 수는
+    없다. 하지만 기존 라우트에도 늘 있던 잠재 버그였고, Bazaar 인덱서 쪽의
+    실제 등록/카탈로그 반영 로직이 이 필드를 요구할 가능성이 높아서 고쳐야
+    맞다.
     """
     if not _HAS_DISCOVERY_HELPER:
         logger.warning(
@@ -269,7 +284,7 @@ def _bazaar_extension(
         output = OutputConfig(example=output_example, schema=output_schema)
 
     return declare_discovery_extension(
-        input=input_example,
+        input={"type": "http", "method": method, "queryParams": input_example},
         input_schema=input_schema,
         output=output,
     )
