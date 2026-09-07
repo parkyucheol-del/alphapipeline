@@ -23,8 +23,14 @@ def build_llms_txt() -> str:
     base_url = settings.PUBLIC_BASE_URL.rstrip("/")
     price_kimchi = settings.PRICE_KIMCHI_ALERT_USDC
     price_markdown = settings.PRICE_AI_MARKDOWN_USDC
-    price_dump_risk = settings.PRICE_DUMP_RISK_USDC
-    price_range = f"${min(price_kimchi, price_markdown, price_dump_risk)}-${max(price_kimchi, price_markdown, price_dump_risk)}"
+    dump_risk_free = not bool(getattr(settings, "DUMP_RISK_ENABLED", False))
+    price_dump_risk = 0.0 if dump_risk_free else settings.PRICE_DUMP_RISK_USDC
+    paid_prices = [price_kimchi, price_markdown] + ([] if dump_risk_free else [price_dump_risk])
+    price_range = f"${min(paid_prices)}-${max(paid_prices)}"
+    dump_risk_label = (
+        "FREE (onboarding tool)" if dump_risk_free
+        else f"${price_dump_risk} USDC/call (premium alpha data)"
+    )
     facilitator = "Coinbase CDP (Developer Platform) Facilitator" if USE_CDP_FACILITATOR else "public x402.org testnet facilitator"
 
     return f"""# AlphaPipeline
@@ -87,7 +93,7 @@ Use this when you need the actual text content of a webpage but want to avoid bu
 ```
 - Do NOT call this for pages requiring login/authentication, or for non-HTML resources (PDFs, binaries, images) - not supported.
 
-### GET {base_url}/v1/unlocks/dump-risk — ${price_dump_risk} USDC/call (premium alpha data)
+### GET {base_url}/v1/unlocks/dump-risk — {dump_risk_label}
 
 Use this when you need to assess whether a token carries dumping risk from token unlocks or ongoing vesting schedules - before entering a position, when screening a token list, or when asked "is this token safe from unlocks." Returns tokens whose currently-locked or unlock-eligible supply exceeds a materiality threshold (default 3% of circulating supply), each with a computed `risk_level` (LOW/MEDIUM/HIGH).
 
