@@ -96,11 +96,29 @@ async def _safe_call(op_name: str, coro) -> dict:
 @mcp.tool()
 async def convert_to_markdown(url: str) -> dict:
     """
-    Convert any webpage URL into clean, AI-friendly markdown by stripping
-    ads, navigation, and scripts and keeping only the main content.
+    Convert a webpage URL into clean, AI-friendly markdown by performing a live
+    HTTP GET (15s timeout) and stripping ads, navigation, and scripts, keeping
+    only the main content (capped at 3MB of source HTML).
+
+    Use this when you need to read a webpage's actual content but want to avoid
+    wasting tokens on HTML tags, ads, navigation menus, and scripts - or when raw
+    HTML parsing is causing hallucinations in downstream reasoning. Call it before
+    summarizing, extracting facts from, or answering questions about any arbitrary
+    public URL. Do NOT use it for: URLs requiring authentication/login (no cookies
+    or headers are sent); non-HTML resources such as PDFs, images, or other binary
+    files (returns "unsupported_content"); or JavaScript-rendered single-page apps
+    (this does a static HTML fetch, not a browser render, so client-side-only
+    content may come back sparse or empty). No other tool here does markdown
+    conversion - the sibling get_token_dump_risk is unrelated.
+
+    Failure modes returned as structured errors (never raised): "timeout" (15s
+    exceeded), "http_error" (non-2xx from the target site), "network_error"
+    (DNS/connection failure), "unsupported_content" (not HTML or over 3MB),
+    "invalid_url" (missing http(s):// scheme).
 
     Args:
-        url: The full URL of the webpage to convert (e.g. "https://example.com/article")
+        url: The full absolute URL of the webpage to convert, including scheme
+            (e.g. "https://example.com/article"). Relative paths are not accepted.
 
     Returns:
         On success: {"success": true, "url", "title", "markdown", "char_count"}
@@ -144,6 +162,13 @@ async def get_token_dump_risk(symbol: str) -> dict:
     circulating supply, and a sell-pressure score against real-time volume,
     returned as a concise summary report.
 
+    Use this to evaluate token unlock schedules, vesting cliffs, and upcoming
+    VC/team dump pressure relative to circulating supply before taking mid-to-
+    long term positions. Do NOT use it for intra-day slippage or real-time
+    transaction simulation - use dex.liquidity_slippage for that instead. This
+    tool is free (no payment) as an onboarding check; every other tool here is
+    a normal read-only call against app/logic.py.
+
     Args:
         symbol: Token ticker symbol (e.g. "ATH", "AO", "CPOOL"). Case-insensitive.
 
@@ -167,13 +192,19 @@ async def get_token_dump_risk(symbol: str) -> dict:
         return _error("unknown_error", f"An unknown error occurred: {e}")
 
 
-@mcp.tool()
+@mcp.tool(name="market.kimchi_alert")
 async def get_kimchi_alert(symbol: str = "BTC") -> dict:
     """
     Detect Korea-vs-global crypto price arbitrage (the "kimchi premium"):
     whether a coin trades at a premium or discount on Upbit vs the global
     market, a reverse-premium crash-risk flag (-1.5% or below), and a
     premium-surge flag (+3 percentage points within the last hour).
+
+    Use this when asked about cross-exchange arbitrage opportunities in Korean
+    crypto markets, to detect a reverse-premium crash risk, or a sudden premium
+    surge. This is a live snapshot only - do NOT use it for historical/backtesting
+    data, or for non-Korean-exchange comparisons (use arb.spread_matrix for a
+    general CEX-DEX spread check instead).
 
     Args:
         symbol: Ticker symbol, e.g. "BTC", "ETH", "SOL" (default "BTC").
@@ -187,13 +218,19 @@ async def get_kimchi_alert(symbol: str = "BTC") -> dict:
     return await _safe_call("get_kimchi_alert", _logic_kimchi_alert(str(symbol).upper()))
 
 
-@mcp.tool()
+@mcp.tool(name="security.token_risk")
 async def get_token_risk(chain_id: int, contract_address: str) -> dict:
     """
     Check a token contract for honeypot/scam risk before buying: is_honeypot,
     buy/sell tax, mintability, open-source status, ownership renouncement,
     holder count, and a summarized risk_level (LOW/MEDIUM/HIGH/UNKNOWN).
     Data source: GoPlus Security, falling back to Honeypot.is.
+
+    Use this right before entering a position on an unfamiliar or newly-listed
+    token. Do NOT treat a null field as "safe" - it means that field could not
+    be determined; check risk_level and risk_flags instead. This tool does not
+    cover LP lock/burn status - use get_contract_health_audit for that, or
+    get_token_diagnostic to get both in one call.
 
     Args:
         chain_id: EVM chain id, e.g. 8453 for Base.
@@ -207,13 +244,19 @@ async def get_token_risk(chain_id: int, contract_address: str) -> dict:
     return await _safe_call("get_token_risk", _logic_token_risk(chain_id, contract_address))
 
 
-@mcp.tool()
+@mcp.tool(name="security.contract_health_audit")
 async def get_contract_health_audit(chain_id: int, contract_address: str) -> dict:
     """
     Audit LP lock/burn status for a token contract (GoPlus): lp_locked_pct,
     lp_burned_pct, top_unlocked_holder_pct, rolled up into a liquidity_health
     category (LOCKED / PARTIALLY_LOCKED / UNLOCKED / NO_LP_DATA). A key
     rug-pull signal that get_token_risk does not cover.
+
+    Use this to check whether a token's liquidity is locked, burned, or freely
+    held by a single wallet before trusting it - complements, not replaces,
+    get_token_risk (honeypot/tax/mint checks). Deliberately does NOT include any
+    qualitative "suspicious transaction" judgment, only GoPlus's own numbers, and
+    has no fallback if GoPlus fails (Honeypot.is does not expose LP lock data).
 
     Args:
         chain_id: EVM chain id, e.g. 8453 for Base.
@@ -229,13 +272,19 @@ async def get_contract_health_audit(chain_id: int, contract_address: str) -> dic
     )
 
 
-@mcp.tool()
+@mcp.tool(name="security.token_diagnostic")
 async def get_token_diagnostic(chain_id: int, contract_address: str) -> dict:
     """
     Bundles get_token_risk + get_contract_health_audit into one combined
-    diagnostic report (same GoPlus data, run in parallel), plus a deduped
-    union of risk_flags. Does not compute a composite score/grade - every
-    field is copied unchanged from the two underlying tools.
+    diagnostic report (same GoPlus data, run in parallel, one upstream round
+    trip), plus a deduped union of risk_flags. Does not compute a composite
+    score/grade - every field is copied unchanged from the two underlying tools.
+
+    Use this instead of calling get_token_risk and get_contract_health_audit
+    separately when you want both honeypot/tax risk AND LP lock/burn status in
+    one call. Do NOT use it if you only need one of the two - call that single
+    tool directly to save a round trip. Does not cover token unlock/vesting
+    risk - use get_token_dump_risk separately for that.
 
     Args:
         chain_id: EVM chain id, e.g. 8453 for Base.
@@ -250,13 +299,20 @@ async def get_token_diagnostic(chain_id: int, contract_address: str) -> dict:
     )
 
 
-@mcp.tool()
+@mcp.tool(name="derivatives.whale_position_audit")
 async def get_whale_position_audit(address: str) -> dict:
     """
     Audit a Hyperliquid wallet's open perpetual futures positions: side,
     size, leverage, unrealized PnL, liquidation price, and distance-to-
-    liquidation percentage for every open position. An audit tool, not a
-    "smart money" discovery tool - you must already know the address.
+    liquidation percentage for every open position.
+
+    Use this only when you already have a specific Hyperliquid/EVM wallet address
+    (from an explorer, a screenshot, on-chain sleuthing, etc.) and want to audit
+    its current exposure. Do NOT use it to discover or rank "smart money" wallets
+    - Hyperliquid's public API has no leaderboard or large-trader disclosure
+    endpoint, so this tool cannot identify addresses for you, only audit ones you
+    provide. risk_flags (HIGH_LEVERAGE, NEAR_LIQUIDATION) are fixed numeric
+    thresholds, never a qualitative judgment.
 
     Args:
         address: Hyperliquid/EVM wallet address to audit (0x...).
@@ -268,11 +324,19 @@ async def get_whale_position_audit(address: str) -> dict:
     return await _safe_call("get_whale_position_audit", _logic_whale_position_audit(address))
 
 
-@mcp.tool()
+@mcp.tool(name="derivatives.funding_rate")
 async def get_funding_rate(symbol: str) -> dict:
     """
     Get perpetual futures funding rate (Bybit primary, Binance fallback) to
     gauge long/short crowding before entering or hedging a position.
+
+    Use this when asked about funding rate levels or funding-rate arbitrage/carry
+    trade opportunities. If you also need the trade annualized into an APR with
+    a carry-trade breakeven-days estimate, use get_funding_apr_matrix instead -
+    it already calls this internally, so calling both is redundant. Check the
+    data_source field to see whether Bybit or the Binance fallback answered;
+    predicted_rate equals funding_rate because neither exchange exposes a
+    separate forecast field (not a bug).
 
     Args:
         symbol: e.g. "BTC", "ETH", or "BTCUSDT" (non-USDT symbols are
@@ -286,13 +350,19 @@ async def get_funding_rate(symbol: str) -> dict:
     return await _safe_call("get_funding_rate", _logic_funding_rate(symbol))
 
 
-@mcp.tool()
+@mcp.tool(name="derivatives.funding_apr_matrix")
 async def get_funding_apr_matrix(symbol: str, assumed_round_trip_cost_pct: float = 0.2) -> dict:
     """
     Annualize a perpetual funding rate into APR + carry-trade breakeven days:
     evaluates a spot+perpetual cash-and-carry trade, tells you which side
     collects funding, and how many days of income recoups round-trip costs.
-    Pure calculation on top of get_funding_rate - no extra upstream call.
+    Pure calculation layer on top of get_funding_rate - no extra upstream call,
+    so prefer this over get_funding_rate whenever you need the APR/breakeven
+    view rather than the raw rate.
+
+    Use this to evaluate a spot+perpetual carry trade. Does NOT account for
+    margin borrow cost, spot-perp basis risk, or perp liquidation risk - treat
+    breakeven_days as a rough estimate, not a guaranteed profit timeline.
 
     Args:
         symbol: e.g. "BTC", "ETH", or "BTCUSDT".
@@ -310,7 +380,7 @@ async def get_funding_apr_matrix(symbol: str, assumed_round_trip_cost_pct: float
     )
 
 
-@mcp.tool()
+@mcp.tool(name="dex.liquidity_slippage")
 async def get_dex_liquidity_slippage(
     trade_size_usd: float,
     network: str = "base",
@@ -321,8 +391,15 @@ async def get_dex_liquidity_slippage(
     Estimate DEX pool liquidity and trade slippage (GeckoTerminal): total USD
     liquidity, 24h volume, an estimated slippage percentage for the given
     trade size, and slippage_tiers at fixed $1k/$5k/$10k sizes. Approximated
-    under a documented constant-product assumption - always re-verify with a
-    live quote before executing.
+    under a documented constant-product (50:50) assumption since GeckoTerminal's
+    free API exposes only combined USD liquidity, not per-token reserves.
+
+    Use this before sizing a trade or comparing pools for a given token, to
+    check depth before swapping. Do NOT treat estimated_slippage_pct or
+    slippage_tiers as an exact on-chain quote, especially for concentrated-
+    liquidity or stableswap pools - always re-verify with a live quote before
+    executing. Requires exactly one of pool_address or token_address; passing
+    neither raises an "invalid_input" error.
 
     Args:
         trade_size_usd: Hypothetical trade size in USD.
@@ -347,7 +424,7 @@ async def get_dex_liquidity_slippage(
     )
 
 
-@mcp.tool()
+@mcp.tool(name="arb.spread_matrix")
 async def get_arb_spread_matrix(
     symbol: str,
     network: str = "base",
@@ -358,9 +435,17 @@ async def get_arb_spread_matrix(
 ) -> dict:
     """
     CEX-DEX arbitrage spread calculator: checks whether a global reference
-    price (Coinbase spot, CoinGecko fallback) and a DEX pool price
-    (GeckoTerminal) diverge enough to be worth trading after an assumed flat
-    gas cost. Returns gross/net spread, direction, and is_profitable.
+    price (Coinbase spot, CoinGecko fallback - NOT a specific exchange
+    orderbook, despite internal naming) and a DEX pool price (GeckoTerminal)
+    diverge enough to be worth trading after an assumed flat gas cost. Returns
+    gross/net spread, direction, and is_profitable.
+
+    Use this before executing a cross-venue arbitrage trade, or for kimchi-style
+    premium checks on non-Korean venues (use market.kimchi_alert instead for the
+    Upbit-specific case). Does NOT account for CEX deposit/withdrawal
+    availability, trading fees, or slippage beyond trade_size_usd - always
+    re-verify with live quotes before executing. Requires exactly one of
+    pool_address or token_address; passing neither raises "invalid_input".
 
     Args:
         symbol: Ticker symbol, e.g. "SUI", "BTC", "ETH".
@@ -390,13 +475,19 @@ async def get_arb_spread_matrix(
     )
 
 
-@mcp.tool()
+@mcp.tool(name="calendar.macro_dday")
 async def get_macro_dday() -> dict:
     """
     Countdown to the nearest major US macro event (FOMC/CPI/NFP): event name,
     exact date/time (UTC and KST), a D-Day countdown, impact level, and the
-    next few upcoming events. Static, pre-loaded 2026 calendar - no live
-    external API call, so this never fails on an upstream outage.
+    next few upcoming events. Static, pre-loaded 2026 calendar sourced from
+    official Federal Reserve/BLS release schedules - no live external API call,
+    so this never fails on an upstream outage and takes no parameters.
+
+    Use this to plan position sizing or avoid holding risk into a high-impact
+    macro print. Does NOT cover non-US events (e.g. ECB, BOJ) or company
+    earnings - only FOMC/CPI/NFP are tracked. Takes no arguments; calling it
+    with any input is unnecessary.
 
     Returns:
         On success: {"success": true, "nearest_event", "days_until", ...}
