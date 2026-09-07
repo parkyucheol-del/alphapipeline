@@ -61,14 +61,15 @@ logger = logging.getLogger("alphapipeline")
 _PROTOCOL_VERSION_FALLBACK = "2025-06-18"
 
 _SERVER_INSTRUCTIONS = (
-    "AlphaPipeline은 각 도구를 Base 메인넷 USDC(x402 'exact' 스킴)로 건당 결제해야 "
-    "쓸 수 있습니다. tools/list의 각 도구 _meta.x402 필드에 가격/네트워크/수신주소가 "
-    "있습니다. 결제 없이 tools/call을 호출하면 이 요청에 대한 HTTP 응답 자체가 402가 "
-    "되고, 본문에 x402 accepts 배열(가격/자산/수신주소/논스 등 결제에 필요한 정보)이 "
-    "담겨 옵니다 - EIP-3009 transferWithAuthorization 서명을 만들어 X-PAYMENT 헤더에 "
-    "실어 같은 요청을 재시도하세요. 사람이 쓰는 순정 Claude Desktop/Cursor 채팅 UI는 "
-    "자체 지갑이 없어 이 결제를 자동으로 처리하지 못합니다 - 이 서버는 x402 결제 "
-    "인터셉터(x402-httpx, x402-fetch 등)를 갖춘 에이전트/봇 코드를 위한 것입니다."
+    "Every AlphaPipeline tool must be paid per call in USDC on Base mainnet (x402 'exact' "
+    "scheme). Each tool's _meta.x402 field in tools/list carries its price, network, and "
+    "recipient address. Calling tools/call without payment makes this request's own HTTP "
+    "response come back as 402, with an x402 accepts array in the body (price, asset, "
+    "recipient address, nonce, and everything else needed to pay) - build an EIP-3009 "
+    "transferWithAuthorization signature, attach it as the X-PAYMENT header, and retry the "
+    "same request. Plain human chat UIs such as stock Claude Desktop/Cursor have no wallet "
+    "of their own and cannot settle this payment automatically - this server is meant for "
+    "agent/bot code equipped with an x402 payment interceptor (x402-httpx, x402-fetch, etc.)."
 )
 
 # 각 도구 -> 기존에 이미 결제가 걸려 있는 REST GET 엔드포인트로 매핑한다.
@@ -867,7 +868,7 @@ async def _call_tool(body: dict, request: Request, client: httpx.AsyncClient) ->
 
     tool = _TOOL_BY_NAME.get(name)
     if tool is None:
-        return JSONResponse(content=_jsonrpc_error(req_id, -32602, f"알 수 없는 tool 이름: {name}"))
+        return JSONResponse(content=_jsonrpc_error(req_id, -32602, f"Unknown tool name: {name}"))
 
     query = {k: v for k, v in arguments.items() if v is not None}
     forward_headers = {}
@@ -885,8 +886,8 @@ async def _call_tool(body: dict, request: Request, client: httpx.AsyncClient) ->
     try:
         upstream = await client.get(tool["path"], params=query, headers=forward_headers)
     except Exception as e:
-        logger.exception("MCP tools/call 내부 self-call 실패: %s", name)
-        return JSONResponse(content=_jsonrpc_error(req_id, -32000, f"내부 호출 실패: {e}"))
+        logger.exception("MCP tools/call internal self-call failed: %s", name)
+        return JSONResponse(content=_jsonrpc_error(req_id, -32000, f"Internal call failed: {e}"))
 
     if upstream.status_code == 402:
         # x402 결제 필요 - 실제 결제 조건은 본문이 아니라 payment-required
@@ -898,7 +899,7 @@ async def _call_tool(body: dict, request: Request, client: httpx.AsyncClient) ->
     if upstream.status_code >= 400:
         return JSONResponse(
             content=_jsonrpc_error(
-                req_id, -32000, f"업스트림 오류 ({upstream.status_code}): {upstream.text[:500]}"
+                req_id, -32000, f"Upstream error ({upstream.status_code}): {upstream.text[:500]}"
             )
         )
 
@@ -915,7 +916,7 @@ async def _dispatch(body, request: Request, client: httpx.AsyncClient) -> Respon
         return JSONResponse(
             status_code=400,
             content=_jsonrpc_error(
-                None, -32600, "JSON-RPC 배치 요청은 지원하지 않습니다 (MCP 2025-06-18+에서 제거됨) - 요청을 하나씩 보내세요."
+                None, -32600, "Batch JSON-RPC requests are not supported (removed in MCP 2025-06-18+) - send requests individually."
             ),
         )
     if not isinstance(body, dict) or body.get("jsonrpc") != "2.0" or "method" not in body:
@@ -982,9 +983,7 @@ def register_mcp_routes(app: FastAPI) -> None:
                 "message": (
                     "This MCP server is stateless Streamable HTTP - POST only. There is no "
                     "SSE streaming (GET) because the server never sends unsolicited "
-                    "notifications. / 이 MCP 서버는 상태 비저장(stateless) Streamable HTTP - "
-                    "POST만 지원합니다. 서버가 먼저 보내는 알림이 없어 SSE 스트리밍(GET)은 "
-                    "제공하지 않습니다."
+                    "notifications."
                 ),
             },
         )

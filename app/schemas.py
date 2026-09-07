@@ -73,11 +73,12 @@ MARKDOWN_EXAMPLE = {
 
 class DumpRiskUnlockItem(BaseModel):
     """
-    두 데이터 경로(DropsTab / 온체인-Sablier)를 하나의 모델로 표현한다 - 그래서
-    DropsTab 전용 필드(unlock_date_utc, is_insider_vc_team 등)와 온체인 전용
-    필드(onchain_contract, timing_precision, data_source)가 전부 Optional이다.
-    어느 경로든 항상 채워지는 필드는 token/unlock_supply_pct/category/risk_level뿐.
-    (app/logic.py의 _process_event / _refresh_unlock_cache_onchain 참고)
+    Represents both data paths (DropsTab / on-chain Sablier) with a single model - that's
+    why the DropsTab-only fields (unlock_date_utc, is_insider_vc_team, etc.) and the
+    on-chain-only fields (onchain_contract, timing_precision, data_source) are all
+    Optional. The only fields always populated regardless of path are
+    token/unlock_supply_pct/category/risk_level.
+    (see _process_event / _refresh_unlock_cache_onchain in app/logic.py)
     """
     token: str
     onchain_contract: Optional[str] = None
@@ -399,9 +400,9 @@ FUNDING_RATE_EXAMPLE = {
     "funding_interval_hours": 8,
     "data_source": "bybit",
     "notice": (
-        "펀딩비는 다음 정산 시점(next_funding_time)에 적용될 예정 요율입니다. "
-        "Bybit/바이낸스 둘 다 이와 별개의 '예측' 필드를 제공하지 않으므로 "
-        "predicted_rate는 funding_rate와 동일한 값입니다."
+        "funding_rate is the rate scheduled to take effect at the next settlement "
+        "(next_funding_time). Neither Bybit nor Binance exposes a separate 'predicted' "
+        "field, so predicted_rate is identical to funding_rate."
     ),
 }
 
@@ -597,7 +598,7 @@ class MacroDdayResponse(BaseModel):
 
 MACRO_DDAY_EXAMPLE = {
     "generated_at": {"utc": "2026-09-03T12:00:00Z", "kst": "2026-09-03 21:00:00 KST"},
-    "event_name": "FOMC 금리 결정 (9월, SEP 포함)",
+    "event_name": "FOMC Rate Decision (September, includes SEP)",
     "event_type": "FOMC",
     "event_datetime": {"utc": "2026-09-16T18:00:00Z", "kst": "2026-09-17 03:00:00 KST"},
     "d_day": 13,
@@ -607,14 +608,14 @@ MACRO_DDAY_EXAMPLE = {
     "description": "Federal Reserve interest rate decision and policy statement.",
     "upcoming_events": [
         {
-            "event_name": "CPI (2026년 9월 기준)",
+            "event_name": "CPI (September 2026)",
             "event_type": "CPI",
             "event_datetime": {"utc": "2026-10-14T12:30:00Z", "kst": "2026-10-14 21:30:00 KST"},
             "impact_level": "HIGH",
             "tags": ["inflation", "cpi", "cpi-report"],
         },
         {
-            "event_name": "NFP (2026년 9월 기준)",
+            "event_name": "NFP (September 2026)",
             "event_type": "NFP",
             "event_datetime": {"utc": "2026-10-02T12:30:00Z", "kst": "2026-10-02 21:30:00 KST"},
             "impact_level": "HIGH",
@@ -623,9 +624,10 @@ MACRO_DDAY_EXAMPLE = {
     ],
     "data_source": "static_2026_macro_calendar",
     "notice": (
-        "이 캘린더는 2026년 FOMC 금리 결정, 미국 CPI, 미국 고용지표(NFP) 일정을 공식 "
-        "연준(Fed)/BLS 발표 기준으로 정적으로 내장한 것입니다 - 실시간 외부 API를 호출하지 "
-        "않습니다. 일정은 연준/BLS가 추후 변경할 수 있고 2027년 일정은 아직 포함되어 있지 "
-        "않으니, 중요한 의사결정 전에는 공식 소스(federalreserve.gov, bls.gov)로 재확인하세요."
+        "This calendar statically embeds the 2026 FOMC rate decision, US CPI, and US "
+        "employment (NFP) schedule based on official Federal Reserve/BLS release dates - "
+        "no live external API is called. The Fed/BLS can change these dates later and the "
+        "2027 schedule is not yet included, so re-verify against official sources "
+        "(federalreserve.gov, bls.gov) before any important decision."
     ),
 }

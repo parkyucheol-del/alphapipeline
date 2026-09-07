@@ -72,15 +72,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="AlphaPipeline API",
-    description="AI 에이전트/트레이더 봇을 위한 초미세 결제(0.01 USDC) 데이터 API",
+    description="Pay-per-call ($0.005-$0.03 USDC) market/on-chain data API for AI agents and trading bots",
     version="0.3.0",
     lifespan=lifespan,
     # /openapi.json, /docs에 표시되는 태그 그룹 설명. x402 Bazaar 스펙과는 무관하지만,
     # OpenAPI 스펙을 그대로 읽는 에이전트 디렉토리(예: Agentic.Market 후보군)를 위해
     # 사람이 읽어도, 기계가 읽어도 되는 문서를 갖춰두는 차원.
     openapi_tags=[
-        {"name": "market", "description": "실시간 시세/온체인 이벤트 기반 시장 데이터"},
-        {"name": "tools", "description": "AI 에이전트용 유틸리티 도구"},
+        {"name": "market", "description": "Real-time price and on-chain event market data"},
+        {"name": "tools", "description": "Utility tools for AI agents"},
     ],
 )
 
@@ -184,9 +184,9 @@ async def llms_txt_endpoint():
         "supported vesting mechanisms; always check the coverage_notice field in the response."
     ),
     responses={
-        200: {"model": DumpRiskResponse, "description": "락업 해제 위험도 데이터"},
-        402: {"description": "x402 결제 필요"},
-        502: {"model": ErrorResponse, "description": "업스트림(DropsTab/Sablier/CoinGecko) 오류"},
+        200: {"model": DumpRiskResponse, "description": "Unlock/vesting dump-risk data"},
+        402: {"description": "x402 payment required"},
+        502: {"model": ErrorResponse, "description": "Upstream (DropsTab/Sablier/CoinGecko) error"},
     },
 )
 async def dump_risk_endpoint():
@@ -214,12 +214,12 @@ async def dump_risk_endpoint():
         "or backtesting data, or for non-Korean-exchange comparisons."
     ),
     responses={
-        200: {"model": KimchiAlertResponse, "description": "김치프리미엄 계산 결과"},
-        402: {"description": "x402 결제 필요"},
-        502: {"model": ErrorResponse, "description": "업스트림(업비트/바이낸스) 오류"},
+        200: {"model": KimchiAlertResponse, "description": "Kimchi premium calculation result"},
+        402: {"description": "x402 payment required"},
+        502: {"model": ErrorResponse, "description": "Upstream (Upbit/Binance) error"},
     },
 )
-async def kimchi_alert_endpoint(symbol: str = Query("BTC", description="예: BTC, ETH, SOL")):
+async def kimchi_alert_endpoint(symbol: str = Query("BTC", description="e.g. BTC, ETH, SOL")):
     # 결제 검증은 이제 main.py 상단에서 장착한 x402 PaymentMiddlewareASGI가
     # 라우트 진입 전에 처리한다 - 여기까지 왔다는 건 이미 결제가 확인됐다는 뜻.
     try:
@@ -245,12 +245,12 @@ async def kimchi_alert_endpoint(symbol: str = Query("BTC", description="예: BTC
         "those are not supported."
     ),
     responses={
-        200: {"model": MarkdownResponse, "description": "정제된 마크다운"},
-        402: {"description": "x402 결제 필요"},
-        502: {"model": ErrorResponse, "description": "대상 URL 접근/파싱 오류"},
+        200: {"model": MarkdownResponse, "description": "Cleaned Markdown"},
+        402: {"description": "x402 payment required"},
+        502: {"model": ErrorResponse, "description": "Target URL access/parsing error"},
     },
 )
-async def ai_markdown_endpoint(url: str = Query(..., description="변환할 웹페이지 URL")):
+async def ai_markdown_endpoint(url: str = Query(..., description="Webpage URL to convert")):
     try:
         data = await url_to_markdown(url)
         return JSONResponse(content=data)
@@ -276,9 +276,9 @@ async def ai_markdown_endpoint(url: str = Query(..., description="변환할 웹�
         "be determined; check risk_level and risk_flags instead."
     ),
     responses={
-        200: {"model": TokenRiskResponse, "description": "토큰 보안/허니팟 위험도 데이터"},
-        402: {"description": "x402 결제 필요"},
-        502: {"model": ErrorResponse, "description": "업스트림(GoPlus/Honeypot.is) 오류"},
+        200: {"model": TokenRiskResponse, "description": "Token security / honeypot risk data"},
+        402: {"description": "x402 payment required"},
+        502: {"model": ErrorResponse, "description": "Upstream (GoPlus/Honeypot.is) error"},
     },
 )
 async def token_risk_endpoint(
@@ -311,9 +311,9 @@ async def token_risk_endpoint(
         "does not expose LP lock data."
     ),
     responses={
-        200: {"model": ContractHealthAuditResponse, "description": "LP 락업/소각 감사 결과"},
-        402: {"description": "x402 결제 필요"},
-        502: {"model": ErrorResponse, "description": "업스트림(GoPlus) 오류"},
+        200: {"model": ContractHealthAuditResponse, "description": "LP lock/burn audit result"},
+        402: {"description": "x402 payment required"},
+        502: {"model": ErrorResponse, "description": "Upstream (GoPlus) error"},
     },
 )
 async def contract_health_audit_endpoint(
@@ -344,9 +344,9 @@ async def contract_health_audit_endpoint(
         "`chain_id` (e.g. 8453 for Base) and `contract_address` (required)."
     ),
     responses={
-        200: {"model": TokenDiagnosticResponse, "description": "결합 진단 결과 (합성 점수 없음)"},
-        402: {"description": "x402 결제 필요"},
-        502: {"model": ErrorResponse, "description": "업스트림(GoPlus) 오류"},
+        200: {"model": TokenDiagnosticResponse, "description": "Combined diagnostic result (no composite score)"},
+        402: {"description": "x402 payment required"},
+        502: {"model": ErrorResponse, "description": "Upstream (GoPlus) error"},
     },
 )
 async def token_diagnostic_endpoint(
@@ -378,9 +378,9 @@ async def token_diagnostic_endpoint(
         "Hyperliquid/EVM wallet address, 0x...)."
     ),
     responses={
-        200: {"model": WhalePositionAuditResponse, "description": "지갑 포지션 감사 결과"},
-        402: {"description": "x402 결제 필요"},
-        502: {"model": ErrorResponse, "description": "업스트림(Hyperliquid) 오류"},
+        200: {"model": WhalePositionAuditResponse, "description": "Wallet position audit result"},
+        402: {"description": "x402 payment required"},
+        502: {"model": ErrorResponse, "description": "Upstream (Hyperliquid) error"},
     },
 )
 async def whale_position_audit_endpoint(
@@ -411,9 +411,9 @@ async def whale_position_audit_endpoint(
         "ETH, or BTCUSDT - non-USDT-suffixed symbols are normalized to USDT pairs)."
     ),
     responses={
-        200: {"model": FundingRateResponse, "description": "무기한 선물 펀딩비 데이터"},
-        402: {"description": "x402 결제 필요"},
-        502: {"model": ErrorResponse, "description": "업스트림(Bybit/바이낸스) 오류"},
+        200: {"model": FundingRateResponse, "description": "Perpetual futures funding rate data"},
+        402: {"description": "x402 payment required"},
+        502: {"model": ErrorResponse, "description": "Upstream (Bybit/Binance) error"},
     },
 )
 async def funding_rate_endpoint(symbol: str = Query(..., description="e.g. BTC, ETH, or BTCUSDT")):
@@ -442,9 +442,9 @@ async def funding_rate_endpoint(symbol: str = Query(..., description="e.g. BTC, 
         "borrow cost, spot-perp basis risk, or perp liquidation risk."
     ),
     responses={
-        200: {"model": FundingAprMatrixResponse, "description": "펀딩비 연환산 APR 및 캐리 트레이드 손익분기일"},
-        402: {"description": "x402 결제 필요"},
-        502: {"model": ErrorResponse, "description": "업스트림(Bybit/바이낸스) 오류"},
+        200: {"model": FundingAprMatrixResponse, "description": "Annualized funding APR and carry-trade breakeven days"},
+        402: {"description": "x402 payment required"},
+        502: {"model": ErrorResponse, "description": "Upstream (Bybit/Binance) error"},
     },
 )
 async def funding_apr_matrix_endpoint(
@@ -482,9 +482,9 @@ async def funding_apr_matrix_endpoint(
         "or stableswap pools."
     ),
     responses={
-        200: {"model": DexSlippageResponse, "description": "DEX 유동성/슬리피지 추정 데이터"},
-        402: {"description": "x402 결제 필요"},
-        502: {"model": ErrorResponse, "description": "업스트림(GeckoTerminal) 오류 또는 입력 오류"},
+        200: {"model": DexSlippageResponse, "description": "DEX liquidity/slippage estimate data"},
+        402: {"description": "x402 payment required"},
+        502: {"model": ErrorResponse, "description": "Upstream (GeckoTerminal) error or input error"},
     },
 )
 async def dex_liquidity_slippage_endpoint(
@@ -526,9 +526,9 @@ async def dex_liquidity_slippage_endpoint(
         "re-verify with live quotes before executing."
     ),
     responses={
-        200: {"model": ArbSpreadResponse, "description": "차익거래 스프레드 계산 결과"},
-        402: {"description": "x402 결제 필요"},
-        502: {"model": ErrorResponse, "description": "업스트림(Coinbase/CoinGecko/GeckoTerminal) 오류 또는 입력 오류"},
+        200: {"model": ArbSpreadResponse, "description": "Arbitrage spread calculation result"},
+        402: {"description": "x402 payment required"},
+        502: {"model": ErrorResponse, "description": "Upstream (Coinbase/CoinGecko/GeckoTerminal) error or input error"},
     },
 )
 async def arb_spread_matrix_endpoint(
@@ -574,9 +574,9 @@ async def arb_spread_matrix_endpoint(
         "upstream outage. No input parameters required."
     ),
     responses={
-        200: {"model": MacroDdayResponse, "description": "매크로 이벤트 D-Day 캘린더 데이터"},
-        402: {"description": "x402 결제 필요"},
-        500: {"model": ErrorResponse, "description": "내부 처리 오류"},
+        200: {"model": MacroDdayResponse, "description": "Macro event D-Day calendar data"},
+        402: {"description": "x402 payment required"},
+        500: {"model": ErrorResponse, "description": "Internal processing error"},
     },
 )
 async def macro_dday_endpoint():
