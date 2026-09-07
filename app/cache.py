@@ -27,6 +27,12 @@ price_cache: TTLCache = TTLCache(maxsize=64, ttl=settings.KIMCHI_CACHE_TTL_SECON
 # ai-markdown 변환 결과: 같은 URL 반복 호출 시 10분 캐시
 markdown_cache: TTLCache = TTLCache(maxsize=256, ttl=600)
 
+# GoPlus token_security 원본 응답: security.token_risk/contract_health_audit/
+# token_diagnostic 3개 엔드포인트가 공유하는 캐시. 같은 컨트랙트 주소를 반복
+# 조회할 때 GoPlus 무료 쿼터 소진을 막는 게 목적(2026-09, "업스트림 무료
+# 쿼터 보호" 요청으로 추가) - 짧은 TTL이라 실시간성 손실은 미미함.
+goplus_cache: TTLCache = TTLCache(maxsize=256, ttl=settings.GOPLUS_CACHE_TTL_SECONDS)
+
 
 def ttl_cached(cache: TTLCache, key_fn: Callable[..., str] | None = None):
     """

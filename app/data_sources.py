@@ -16,6 +16,7 @@ import logging
 
 import httpx
 from app.config import settings
+from app.cache import goplus_cache, ttl_cached
 
 logger = logging.getLogger("alphapipeline")
 
@@ -323,11 +324,20 @@ async def get_coingecko_token_contract_and_supply(coin_id: str) -> dict:
 
 
 
+@ttl_cached(
+    goplus_cache,
+    key_fn=lambda chain_id, contract_address: f"{chain_id}:{contract_address.lower()}",
+)
 async def get_goplus_token_security(chain_id: int, contract_address: str) -> dict:
     """
     GoPlus Security의 token_security 엔드포인트를 호출한다. 앱키 없이 동작한다
     (공식 문서는 Authorization 헤더를 언급하지만, 실사용 커뮤니티 래퍼 기준으로는
     키 없이도 정상 응답한다 - 2026-09 확인).
+
+    security.token_risk / contract_health_audit / token_diagnostic 3개 엔드포인트가
+    전부 이 함수를 호출하므로(token_diagnostic은 asyncio.gather로 둘을 동시 호출),
+    GOPLUS_CACHE_TTL_SECONDS 동안 (chain_id, contract_address) 단위로 캐싱해서
+    GoPlus 무료 쿼터 소진을 방지한다(app/cache.py의 goplus_cache/ttl_cached 참고).
     """
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         r = await client.get(

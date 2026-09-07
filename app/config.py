@@ -76,6 +76,14 @@ class Settings:
     # 지표가 아니라 실시간성 손실도 체감상 미미하다.
     KIMCHI_CACHE_TTL_SECONDS: int = int(os.getenv("KIMCHI_CACHE_TTL_SECONDS", "30"))
 
+    # GoPlus token_security 캐시 TTL(초). security.token_risk / contract_health_audit /
+    # token_diagnostic 세 유료 엔드포인트가 전부 같은 GoPlus 무료 쿼터를 공유하므로,
+    # 같은 (chain_id, contract_address) 조합이 짧은 시간 안에 반복 조회되면(봇의
+    # 재시도, token_diagnostic의 내부 asyncio.gather 등) 캐시로 흡수해서 무료
+    # 쿼터 소진/레이트리밋으로 인한 502를 방지한다. x402 결제는 캐시 히트와
+    # 무관하게 매 호출 그대로 징수되므로 마진에는 영향 없다(app/cache.py 참고).
+    GOPLUS_CACHE_TTL_SECONDS: int = int(os.getenv("GOPLUS_CACHE_TTL_SECONDS", "120"))
+
     # 락업 해제(dump-risk) 스캔 주기(시간). 언락 일정은 몇 주 전에 미리 확정되는
     # 경우가 대부분이라 실시간일 필요가 없음 - 기본값 24시간(하루 1회)이 이미
     # "필요한 최소" 수준이며, 필요하면 이 값만 늘려서 더 낮출 수 있음.
