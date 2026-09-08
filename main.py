@@ -762,6 +762,36 @@ async def polymarket_connectivity_debug(
         except Exception as e:
             checks["fed_event_probe"] = {"error": f"{type(e).__name__}: {e}"}
 
+        # 5) 실제 스키마 확인용 - 마켓 원본 JSON 전체 (필드명 정확히 뭔지, neg_risk 플래그가
+        #    어디에 있는지, tokens/clobTokenIds/outcomes 실제 구조가 어떤지 확인).
+        try:
+            r = await client.get(
+                "https://gamma-api.polymarket.com/markets",
+                params={"slug": "will-1-fed-rate-cut-happen-in-2026"},
+            )
+            checks["raw_market_dump"] = {"status": r.status_code, "body": r.text[:4000]}
+        except Exception as e:
+            checks["raw_market_dump"] = {"error": f"{type(e).__name__}: {e}"}
+
+        # 6) 이벤트 레벨 원본에서도 neg_risk 관련 필드가 있는지 확인 (market 레벨이 아니라
+        #    event 레벨에 있을 수도 있음).
+        try:
+            r = await client.get(
+                "https://gamma-api.polymarket.com/events",
+                params={"slug": probe_event_slug},
+            )
+            raw_events = r.json() if r.status_code == 200 else []
+            first_market_raw = None
+            if raw_events and raw_events[0].get("markets"):
+                first_market_raw = raw_events[0]["markets"][0]
+            checks["raw_event_dump"] = {
+                "status": r.status_code,
+                "event_top_level_keys": list(raw_events[0].keys()) if raw_events else [],
+                "first_market_full": first_market_raw,
+            }
+        except Exception as e:
+            checks["raw_event_dump"] = {"error": f"{type(e).__name__}: {e}"}
+
     return JSONResponse(content={"checks": checks, "notice": "임시 진단용 엔드포인트 - 확인 후 삭제 예정"})
 
 
