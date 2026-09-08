@@ -736,6 +736,30 @@ async def polymarket_connectivity_debug():
         except Exception as e:
             checks["clob_api"] = {"error": f"{type(e).__name__}: {e}"}
 
+        # 4) 실제 엔드투엔드 테스트용 - neg-risk 다중 결과 이벤트 하나를 실제로 조회해서
+        #    market slug / clobTokenIds를 확보 (get_neg_risk_arbitrage, get_exit_capacity_audit
+        #    실제 테스트 파라미터를 찾기 위함). 확인 끝나면 이 블록도 같이 삭제할 것.
+        try:
+            r = await client.get(
+                "https://gamma-api.polymarket.com/events",
+                params={"slug": "fed-decision-in-december"},
+            )
+            events = r.json() if r.status_code == 200 else []
+            summary = []
+            for ev in events:
+                for m in ev.get("markets", []):
+                    summary.append({
+                        "event_slug": ev.get("slug"),
+                        "market_slug": m.get("slug"),
+                        "question": m.get("question"),
+                        "clobTokenIds": m.get("clobTokenIds"),
+                        "active": m.get("active"),
+                        "closed": m.get("closed"),
+                    })
+            checks["fed_event_probe"] = {"status": r.status_code, "markets": summary}
+        except Exception as e:
+            checks["fed_event_probe"] = {"error": f"{type(e).__name__}: {e}"}
+
     return JSONResponse(content={"checks": checks, "notice": "임시 진단용 엔드포인트 - 확인 후 삭제 예정"})
 
 
