@@ -695,7 +695,9 @@ async def exit_capacity_audit_endpoint(
     "/v1/debug/polymarket-connectivity",
     include_in_schema=False,  # 결제 게이트(app/payment.py build_routes)에 등록 안 함 - 임시 진단용, 무료
 )
-async def polymarket_connectivity_debug():
+async def polymarket_connectivity_debug(
+    probe_event_slug: str = Query("fed-decision-in-december", description="임시 - fed_event_probe에 쓸 이벤트 slug"),
+):
     """
     임시 진단용 엔드포인트.
 
@@ -742,7 +744,7 @@ async def polymarket_connectivity_debug():
         try:
             r = await client.get(
                 "https://gamma-api.polymarket.com/events",
-                params={"slug": "fed-decision-in-december"},
+                params={"slug": probe_event_slug},
             )
             events = r.json() if r.status_code == 200 else []
             summary = []
