@@ -631,3 +631,88 @@ MACRO_DDAY_EXAMPLE = {
         "(federalreserve.gov, bls.gov) before any important decision."
     ),
 }
+
+
+class PredictionNegRiskArbitrageResponse(BaseModel):
+    generated_at: TimestampPair
+    event_slug: str
+    num_outcomes: int
+    basket_ask_sum: float | None = None
+    basket_bid_sum: float | None = None
+    buy_basket_gross_edge_usd: float | None = None
+    sell_basket_gross_edge_usd: float | None = None
+    assumed_round_trip_cost_pct: float
+    buy_basket_net_edge_usd: float | None = None
+    sell_basket_net_edge_usd: float | None = None
+    buy_basket_capacity_shares: float
+    sell_basket_capacity_shares: float
+    buy_basket_capacity_notional_usd: float | None = None
+    sell_basket_capacity_notional_usd: float | None = None
+    opportunity: str
+    arbitrage_viable: bool
+    data_source: str
+    notice: str | None = None
+
+
+NEG_RISK_ARBITRAGE_EXAMPLE = {
+    "generated_at": {"utc": "2026-09-08T12:00:00Z", "kst": "2026-09-08 21:00:00 KST"},
+    "event_slug": "presidential-election-winner-2028",
+    "num_outcomes": 5,
+    "basket_ask_sum": 0.94,
+    "basket_bid_sum": 0.88,
+    "buy_basket_gross_edge_usd": 0.06,
+    "sell_basket_gross_edge_usd": -0.12,
+    "assumed_round_trip_cost_pct": 1.5,
+    "buy_basket_net_edge_usd": 0.045,
+    "sell_basket_net_edge_usd": -0.135,
+    "buy_basket_capacity_shares": 42.0,
+    "sell_basket_capacity_shares": 0.0,
+    "buy_basket_capacity_notional_usd": 39.48,
+    "sell_basket_capacity_notional_usd": 0.0,
+    "opportunity": "buy_basket",
+    "arbitrage_viable": True,
+    "data_source": "polymarket-gamma+clob",
+    "notice": (
+        "*_capacity_shares is how many full baskets (1 share of every outcome) you could "
+        "execute right now within max_slippage_pct of each leg's best price - "
+        "arbitrage_viable=false with a positive edge usually means the edge is real but "
+        "too thin to size meaningfully. Cross-check the specific leg you intend to trade "
+        "with prediction.exit_capacity_audit before sizing a real position."
+    ),
+}
+
+
+class PredictionExitCapacityAuditResponse(BaseModel):
+    generated_at: TimestampPair
+    token_id: str
+    market_slug: str | None = None
+    side: str
+    position_size_shares: float
+    executable: bool
+    best_quote: float | None = None
+    avg_exit_price: float | None = None
+    price_impact_pct: float | None = None
+    max_executable_shares: float
+    data_source: str
+    notice: str | None = None
+
+
+EXIT_CAPACITY_AUDIT_EXAMPLE = {
+    "generated_at": {"utc": "2026-09-08T12:00:00Z", "kst": "2026-09-08 21:00:00 KST"},
+    "token_id": "78901234567890123456789012345678901234567890123456789012345678",
+    "market_slug": "will-btc-hit-150k-by-2028",
+    "side": "sell",
+    "position_size_shares": 500.0,
+    "executable": True,
+    "best_quote": 0.62,
+    "avg_exit_price": 0.609,
+    "price_impact_pct": 1.77,
+    "max_executable_shares": 500.0,
+    "data_source": "polymarket-clob",
+    "notice": (
+        "executable=false means the current book cannot fully fill this size - "
+        "max_executable_shares is how much you could get out of (or into) right now at "
+        "the prices already walked through above. This is a live, point-in-time "
+        "snapshot, not an average or historical liquidity figure."
+    ),
+}

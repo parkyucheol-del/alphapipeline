@@ -33,6 +33,16 @@ markdown_cache: TTLCache = TTLCache(maxsize=256, ttl=600)
 # 쿼터 보호" 요청으로 추가) - 짧은 TTL이라 실시간성 손실은 미미함.
 goplus_cache: TTLCache = TTLCache(maxsize=256, ttl=settings.GOPLUS_CACHE_TTL_SECONDS)
 
+# Polymarket CLOB 오더북: prediction.neg_risk_arbitrage가 neg-risk 그룹의 여러
+# outcome 레그를 한 번에 조회할 때, 그리고 prediction.exit_capacity_audit이
+# 직후 같은 토큰을 다시 조회할 때 중복 호출을 흡수해서 Polymarket CLOB의 IP
+# 레이트리밋(429)을 방어한다(2026-09, 배포 전 외부 리뷰 피드백 반영). 3초로
+# 짧게 잡은 이유는 오더북이 실시간성이 중요한 데이터라 TTL이 길면 차익
+# 시그널이 이미 사라진 가격을 보여줄 위험이 있어서다 - 레이트리밋 방어와
+# 실시간성 사이의 절충점. x402 결제는 캐시 히트와 무관하게 매 호출 그대로
+# 징수되므로 마진에는 영향 없다(위 ttl_cached() 설명 참고).
+polymarket_book_cache: TTLCache = TTLCache(maxsize=256, ttl=settings.POLYMARKET_BOOK_CACHE_TTL_SECONDS)
+
 
 def ttl_cached(cache: TTLCache, key_fn: Callable[..., str] | None = None):
     """

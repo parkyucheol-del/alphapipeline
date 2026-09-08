@@ -16,7 +16,7 @@ import logging
 
 import httpx
 from app.config import settings
-from app.cache import goplus_cache, ttl_cached
+from app.cache import goplus_cache, polymarket_book_cache, ttl_cached
 
 logger = logging.getLogger("alphapipeline")
 
@@ -466,5 +466,59 @@ async def get_hyperliquid_clearinghouse_state(address: str) -> dict:
             HYPERLIQUID_INFO_URL,
             json={"type": "clearinghouseState", "user": address},
         )
+        r.raise_for_status()
+        return r.json()
+
+
+# ============================================================================
+# prediction.neg_risk_arbitrage / prediction.exit_capacity_audit (2026-09) -
+# 예측시장 확장 Wave 1. Polymarket 공식 공개 API만 사용한다(인증 불필요) -
+# Gamma API로 이벤트/마켓 메타데이터를, CLOB API로 실시간 오더북을 조회한다.
+#
+# 왜 Kalshi가 아니라 Polymarket만인가: Kalshi의 공식 Data ToS는 데이터 캐싱 후
+# 제3자 제공, 파생 상품/서비스로 가공해 재판매, AI/머신러닝 용도 사용을 전부
+# 명시적으로 금지한다 - 이 프로젝트처럼 유료 API로 가공해 파는 모델과 정면
+# 충돌해서 법적 리스크로 배제했다(프로젝트 노트 업데이트 32 참고). Polymarket은
+# 이 데이터를 제3자 통합 목적의 공개 API로 서빙하고 있고, 궁극적으로는 Polygon
+# 온체인 공개 상태이기도 해서 라이선스 리스크가 낮다고 판단했다.
+# ============================================================================
+GAMMA_API_BASE = "https://gamma-api.polymarket.com"
+CLOB_API_BASE = "https://clob.polymarket.com"
+
+
+async def get_polymarket_event(event_slug: str) -> dict:
+    """slug로 Polymarket 이벤트 1개를 조회한다 (Gamma API). 없으면 ValueError."""
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        r = await client.get(f"{GAMMA_API_BASE}/events", params={"slug": event_slug})
+        r.raise_for_status()
+        events = r.json()
+    if not events:
+        raise ValueError(f"Polymarket에서 이벤트 slug '{event_slug}'를 찾지 못했습니다")
+    return events[0] if isinstance(events, list) else events
+
+
+async def get_polymarket_market(market_slug: str) -> dict:
+    """slug로 Polymarket 마켓 1개를 조회한다 (Gamma API). 없으면 ValueError."""
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        r = await client.get(f"{GAMMA_API_BASE}/markets", params={"slug": market_slug})
+        r.raise_for_status()
+        markets = r.json()
+    if not markets:
+        raise ValueError(f"Polymarket에서 마켓 slug '{market_slug}'를 찾지 못했습니다")
+    return markets[0] if isinstance(markets, list) else markets
+
+
+@ttl_cached(polymarket_book_cache, key_fn=lambda token_id: f"book:{token_id}")
+async def get_polymarket_order_book(token_id: str) -> dict:
+    """
+    CLOB 오더북 조회 (POLYMARKET_BOOK_CACHE_TTL_SECONDS 짧은 TTL 캐시 -
+    neg_risk_arbitrage가 여러 outcome을 asyncio.gather로 한 번에 조회할 때,
+    그리고 exit_capacity_audit이 직후 같은 토큰을 다시 조회할 때 중복 호출을
+    줄여서 Polymarket CLOB의 IP 레이트리밋(429)을 방어한다. x402 결제는 캐시
+    히트와 무관하게 매 호출 그대로 징수되므로 마진에는 영향 없다 - app/cache.py의
+    ttl_cached() 참고).
+    """
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        r = await client.get(f"{CLOB_API_BASE}/book", params={"token_id": token_id})
         r.raise_for_status()
         return r.json()

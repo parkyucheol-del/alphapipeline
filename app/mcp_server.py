@@ -310,6 +310,57 @@ ARB_SPREAD_OUTPUT_SCHEMA = {
     ],
 }
 
+NEG_RISK_ARBITRAGE_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "generated_at": _TIMESTAMP_PAIR_SCHEMA,
+        "event_slug": {"type": "string"},
+        "num_outcomes": {"type": "integer"},
+        "basket_ask_sum": {"type": ["number", "null"]},
+        "basket_bid_sum": {"type": ["number", "null"]},
+        "buy_basket_gross_edge_usd": {"type": ["number", "null"]},
+        "sell_basket_gross_edge_usd": {"type": ["number", "null"]},
+        "assumed_round_trip_cost_pct": {"type": "number"},
+        "buy_basket_net_edge_usd": {"type": ["number", "null"]},
+        "sell_basket_net_edge_usd": {"type": ["number", "null"]},
+        "buy_basket_capacity_shares": {"type": "number"},
+        "sell_basket_capacity_shares": {"type": "number"},
+        "buy_basket_capacity_notional_usd": {"type": ["number", "null"]},
+        "sell_basket_capacity_notional_usd": {"type": ["number", "null"]},
+        "opportunity": {"type": "string"},
+        "arbitrage_viable": {"type": "boolean"},
+        "data_source": {"type": "string"},
+        "notice": {"type": ["string", "null"]},
+    },
+    "required": [
+        "generated_at", "event_slug", "num_outcomes", "assumed_round_trip_cost_pct",
+        "buy_basket_capacity_shares", "sell_basket_capacity_shares", "opportunity",
+        "arbitrage_viable", "data_source",
+    ],
+}
+
+EXIT_CAPACITY_AUDIT_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "generated_at": _TIMESTAMP_PAIR_SCHEMA,
+        "token_id": {"type": "string"},
+        "market_slug": {"type": ["string", "null"]},
+        "side": {"type": "string"},
+        "position_size_shares": {"type": "number"},
+        "executable": {"type": "boolean"},
+        "best_quote": {"type": ["number", "null"]},
+        "avg_exit_price": {"type": ["number", "null"]},
+        "price_impact_pct": {"type": ["number", "null"]},
+        "max_executable_shares": {"type": "number"},
+        "data_source": {"type": "string"},
+        "notice": {"type": ["string", "null"]},
+    },
+    "required": [
+        "generated_at", "token_id", "side", "position_size_shares", "executable",
+        "max_executable_shares", "data_source",
+    ],
+}
+
 WHALE_AUDIT_OUTPUT_SCHEMA = {
     "type": "object",
     "properties": {
@@ -759,6 +810,91 @@ _TOOLS: list[dict] = [
         ),
         "input_schema": {"type": "object", "properties": {}, "required": []},
         "output_schema": MACRO_DDAY_OUTPUT_SCHEMA,
+        "annotations": _READ_ONLY_ANNOTATIONS,
+    },
+    {
+        "name": "prediction.neg_risk_arbitrage",
+        "path": "/v1/prediction/neg-risk-arbitrage",
+        "price_attr": "PRICE_NEG_RISK_ARBITRAGE_USDC",
+        "description": (
+            "Detect basket arbitrage in a Polymarket neg-risk (mutually-exclusive, "
+            "multi-outcome) event - a full YES basket across all outcomes always "
+            "settles to exactly $1, so a basket price away from $1 (after costs) is "
+            "a near risk-free edge. Also returns buy/sell_basket_capacity_shares, "
+            "the actual liquidity-bottleneck size executable right now, so this "
+            "isn't just a top-of-book mirage. Polymarket only. Do not use for "
+            "binary Yes/No markets (no basket to arbitrage) or for Kalshi (its "
+            "Data ToS forbids this use). Paid in USDC on Base."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "event_slug": {
+                    "type": "string",
+                    "description": "Polymarket event slug, from the event's URL on polymarket.com.",
+                },
+                "assumed_round_trip_cost_pct": {
+                    "type": "number",
+                    "description": (
+                        "Gas + fees + slippage buffer, as a percentage of $1 basket "
+                        "notional. Defaults to 1.5."
+                    ),
+                },
+                "max_slippage_pct": {
+                    "type": "number",
+                    "description": "How far past each leg's best price to walk the book when sizing capacity. Defaults to 1.0.",
+                },
+                "min_net_edge_pct": {
+                    "type": "number",
+                    "description": "Minimum net edge (%) required to flag arbitrage_viable: true. Defaults to 1.0.",
+                },
+            },
+            "required": ["event_slug"],
+        },
+        "output_schema": NEG_RISK_ARBITRAGE_OUTPUT_SCHEMA,
+        "annotations": _READ_ONLY_ANNOTATIONS,
+    },
+    {
+        "name": "prediction.exit_capacity_audit",
+        "path": "/v1/prediction/exit-capacity-audit",
+        "price_attr": "PRICE_EXIT_CAPACITY_AUDIT_USDC",
+        "description": (
+            "Walk a single Polymarket outcome's live order book to determine how "
+            "much of a given position size can actually be filled right now, at "
+            "what average price, and with how much price impact versus the best "
+            "quote - a live snapshot, not historical liquidity. Accepts either a "
+            "raw token_id or a market_slug (+ outcome) to resolve it automatically "
+            "- exact slug only, no fuzzy keyword search. Do not use for "
+            "multi-outcome basket arbitrage detection (use "
+            "prediction.neg_risk_arbitrage instead). Paid in USDC on Base."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "position_size_shares": {
+                    "type": "number",
+                    "description": "Number of outcome shares to sell (or buy). Must be positive.",
+                },
+                "token_id": {
+                    "type": "string",
+                    "description": "The outcome's CLOB token_id / asset_id, if already known.",
+                },
+                "market_slug": {
+                    "type": "string",
+                    "description": "Exact Polymarket market slug, used to resolve token_id automatically.",
+                },
+                "outcome": {
+                    "type": "string",
+                    "description": "\"yes\" (default) or \"no\" - which side to resolve when using market_slug.",
+                },
+                "side": {
+                    "type": "string",
+                    "description": "\"sell\" (default) or \"buy\".",
+                },
+            },
+            "required": ["position_size_shares"],
+        },
+        "output_schema": EXIT_CAPACITY_AUDIT_OUTPUT_SCHEMA,
         "annotations": _READ_ONLY_ANNOTATIONS,
     },
     {

@@ -16,10 +16,12 @@ from app.logic import (
     get_contract_health_audit,
     get_dex_liquidity_slippage,
     get_dump_risk,
+    get_exit_capacity_audit,
     get_funding_apr_matrix,
     get_funding_rate,
     get_kimchi_alert,
     get_macro_calendar_dday,
+    get_neg_risk_arbitrage,
     get_token_diagnostic,
     get_token_risk,
     get_whale_position_audit,
@@ -39,6 +41,8 @@ from app.schemas import (
     KimchiAlertResponse,
     MacroDdayResponse,
     MarkdownResponse,
+    PredictionExitCapacityAuditResponse,
+    PredictionNegRiskArbitrageResponse,
     TokenDiagnosticResponse,
     TokenRiskResponse,
     WhalePositionAuditResponse,
@@ -122,6 +126,8 @@ async def root():
             "/v1/arb/spread-matrix": settings.PRICE_ARB_SPREAD_USDC,
             "/v1/derivatives/whale-position-audit": settings.PRICE_WHALE_AUDIT_USDC,
             "/v1/security/token-diagnostic": settings.PRICE_TOKEN_DIAGNOSTIC_USDC,
+            "/v1/prediction/neg-risk-arbitrage": settings.PRICE_NEG_RISK_ARBITRAGE_USDC,
+            "/v1/prediction/exit-capacity-audit": settings.PRICE_EXIT_CAPACITY_AUDIT_USDC,
         },
         "payment": {
             "protocol": "x402",
@@ -142,6 +148,8 @@ async def root():
             "/v1/arb/spread-matrix",
             "/v1/derivatives/whale-position-audit",
             "/v1/security/token-diagnostic",
+            "/v1/prediction/neg-risk-arbitrage",
+            "/v1/prediction/exit-capacity-audit",
         ],
         "coming_soon_endpoints": [],
         "docs": "/docs",
@@ -586,6 +594,149 @@ async def macro_dday_endpoint():
     except Exception as e:
         logger.exception("macro-dday 처리 실패")
         return JSONResponse(status_code=500, content={"error": "internal_error", "message": str(e)})
+
+
+@app.get(
+    "/v1/prediction/neg-risk-arbitrage",
+    tags=["market"],
+    summary="Detect basket arbitrage in a Polymarket neg-risk multi-outcome event",
+    description=(
+        "Use this endpoint to scan a specific Polymarket neg-risk (mutually-exclusive, "
+        "multi-outcome) event for a risk-free or near risk-free basket arbitrage: since "
+        "owning exactly 1 YES share of every outcome always settles to exactly $1, a "
+        "basket price away from $1 is an edge - after subtracting assumed_round_trip_cost_pct "
+        "(gas + fees + slippage buffer). Also computes buy/sell_basket_capacity_shares, the "
+        "actual liquidity-bottleneck size the thinnest outcome's order book can support "
+        "within max_slippage_pct, so arbitrage_viable reflects what's really executable, "
+        "not just a top-of-book mirage. Input: required `event_slug` (from the event's URL "
+        "on polymarket.com) and optional `assumed_round_trip_cost_pct` (default 1.5), "
+        "`max_slippage_pct` (default 1.0), `min_net_edge_pct` (default 1.0). Polymarket only "
+        "- Kalshi's Data ToS explicitly forbids this kind of commercial reuse of their data, "
+        "so it is never used here. Pair with exit-capacity-audit on an individual leg before "
+        "sizing a real position."
+    ),
+    responses={
+        200: {"model": PredictionNegRiskArbitrageResponse, "description": "Neg-risk basket arbitrage result"},
+        402: {"description": "x402 payment required"},
+        502: {"model": ErrorResponse, "description": "Upstream (Polymarket) error or input error"},
+    },
+)
+async def neg_risk_arbitrage_endpoint(
+    event_slug: str = Query(..., description="Polymarket event slug, from the event's URL on polymarket.com"),
+    assumed_round_trip_cost_pct: float = Query(
+        1.5, description="Gas + fees + slippage buffer, as a percentage of $1 basket notional"
+    ),
+    max_slippage_pct: float = Query(
+        1.0, description="How far past each leg's best price to walk the book when sizing basket capacity"
+    ),
+    min_net_edge_pct: float = Query(
+        1.0, description="Minimum net edge (% of $1 basket notional) required to flag arbitrage_viable: true"
+    ),
+):
+    try:
+        data = await get_neg_risk_arbitrage(
+            event_slug=event_slug,
+            assumed_round_trip_cost_pct=assumed_round_trip_cost_pct,
+            max_slippage_pct=max_slippage_pct,
+            min_net_edge_pct=min_net_edge_pct,
+        )
+        return JSONResponse(content=data)
+    except Exception as e:
+        logger.exception("neg-risk-arbitrage 처리 실패")
+        return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
+
+
+@app.get(
+    "/v1/prediction/exit-capacity-audit",
+    tags=["market"],
+    summary="Audit real executable liquidity for a Polymarket outcome position",
+    description=(
+        "Use this endpoint to check whether a given position size in a specific Polymarket "
+        "outcome can actually be filled right now - walks the live order book and returns "
+        "whether it's fully executable, the average fill price, and the price impact versus "
+        "the best quote. This is a live, point-in-time snapshot, not historical/average "
+        "liquidity. Input: required `position_size_shares`, and either `token_id` (if already "
+        "known) or `market_slug` (+ optional `outcome`, default 'yes') to resolve it "
+        "automatically - only an exact Polymarket market slug is supported, this endpoint "
+        "does not do fuzzy keyword search since a wrong silent match would be worse than an "
+        "error. Optional `side` ('sell' default, or 'buy'). Pair this with "
+        "neg-risk-arbitrage to validate one leg of a detected opportunity before sizing it."
+    ),
+    responses={
+        200: {"model": PredictionExitCapacityAuditResponse, "description": "Executable liquidity audit result"},
+        402: {"description": "x402 payment required"},
+        502: {"model": ErrorResponse, "description": "Upstream (Polymarket) error or input error"},
+    },
+)
+async def exit_capacity_audit_endpoint(
+    position_size_shares: float = Query(..., description="Number of outcome shares to sell (or buy). Must be positive."),
+    token_id: str | None = Query(None, description="The outcome's CLOB token_id / asset_id, if already known"),
+    market_slug: str | None = Query(
+        None, description="Exact Polymarket market slug, used to resolve token_id automatically"
+    ),
+    outcome: str = Query("yes", description="'yes' (default) or 'no' - which side to resolve when using market_slug"),
+    side: str = Query("sell", description="'sell' (default) or 'buy'"),
+):
+    try:
+        data = await get_exit_capacity_audit(
+            position_size_shares=position_size_shares,
+            token_id=token_id,
+            market_slug=market_slug,
+            outcome=outcome,
+            side=side,
+        )
+        return JSONResponse(content=data)
+    except Exception as e:
+        logger.exception("exit-capacity-audit 처리 실패")
+        return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
+
+
+@app.get(
+    "/v1/debug/polymarket-connectivity",
+    include_in_schema=False,  # 결제 게이트(app/payment.py build_routes)에 등록 안 함 - 임시 진단용, 무료
+)
+async def polymarket_connectivity_debug():
+    """
+    임시 진단용 엔드포인트.
+
+    한국 로컬 PC에서는 정부 ISP 차단으로 폴리마켓 도메인 접근 시 HTTP 451이
+    뜨는 것을 이미 확인했음 (Polymarket 자체 지역제한과는 무관한 별개 이슈).
+    이 엔드포인트는 그것과 별개로, 실제 배포 서버(Render, 프랑크푸르트) egress
+    IP 기준으로 읽기 전용 GET이 실제로 통하는지 직접 확인하기 위한 것.
+
+    확인 끝나면 반드시 삭제할 것 - 인증 없는 아웃바운드 프록시로 악용될 수
+    있으므로 오래 남겨두지 않는다.
+    """
+    import httpx
+
+    checks: dict = {}
+    timeout = httpx.Timeout(8.0, connect=5.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        # 1) 폴리마켓 자체 geoblock 자가진단 - Render egress IP가 어느 나라/
+        #    차단상태로 잡히는지 가장 빠르게 알려주는 신호. 단, 이 엔드포인트의
+        #    의미는 공식적으로 "주문 실행 가능 여부"이므로 blocked:true가 나와도
+        #    곧바로 "읽기도 막혔다"로 확대 해석하지 말 것 - 2), 3)과 같이 봐야 함.
+        try:
+            r = await client.get("https://polymarket.com/api/geoblock")
+            checks["geoblock"] = {"status": r.status_code, "body": r.text[:500]}
+        except Exception as e:
+            checks["geoblock"] = {"error": f"{type(e).__name__}: {e}"}
+
+        # 2) Gamma API 공개 조회 (인증 불필요, get_neg_risk_arbitrage 등이 실제로 쓰는 도메인)
+        try:
+            r = await client.get("https://gamma-api.polymarket.com/events", params={"limit": 1})
+            checks["gamma_api"] = {"status": r.status_code, "body": r.text[:500]}
+        except Exception as e:
+            checks["gamma_api"] = {"error": f"{type(e).__name__}: {e}"}
+
+        # 3) CLOB API 공개 조회 (인증 불필요, get_polymarket_order_book이 실제로 쓰는 도메인)
+        try:
+            r = await client.get("https://clob.polymarket.com/markets")
+            checks["clob_api"] = {"status": r.status_code, "body": r.text[:500]}
+        except Exception as e:
+            checks["clob_api"] = {"error": f"{type(e).__name__}: {e}"}
+
+    return JSONResponse(content={"checks": checks, "notice": "임시 진단용 엔드포인트 - 확인 후 삭제 예정"})
 
 
 from app.mcp_server import register_mcp_routes as _register_mcp_routes  # noqa: E402

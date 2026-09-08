@@ -7,7 +7,7 @@ Also the exact server Glama's automated Docker build test introspects for
 this listing's "Server" score, so its tool count should track app/mcp_server.py
 (the paid remote server) 1:1 even though calls here bypass payment entirely.
 
-12 tools provided (same coverage as the paid remote /mcp server, just called
+14 tools provided (same coverage as the paid remote /mcp server, just called
 directly against app/logic.py instead of going through x402 payment):
   1.  convert_to_markdown(url)                              -> app/markdown_tool.py: url_to_markdown
   2.  get_token_dump_risk(symbol)                            -> app/logic.py: get_symbol_dump_risk
@@ -21,6 +21,8 @@ directly against app/logic.py instead of going through x402 payment):
   10. get_dex_liquidity_slippage(...)                        -> app/logic.py: get_dex_liquidity_slippage
   11. get_arb_spread_matrix(...)                             -> app/logic.py: get_arb_spread_matrix
   12. get_macro_dday()                                       -> app/logic.py: get_macro_calendar_dday
+  13. get_neg_risk_arbitrage(event_slug, ...)                -> app/logic.py: get_neg_risk_arbitrage
+  14. get_exit_capacity_audit(position_size_shares, ...)     -> app/logic.py: get_exit_capacity_audit
 
 Note (important, stated honestly):
   - This MCP server is a separate "distribution build" from the paid x402 HTTP
@@ -53,10 +55,12 @@ from app.logic import (
     get_arb_spread_matrix as _logic_arb_spread_matrix,
     get_contract_health_audit as _logic_contract_health_audit,
     get_dex_liquidity_slippage as _logic_dex_liquidity_slippage,
+    get_exit_capacity_audit as _logic_exit_capacity_audit,
     get_funding_apr_matrix as _logic_funding_apr_matrix,
     get_funding_rate as _logic_funding_rate,
     get_kimchi_alert as _logic_kimchi_alert,
     get_macro_calendar_dday as _logic_macro_calendar_dday,
+    get_neg_risk_arbitrage as _logic_neg_risk_arbitrage,
     get_symbol_dump_risk,
     get_token_diagnostic as _logic_token_diagnostic,
     get_token_risk as _logic_token_risk,
@@ -494,6 +498,105 @@ async def get_macro_dday() -> dict:
         On failure: {"success": false, "error": {"type", "message"}}
     """
     return await _safe_call("get_macro_dday", _logic_macro_calendar_dday())
+
+
+@mcp.tool(name="prediction.neg_risk_arbitrage")
+async def get_neg_risk_arbitrage(
+    event_slug: str,
+    assumed_round_trip_cost_pct: float = 1.5,
+    max_slippage_pct: float = 1.0,
+    min_net_edge_pct: float = 1.0,
+) -> dict:
+    """
+    Detect basket arbitrage in a Polymarket neg-risk (mutually-exclusive,
+    multi-outcome) event: a full YES basket across all outcomes always settles
+    to exactly $1 via Polymarket's neg-risk adapter, so a basket price away
+    from $1 (after costs) is a near risk-free edge. Also computes
+    buy/sell_basket_capacity_shares - the actual liquidity-bottleneck size the
+    thinnest outcome's order book can support within max_slippage_pct - so
+    this isn't just a top-of-book mirage. Polymarket only.
+
+    Use this to scan a specific multi-outcome event you already know the slug
+    for. Do NOT use for binary Yes/No markets (no basket to arbitrage, this
+    needs 2+ mutually-exclusive outcomes) or for Kalshi (its Data ToS forbids
+    this use of their data). Pair with prediction.exit_capacity_audit before
+    sizing a real position on one leg.
+
+    Args:
+        event_slug: Polymarket event slug, from the event's URL on polymarket.com.
+        assumed_round_trip_cost_pct: Gas + fees + slippage buffer, as a
+            percentage of $1 basket notional (default 1.5).
+        max_slippage_pct: How far past each leg's best price to walk the book
+            when sizing executable basket capacity (default 1.0).
+        min_net_edge_pct: Minimum net edge (%) required to flag
+            arbitrage_viable: true (default 1.0).
+
+    Returns:
+        On success: {"success": true, "basket_ask_sum", "basket_bid_sum",
+            "buy_basket_net_edge_usd", "buy_basket_capacity_shares",
+            "opportunity", "arbitrage_viable", ...}
+        On failure: {"success": false, "error": {"type", "message"}}
+    """
+    return await _safe_call(
+        "get_neg_risk_arbitrage",
+        _logic_neg_risk_arbitrage(
+            event_slug,
+            assumed_round_trip_cost_pct=assumed_round_trip_cost_pct,
+            max_slippage_pct=max_slippage_pct,
+            min_net_edge_pct=min_net_edge_pct,
+        ),
+    )
+
+
+@mcp.tool(name="prediction.exit_capacity_audit")
+async def get_exit_capacity_audit(
+    position_size_shares: float,
+    token_id: str | None = None,
+    market_slug: str | None = None,
+    outcome: str = "yes",
+    side: str = "sell",
+) -> dict:
+    """
+    Walk a single Polymarket outcome's live order book to determine how much
+    of a given position size can actually be filled right now, at what
+    average price, and with how much price impact versus the best quote - a
+    live, point-in-time snapshot, not historical/average liquidity.
+
+    Use this to validate one leg of an opportunity found by
+    prediction.neg_risk_arbitrage before committing capital, or whenever you
+    need real executable liquidity rather than the headline best bid/ask. Do
+    NOT use for multi-outcome basket arbitrage detection (use
+    prediction.neg_risk_arbitrage instead). market_slug only resolves an
+    EXACT Polymarket market slug - no fuzzy keyword search, since a wrong
+    silent match would be worse than an error here.
+
+    Args:
+        position_size_shares: Number of outcome shares to sell (or buy). Must
+            be positive.
+        token_id: The outcome's CLOB token_id / asset_id, if already known.
+            Provide either this OR market_slug.
+        market_slug: Exact Polymarket market slug, used to resolve token_id
+            automatically when not already known.
+        outcome: "yes" (default) or "no" - which side to resolve when using
+            market_slug. Ignored if token_id is given directly.
+        side: "sell" (default) to audit exiting a position against the bid
+            side, or "buy" to audit entering against the ask side.
+
+    Returns:
+        On success: {"success": true, "executable", "best_quote",
+            "avg_exit_price", "price_impact_pct", "max_executable_shares", ...}
+        On failure: {"success": false, "error": {"type", "message"}}
+    """
+    return await _safe_call(
+        "get_exit_capacity_audit",
+        _logic_exit_capacity_audit(
+            position_size_shares,
+            token_id=token_id,
+            market_slug=market_slug,
+            outcome=outcome,
+            side=side,
+        ),
+    )
 
 
 if __name__ == "__main__":

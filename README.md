@@ -76,8 +76,16 @@ Full protocol reference: [`/llms.txt`](https://alphapipeline-eu.onrender.com/llm
 | `derivatives.whale_position_audit` | `GET /v1/derivatives/whale-position-audit` | $0.02 | Audits a Hyperliquid wallet address you supply: open positions, leverage, liquidation price, and PnL. Does not discover or rank wallets - Hyperliquid's public API has no leaderboard endpoint. |
 | `calendar.macro_dday` | `GET /v1/calendar/macro-dday` | $0.01 | Countdown to the nearest major US macro event (FOMC, CPI, NFP) from a static, pre-loaded calendar — no external API call, never fails on an upstream outage. |
 | `unlocks.dump_risk` | `GET /v1/unlocks/dump-risk` | **Free** | On-chain (Sablier) proxy for token unlock/vesting dump risk. Kept free by default as an onboarding tool so agents can verify the service before paying for the rest. |
+| `prediction.neg_risk_arbitrage` | `GET /v1/prediction/neg-risk-arbitrage` | $0.03 | Detects basket arbitrage in a Polymarket neg-risk (mutually-exclusive, multi-outcome) event — a full YES basket always settles to $1, so a basket price away from $1 (after costs) is a near risk-free edge. Also returns the actual liquidity-bottleneck size executable right now, not just a top-of-book price. Polymarket only. |
+| `prediction.exit_capacity_audit` | `GET /v1/prediction/exit-capacity-audit` | $0.02 | Walks a Polymarket outcome's live order book to check whether a given position size can actually be filled right now, at what average price and price impact. Resolves by `token_id` or an exact `market_slug`. |
 
 Every response is timestamped in both UTC and KST, and every priced endpoint's payment prompt reads "Paid in USDC on Base." so a human looking at the 402 screen in a browser isn't left guessing which chain's USDC to send.
+
+---
+
+## Disclaimer
+
+AlphaPipeline provides quantitative market data and analytics for informational and research purposes only. It does not execute trades, place orders, hold custody of user funds, or provide brokerage/betting/gambling services of any kind — it is a read-only data layer. Users are solely responsible for ensuring their use of this data complies with the laws and regulations applicable in their own jurisdiction.
 
 ---
 

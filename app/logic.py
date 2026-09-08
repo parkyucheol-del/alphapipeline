@@ -1591,3 +1591,267 @@ async def get_macro_calendar_dday() -> dict:
         "data_source": "static_2026_macro_calendar",
         "notice": _MACRO_CALENDAR_NOTICE,
     }
+
+
+# ============================================================================
+# prediction.neg_risk_arbitrage / prediction.exit_capacity_audit (2026-09) -
+# 예측시장(Polymarket) 확장 Wave 1. 상세 기획/리스크 검토는 프로젝트 노트
+# 업데이트 32/33/34 참고. Kalshi는 Data ToS 위반 리스크로 완전히 배제했고,
+# Polymarket 온체인 neg-risk 어댑터 메커니즘(YES 바스켓 합이 항상 $1로
+# 정산)에 기반한 결정론적 계산만 한다 - LLM 판단/경험적 추정 없음.
+#
+# 2026-09 배포 전 외부 리뷰에서 지적받아 반영한 것 (v1 -> v2):
+#   - 단순 top-of-book 가격 합만 보면 실제로는 못 사는 "가짜 차익"이 나올 수
+#     있어서, 각 레그 오더북을 max_slippage_pct 이내로 걸어 실제 체결 가능한
+#     최소 공통 수량(basket capacity)까지 계산한다.
+#   - 비용 차감을 레그당 고정 $ 대신 get_funding_apr_matrix와 같은 방식의
+#     퍼센트 파라미터(assumed_round_trip_cost_pct)로 통일했다.
+#   - 오더북 조회를 asyncio.gather로 병렬화하고 짧은 TTL 캐시를 적용해
+#     레이트리밋/지연 위험을 줄였다(app/data_sources.py 참고).
+# ============================================================================
+
+_NEG_RISK_ARBITRAGE_NOTICE = (
+    "*_capacity_shares is how many full baskets (1 share of every outcome) you "
+    "could execute right now within max_slippage_pct of each leg's best price - "
+    "arbitrage_viable=false with a positive edge usually means the edge is real "
+    "but too thin to size meaningfully. Cross-check the specific leg you intend "
+    "to trade with prediction.exit_capacity_audit before sizing a real position."
+)
+
+_EXIT_CAPACITY_AUDIT_NOTICE = (
+    "executable=false means the current book cannot fully fill this size - "
+    "max_executable_shares is how much you could get out of (or into) right now "
+    "at the prices already walked through above. This is a live, point-in-time "
+    "snapshot, not an average or historical liquidity figure."
+)
+
+
+def _parse_book_levels(raw_levels: list[dict], reverse: bool) -> list[dict]:
+    """CLOB 오더북의 bids/asks 배열(price/size가 문자열)을 정렬된 float 리스트로."""
+    return sorted(
+        ({"price": float(l["price"]), "size": float(l["size"])} for l in raw_levels),
+        key=lambda l: l["price"],
+        reverse=reverse,
+    )
+
+
+def _leg_capacity_shares(levels: list[dict], best_price: float, max_slippage_pct: float, side: str) -> float:
+    """
+    한 레그(outcome)의 오더북에서, best_price로부터 max_slippage_pct 이내인
+    구간에 걸려있는 수량 합계 - 이 레그를 실제로 얼마나 살(팔) 수 있는지.
+    """
+    if not levels or best_price is None:
+        return 0.0
+    if side == "ask":
+        cutoff = best_price * (1 + max_slippage_pct / 100)
+        return sum(l["size"] for l in levels if l["price"] <= cutoff)
+    cutoff = best_price * (1 - max_slippage_pct / 100)
+    return sum(l["size"] for l in levels if l["price"] >= cutoff)
+
+
+async def get_neg_risk_arbitrage(
+    event_slug: str,
+    assumed_round_trip_cost_pct: float = 1.5,
+    max_slippage_pct: float = 1.0,
+    min_net_edge_pct: float = 1.0,
+) -> dict:
+    """
+    Polymarket "neg-risk"(상호배타적 다중 결과) 이벤트의 바스켓 차익을 계산한다.
+    neg-risk 그룹은 YES 바스켓 합이 항상 $1로 정산되는 온체인 어댑터 메커니즘을
+    갖고 있어서, best-ask 합이 $1 미만(혹은 best-bid 합이 $1 초과)이면 그 차이가
+    거의 무위험 차익이다 - 단, 각 레그의 실제 체결 가능 수량(유동성 병목)까지
+    함께 계산해서 top-of-book만 보고 못 사는 "가짜 차익"을 걸러낸다.
+    GET /v1/prediction/neg-risk-arbitrage가 사용한다 (main.py 참고).
+    """
+    if not event_slug or not event_slug.strip():
+        raise ValueError("event_slug는 필수입니다 (예: 'presidential-election-winner-2028')")
+    event_slug = event_slug.strip()
+
+    event = await ds.get_polymarket_event(event_slug)
+    markets = [m for m in event.get("markets", []) if m.get("neg_risk")]
+    if len(markets) < 2:
+        raise ValueError(
+            f"이벤트 '{event_slug}'에는 neg-risk 상호배타 그룹이 없습니다 "
+            "(바스켓 차익 계산에는 2개 이상의 상호배타 마켓이 필요합니다)"
+        )
+
+    yes_token_ids: list[str] = []
+    for m in markets:
+        tokens = m.get("tokens", [])
+        yes_token = next((t for t in tokens if str(t.get("outcome", "")).lower() == "yes"), None)
+        if yes_token and yes_token.get("token_id"):
+            yes_token_ids.append(str(yes_token["token_id"]))
+    if len(yes_token_ids) < 2:
+        raise ValueError(f"이벤트 '{event_slug}'의 YES 토큰 ID를 찾지 못했습니다")
+
+    books = await asyncio.gather(*(ds.get_polymarket_order_book(tid) for tid in yes_token_ids))
+
+    n = len(yes_token_ids)
+    ask_levels_per_leg: list[list[dict]] = []
+    bid_levels_per_leg: list[list[dict]] = []
+    best_asks: list[float] = []
+    best_bids: list[float] = []
+    for book in books:
+        asks = _parse_book_levels(book.get("asks") or [], reverse=False)
+        bids = _parse_book_levels(book.get("bids") or [], reverse=True)
+        ask_levels_per_leg.append(asks)
+        bid_levels_per_leg.append(bids)
+        if asks:
+            best_asks.append(asks[0]["price"])
+        if bids:
+            best_bids.append(bids[0]["price"])
+
+    basket_ask_sum = sum(best_asks) if len(best_asks) == n else None
+    basket_bid_sum = sum(best_bids) if len(best_bids) == n else None
+
+    buy_gross_edge = (1.0 - basket_ask_sum) if basket_ask_sum is not None else None
+    sell_gross_edge = (basket_bid_sum - 1.0) if basket_bid_sum is not None else None
+
+    cost_frac = assumed_round_trip_cost_pct / 100
+    buy_net_edge = (buy_gross_edge - cost_frac) if buy_gross_edge is not None else None
+    sell_net_edge = (sell_gross_edge - cost_frac) if sell_gross_edge is not None else None
+
+    buy_basket_capacity_shares = 0.0
+    if len(best_asks) == n:
+        leg_caps = [
+            _leg_capacity_shares(levels, best, max_slippage_pct, "ask")
+            for levels, best in zip(ask_levels_per_leg, best_asks)
+        ]
+        buy_basket_capacity_shares = min(leg_caps) if leg_caps else 0.0
+
+    sell_basket_capacity_shares = 0.0
+    if len(best_bids) == n:
+        leg_caps = [
+            _leg_capacity_shares(levels, best, max_slippage_pct, "bid")
+            for levels, best in zip(bid_levels_per_leg, best_bids)
+        ]
+        sell_basket_capacity_shares = min(leg_caps) if leg_caps else 0.0
+
+    opportunity = "none"
+    arbitrage_viable = False
+    if (
+        buy_net_edge is not None
+        and buy_net_edge * 100 >= min_net_edge_pct
+        and buy_basket_capacity_shares > 0
+        and (sell_net_edge is None or buy_net_edge >= sell_net_edge)
+    ):
+        opportunity = "buy_basket"
+        arbitrage_viable = True
+    elif (
+        sell_net_edge is not None
+        and sell_net_edge * 100 >= min_net_edge_pct
+        and sell_basket_capacity_shares > 0
+    ):
+        opportunity = "sell_basket"
+        arbitrage_viable = True
+
+    return {
+        "generated_at": _timestamp_now(),
+        "event_slug": event_slug,
+        "num_outcomes": n,
+        "basket_ask_sum": round(basket_ask_sum, 4) if basket_ask_sum is not None else None,
+        "basket_bid_sum": round(basket_bid_sum, 4) if basket_bid_sum is not None else None,
+        "buy_basket_gross_edge_usd": round(buy_gross_edge, 4) if buy_gross_edge is not None else None,
+        "sell_basket_gross_edge_usd": round(sell_gross_edge, 4) if sell_gross_edge is not None else None,
+        "assumed_round_trip_cost_pct": assumed_round_trip_cost_pct,
+        "buy_basket_net_edge_usd": round(buy_net_edge, 4) if buy_net_edge is not None else None,
+        "sell_basket_net_edge_usd": round(sell_net_edge, 4) if sell_net_edge is not None else None,
+        "buy_basket_capacity_shares": round(buy_basket_capacity_shares, 4),
+        "sell_basket_capacity_shares": round(sell_basket_capacity_shares, 4),
+        "buy_basket_capacity_notional_usd": (
+            round(buy_basket_capacity_shares * basket_ask_sum, 2) if basket_ask_sum is not None else None
+        ),
+        "sell_basket_capacity_notional_usd": (
+            round(sell_basket_capacity_shares * basket_bid_sum, 2) if basket_bid_sum is not None else None
+        ),
+        "opportunity": opportunity,
+        "arbitrage_viable": arbitrage_viable,
+        "data_source": "polymarket-gamma+clob",
+        "notice": _NEG_RISK_ARBITRAGE_NOTICE,
+    }
+
+
+async def get_exit_capacity_audit(
+    position_size_shares: float,
+    token_id: str | None = None,
+    market_slug: str | None = None,
+    outcome: str = "yes",
+    side: str = "sell",
+) -> dict:
+    """
+    Polymarket 특정 outcome의 실시간 오더북을 걷어서, 지정한 수량을 지금 당장
+    실제로 체결할 수 있는지, 평균 체결가/가격충격은 얼마인지 계산한다.
+    token_id를 몰라도 market_slug(+outcome)만 주면 Gamma API로 자동 해석한다 -
+    단 정확한 slug만 지원하고 keyword 검색은 하지 않는다(애매한 매칭으로 엉뚱한
+    마켓을 조용히 골라버리는 게 에러보다 나쁘다고 판단, 2026-09 배포 전 리뷰 반영).
+    GET /v1/prediction/exit-capacity-audit가 사용한다 (main.py 참고).
+    """
+    if position_size_shares is None or position_size_shares <= 0:
+        raise ValueError("position_size_shares는 0보다 큰 값이어야 합니다")
+    if not token_id and not market_slug:
+        raise ValueError("token_id 또는 market_slug(정확한 Polymarket 마켓 slug) 중 하나는 필요합니다")
+
+    resolved_token_id = str(token_id).strip() if token_id else None
+    if not resolved_token_id:
+        market = await ds.get_polymarket_market(market_slug.strip())
+        tokens = market.get("tokens", [])
+        match = next((t for t in tokens if str(t.get("outcome", "")).lower() == outcome), None)
+        if not match or not match.get("token_id"):
+            raise ValueError(f"마켓 slug '{market_slug}'에서 '{outcome}' 토큰을 찾지 못했습니다")
+        resolved_token_id = str(match["token_id"])
+
+    book = await ds.get_polymarket_order_book(resolved_token_id)
+    levels_raw = (book.get("bids") if side == "sell" else book.get("asks")) or []
+    levels = _parse_book_levels(levels_raw, reverse=(side == "sell"))
+
+    if not levels:
+        return {
+            "generated_at": _timestamp_now(),
+            "token_id": resolved_token_id,
+            "market_slug": market_slug,
+            "side": side,
+            "position_size_shares": position_size_shares,
+            "executable": False,
+            "best_quote": None,
+            "avg_exit_price": None,
+            "price_impact_pct": None,
+            "max_executable_shares": 0.0,
+            "data_source": "polymarket-clob",
+            "notice": _EXIT_CAPACITY_AUDIT_NOTICE
+            + f" No {'bids' if side == 'sell' else 'asks'} on the book right now - position is currently stuck.",
+        }
+
+    best_quote = levels[0]["price"]
+    remaining = position_size_shares
+    filled_notional = 0.0
+    filled_shares = 0.0
+    for level in levels:
+        if remaining <= 0:
+            break
+        take = min(remaining, level["size"])
+        filled_notional += take * level["price"]
+        filled_shares += take
+        remaining -= take
+
+    executable = remaining <= 0
+    avg_price = (filled_notional / filled_shares) if filled_shares > 0 else None
+    impact_pct = (
+        ((best_quote - avg_price) / best_quote * 100) if side == "sell" and avg_price is not None
+        else ((avg_price - best_quote) / best_quote * 100) if avg_price is not None
+        else None
+    )
+
+    return {
+        "generated_at": _timestamp_now(),
+        "token_id": resolved_token_id,
+        "market_slug": market_slug,
+        "side": side,
+        "position_size_shares": position_size_shares,
+        "executable": executable,
+        "best_quote": round(best_quote, 4),
+        "avg_exit_price": round(avg_price, 4) if avg_price is not None else None,
+        "price_impact_pct": round(impact_pct, 3) if impact_pct is not None else None,
+        "max_executable_shares": round(filled_shares, 4),
+        "data_source": "polymarket-clob",
+        "notice": _EXIT_CAPACITY_AUDIT_NOTICE,
+    }

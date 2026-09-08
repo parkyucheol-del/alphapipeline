@@ -47,6 +47,12 @@ class Settings:
     PRICE_CONTRACT_HEALTH_USDC: float = float(os.getenv("PRICE_CONTRACT_HEALTH_USDC", "0.02"))
     PRICE_WHALE_AUDIT_USDC: float = float(os.getenv("PRICE_WHALE_AUDIT_USDC", "0.02"))
     PRICE_TOKEN_DIAGNOSTIC_USDC: float = float(os.getenv("PRICE_TOKEN_DIAGNOSTIC_USDC", "0.03"))
+    # 2026-09 예측시장(Polymarket) 확장 Wave 1. neg_risk_arbitrage는 여러 outcome을
+    # 동시에 계산하고 실행 가능성(유동성 병목)까지 판정하는 고부가 시그널이라
+    # dump-risk/token-diagnostic과 같은 최고가 티어로, exit_capacity_audit은
+    # 단일 오더북 조회라 token-risk/dex-slippage와 같은 중간 티어로 매겼다.
+    PRICE_NEG_RISK_ARBITRAGE_USDC: float = float(os.getenv("PRICE_NEG_RISK_ARBITRAGE_USDC", "0.03"))
+    PRICE_EXIT_CAPACITY_AUDIT_USDC: float = float(os.getenv("PRICE_EXIT_CAPACITY_AUDIT_USDC", "0.02"))
 
     # ===== x402 공식 결제 레이어 (Coinbase CDP Facilitator) =====
     # Coinbase Developer Platform(https://portal.cdp.coinbase.com)에서 발급받는 API 키.
@@ -83,6 +89,11 @@ class Settings:
     # 쿼터 소진/레이트리밋으로 인한 502를 방지한다. x402 결제는 캐시 히트와
     # 무관하게 매 호출 그대로 징수되므로 마진에는 영향 없다(app/cache.py 참고).
     GOPLUS_CACHE_TTL_SECONDS: int = int(os.getenv("GOPLUS_CACHE_TTL_SECONDS", "120"))
+
+    # Polymarket CLOB 오더북 캐시 TTL(초). 짧게 잡아서 neg_risk_arbitrage가 여러
+    # outcome 레그를 병렬 조회할 때/exit_capacity_audit이 직후 같은 토큰을 다시
+    # 조회할 때만 중복 호출을 흡수하고, 오더북 실시간성은 거의 그대로 유지한다.
+    POLYMARKET_BOOK_CACHE_TTL_SECONDS: int = int(os.getenv("POLYMARKET_BOOK_CACHE_TTL_SECONDS", "3"))
 
     # 락업 해제(dump-risk) 스캔 주기(시간). 언락 일정은 몇 주 전에 미리 확정되는
     # 경우가 대부분이라 실시간일 필요가 없음 - 기본값 24시간(하루 1회)이 이미

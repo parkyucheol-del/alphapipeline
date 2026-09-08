@@ -101,11 +101,13 @@ from app.schemas import (
     CONTRACT_HEALTH_EXAMPLE,
     DEX_SLIPPAGE_EXAMPLE,
     DUMP_RISK_EXAMPLE,
+    EXIT_CAPACITY_AUDIT_EXAMPLE,
     FUNDING_APR_EXAMPLE,
     FUNDING_RATE_EXAMPLE,
     KIMCHI_ALERT_EXAMPLE,
     MACRO_DDAY_EXAMPLE,
     MARKDOWN_EXAMPLE,
+    NEG_RISK_ARBITRAGE_EXAMPLE,
     TOKEN_DIAGNOSTIC_EXAMPLE,
     TOKEN_RISK_EXAMPLE,
     WHALE_AUDIT_EXAMPLE,
@@ -118,6 +120,8 @@ from app.schemas import (
     KimchiAlertResponse,
     MacroDdayResponse,
     MarkdownResponse,
+    PredictionExitCapacityAuditResponse,
+    PredictionNegRiskArbitrageResponse,
     TokenDiagnosticResponse,
     TokenRiskResponse,
     WhalePositionAuditResponse,
@@ -370,6 +374,8 @@ def build_routes(dump_risk_enabled: bool) -> dict[str, RouteConfig]:
     arb_spread_option = _payment_option(settings.PRICE_ARB_SPREAD_USDC)
     whale_audit_option = _payment_option(settings.PRICE_WHALE_AUDIT_USDC)
     token_diagnostic_option = _payment_option(settings.PRICE_TOKEN_DIAGNOSTIC_USDC)
+    neg_risk_arbitrage_option = _payment_option(settings.PRICE_NEG_RISK_ARBITRAGE_USDC)
+    exit_capacity_audit_option = _payment_option(settings.PRICE_EXIT_CAPACITY_AUDIT_USDC)
 
     macro_dday_option = _payment_option(settings.PRICE_MACRO_DDAY_USDC)
     routes: dict[str, RouteConfig] = {
@@ -742,6 +748,113 @@ def build_routes(dump_risk_enabled: bool) -> dict[str, RouteConfig]:
             ),
             service_name="AlphaPipeline Whale Position Audit",
             tags=["crypto", "derivatives", "hyperliquid", "risk"],
+        ),
+        "GET /v1/prediction/neg-risk-arbitrage": _make_route_config(
+            accepts=[neg_risk_arbitrage_option],
+            mime_type="application/json",
+            description=(
+                "Detect basket arbitrage in a Polymarket neg-risk (mutually-exclusive, "
+                "multi-outcome) event - since a full YES basket across all outcomes "
+                "always settles to exactly $1, a basket price away from $1 is a near "
+                "risk-free edge. Also computes buy/sell_basket_capacity_shares, the "
+                "actual liquidity-bottleneck size executable right now, so this is not "
+                "just a top-of-book mirage. Polymarket only (Kalshi's Data ToS forbids "
+                "this use of their data). Paid in USDC on Base."
+            ),
+            resource=_resource_url("/v1/prediction/neg-risk-arbitrage"),
+            extensions=_bazaar_extension(
+                input_example={"event_slug": "presidential-election-winner-2028"},
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "event_slug": {
+                            "type": "string",
+                            "description": "Polymarket event slug, from the event's URL on polymarket.com.",
+                        },
+                        "assumed_round_trip_cost_pct": {
+                            "type": "number",
+                            "description": (
+                                "Estimated all-in cost (Polygon gas for the neg-risk adapter's "
+                                "convert call, taker fees, slippage buffer) as a percentage of "
+                                "$1 basket notional. Defaults to 1.5."
+                            ),
+                        },
+                        "max_slippage_pct": {
+                            "type": "number",
+                            "description": (
+                                "How far past each leg's best price to walk the book when "
+                                "sizing executable basket capacity. Defaults to 1.0."
+                            ),
+                        },
+                        "min_net_edge_pct": {
+                            "type": "number",
+                            "description": (
+                                "Minimum net edge (% of $1 basket notional) required to flag "
+                                "arbitrage_viable: true. Defaults to 1.0."
+                            ),
+                        },
+                    },
+                    "required": ["event_slug"],
+                },
+                output_example=NEG_RISK_ARBITRAGE_EXAMPLE,
+                output_schema=_inline_schema_defs(PredictionNegRiskArbitrageResponse.model_json_schema()),
+            ),
+            service_name="AlphaPipeline Neg-Risk Arbitrage",
+            tags=["prediction-market", "polymarket", "arbitrage"],
+        ),
+        "GET /v1/prediction/exit-capacity-audit": _make_route_config(
+            accepts=[exit_capacity_audit_option],
+            mime_type="application/json",
+            description=(
+                "Walk a single Polymarket outcome's live order book to determine how much "
+                "of a given position size can actually be filled right now, at what "
+                "average price, and with how much price impact versus the best quote. "
+                "Accepts either a raw token_id or a market_slug (+ outcome) to resolve it "
+                "automatically - exact slug only, no fuzzy keyword search. Paid in USDC "
+                "on Base."
+            ),
+            resource=_resource_url("/v1/prediction/exit-capacity-audit"),
+            extensions=_bazaar_extension(
+                input_example={
+                    "market_slug": "will-btc-hit-150k-by-2028",
+                    "outcome": "yes",
+                    "position_size_shares": 500,
+                    "side": "sell",
+                },
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "position_size_shares": {
+                            "type": "number",
+                            "description": "Number of outcome shares to sell (or buy). Must be positive.",
+                        },
+                        "token_id": {
+                            "type": "string",
+                            "description": "The outcome's CLOB token_id / asset_id, if already known.",
+                        },
+                        "market_slug": {
+                            "type": "string",
+                            "description": (
+                                "Exact Polymarket market slug, used to resolve token_id "
+                                "automatically when not already known."
+                            ),
+                        },
+                        "outcome": {
+                            "type": "string",
+                            "description": "\"yes\" (default) or \"no\" - which side to resolve when using market_slug.",
+                        },
+                        "side": {
+                            "type": "string",
+                            "description": "\"sell\" (default) or \"buy\".",
+                        },
+                    },
+                    "required": ["position_size_shares"],
+                },
+                output_example=EXIT_CAPACITY_AUDIT_EXAMPLE,
+                output_schema=_inline_schema_defs(PredictionExitCapacityAuditResponse.model_json_schema()),
+            ),
+            service_name="AlphaPipeline Exit Capacity Audit",
+            tags=["prediction-market", "polymarket", "liquidity"],
         ),
     }
     if dump_risk_enabled:
