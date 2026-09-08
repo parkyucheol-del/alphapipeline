@@ -4,6 +4,7 @@
 2) /v1/market/kimchi-alert : 거래소 간 차익/급변 감지
 """
 import asyncio
+import json
 import logging
 import time
 from datetime import datetime, timezone, timedelta
@@ -1626,6 +1627,28 @@ _EXIT_CAPACITY_AUDIT_NOTICE = (
 )
 
 
+def _market_token_id_for_outcome(market: dict, outcome: str) -> str | None:
+    """
+    Polymarket Gamma API 마켓 객체에서 outcome 이름(예: 'yes')에 해당하는
+    CLOB token_id를 찾는다.
+
+    실제 Gamma API는 `tokens: [{outcome, token_id}]` 같은 구조가 아니라,
+    `outcomes`(예: '["Yes", "No"]')와 `clobTokenIds`(예: '["1133...", "4805..."]')
+    둘 다 JSON 텍스트가 그대로 문자열로 인코딩된 "병렬 배열"이라서, 두 배열을
+    json.loads로 각각 파싱한 뒤 같은 인덱스끼리 짝지어야 한다 (2026-09 실제 배포
+    테스트에서 확인 - CLOB API 자체 스키마와 착각해서 최초 구현이 틀렸었음).
+    """
+    try:
+        outcomes = json.loads(market.get("outcomes") or "[]")
+        token_ids = json.loads(market.get("clobTokenIds") or "[]")
+    except (TypeError, ValueError):
+        return None
+    for name, tid in zip(outcomes, token_ids):
+        if str(name).strip().lower() == outcome.strip().lower() and tid:
+            return str(tid)
+    return None
+
+
 def _parse_book_levels(raw_levels: list[dict], reverse: bool) -> list[dict]:
     """CLOB 오더북의 bids/asks 배열(price/size가 문자열)을 정렬된 float 리스트로."""
     return sorted(
@@ -1668,7 +1691,7 @@ async def get_neg_risk_arbitrage(
     event_slug = event_slug.strip()
 
     event = await ds.get_polymarket_event(event_slug)
-    markets = [m for m in event.get("markets", []) if m.get("neg_risk")]
+    markets = [m for m in event.get("markets", []) if m.get("negRisk")]
     if len(markets) < 2:
         raise ValueError(
             f"이벤트 '{event_slug}'에는 neg-risk 상호배타 그룹이 없습니다 "
@@ -1677,10 +1700,9 @@ async def get_neg_risk_arbitrage(
 
     yes_token_ids: list[str] = []
     for m in markets:
-        tokens = m.get("tokens", [])
-        yes_token = next((t for t in tokens if str(t.get("outcome", "")).lower() == "yes"), None)
-        if yes_token and yes_token.get("token_id"):
-            yes_token_ids.append(str(yes_token["token_id"]))
+        tid = _market_token_id_for_outcome(m, "yes")
+        if tid:
+            yes_token_ids.append(tid)
     if len(yes_token_ids) < 2:
         raise ValueError(f"이벤트 '{event_slug}'의 YES 토큰 ID를 찾지 못했습니다")
 
@@ -1794,11 +1816,10 @@ async def get_exit_capacity_audit(
     resolved_token_id = str(token_id).strip() if token_id else None
     if not resolved_token_id:
         market = await ds.get_polymarket_market(market_slug.strip())
-        tokens = market.get("tokens", [])
-        match = next((t for t in tokens if str(t.get("outcome", "")).lower() == outcome), None)
-        if not match or not match.get("token_id"):
+        tid = _market_token_id_for_outcome(market, outcome)
+        if not tid:
             raise ValueError(f"마켓 slug '{market_slug}'에서 '{outcome}' 토큰을 찾지 못했습니다")
-        resolved_token_id = str(match["token_id"])
+        resolved_token_id = tid
 
     book = await ds.get_polymarket_order_book(resolved_token_id)
     levels_raw = (book.get("bids") if side == "sell" else book.get("asks")) or []
