@@ -6,7 +6,7 @@ AlphaPipeline - 초미세 결제 기반 온체인 데이터 파이프라인 API
 """
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from app.config import settings
@@ -98,6 +98,21 @@ if not settings.PAYMENT_BYPASS_FOR_TESTING:
     _x402_server = build_resource_server()
     _x402_routes = build_routes(dump_risk_enabled=settings.DUMP_RISK_ENABLED)
     app.add_middleware(PaymentMiddlewareASGI, routes=_x402_routes, server=_x402_server)
+
+
+# ===== 법적 성격 명시 헤더 (2026-09 추가) =====
+# 모든 응답(402/200/에러 불문)에 "정보/리서치 목적, 거래 체결/베팅 서비스 아님"을
+# 기계가 읽을 수 있는 형태로도 박아둔다. app.add_middleware()가 이미 위에서 x402
+# 미들웨어를 등록한 "뒤"에 이 데코레이터로 추가하는 이유: Starlette은 나중에 등록된
+# 미들웨어일수록 스택의 바깥쪽(요청을 가장 먼저 받고 응답을 가장 나중에 손보는 쪽)에
+# 놓이므로, 이렇게 해야 x402가 반환하는 402 응답에도 이 헤더가 확실히 붙는다.
+@app.middleware("http")
+async def add_disclaimer_header(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Data-Disclaimer"] = (
+        "Informational and research data only. No trade execution, brokerage, or gambling services provided."
+    )
+    return response
 
 
 @app.get("/")
