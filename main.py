@@ -5,7 +5,10 @@ AlphaPipeline - 초미세 결제 기반 온체인 데이터 파이프라인 API
 로컬 실행: uvicorn main:app --reload --port 8000
 """
 import logging
+import time
+from collections import defaultdict, deque
 from contextlib import asynccontextmanager
+from threading import Lock
 from fastapi import FastAPI, Query, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 
@@ -648,6 +651,7 @@ async def neg_risk_arbitrage_endpoint(
         1.0, description="Minimum net edge (% of $1 basket notional) required to flag arbitrage_viable: true"
     ),
 ):
+    _t0 = time.monotonic()
     try:
         data = await get_neg_risk_arbitrage(
             event_slug=event_slug,
@@ -655,6 +659,7 @@ async def neg_risk_arbitrage_endpoint(
             max_slippage_pct=max_slippage_pct,
             min_net_edge_pct=min_net_edge_pct,
         )
+        data["latency_ms"] = round((time.monotonic() - _t0) * 1000)
         return JSONResponse(content=data)
     except Exception as e:
         logger.exception("neg-risk-arbitrage 처리 실패")
@@ -692,6 +697,7 @@ async def exit_capacity_audit_endpoint(
     outcome: str = Query("yes", description="'yes' (default) or 'no' - which side to resolve when using market_slug"),
     side: str = Query("sell", description="'sell' (default) or 'buy'"),
 ):
+    _t0 = time.monotonic()
     try:
         data = await get_exit_capacity_audit(
             position_size_shares=position_size_shares,
@@ -700,9 +706,76 @@ async def exit_capacity_audit_endpoint(
             outcome=outcome,
             side=side,
         )
+        data["latency_ms"] = round((time.monotonic() - _t0) * 1000)
         return JSONResponse(content=data)
     except Exception as e:
         logger.exception("exit-capacity-audit 처리 실패")
+        return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
+
+
+# --- 무료 CLI 프리뷰 (check-my-slippage): 결제 게이트 없음, IP당 분당 N회 제한 ---
+# app/payment.py의 build_routes()에 이 경로를 절대 등록하지 말 것 - 등록하면 유료화됨.
+class _SlidingWindowRateLimiter:
+    """IP당 분당 호출 수 제한용 초경량 인메모리 리미터.
+    단일 프로세스에서만 유효 - 인스턴스를 여러 개로 늘리면 공유 저장소 필요."""
+
+    def __init__(self, max_calls: int, window_seconds: int = 60):
+        self.max_calls = max_calls
+        self.window_seconds = window_seconds
+        self._hits: dict[str, deque] = defaultdict(deque)
+        self._lock = Lock()
+
+    def allow(self, key: str) -> bool:
+        now = time.monotonic()
+        with self._lock:
+            q = self._hits[key]
+            while q and now - q[0] > self.window_seconds:
+                q.popleft()
+            if len(q) >= self.max_calls:
+                return False
+            q.append(now)
+            return True
+
+
+_slippage_preview_limiter = _SlidingWindowRateLimiter(
+    max_calls=settings.SLIPPAGE_PREVIEW_RATE_LIMIT_PER_MINUTE
+)
+
+
+@app.get(
+    "/v1/prediction/preview-slippage",
+    tags=["market"],
+    summary="Free, rate-limited preview of exit-capacity-audit on a fixed benchmark market",
+    description=(
+        "No payment required. Runs exit-capacity-audit against a fixed benchmark "
+        "market/position size (server-configured, not caller-supplied) so agents and "
+        "developers can verify data quality before paying for the real endpoint. "
+        "Rate-limited per IP. For arbitrary markets/sizes, use exit-capacity-audit."
+    ),
+)
+async def preview_slippage_endpoint(request: Request):
+    client_ip = (
+        request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+        or (request.client.host if request.client else "unknown")
+    )
+    if not _slippage_preview_limiter.allow(client_ip):
+        return JSONResponse(
+            status_code=429,
+            content={"error": "rate_limited", "message": "Too many requests - try again in a minute."},
+        )
+    _t0 = time.monotonic()
+    try:
+        data = await get_exit_capacity_audit(
+            position_size_shares=settings.SLIPPAGE_PREVIEW_POSITION_SIZE_SHARES,
+            market_slug=settings.SLIPPAGE_PREVIEW_MARKET_SLUG,
+            outcome=settings.SLIPPAGE_PREVIEW_OUTCOME,
+            side=settings.SLIPPAGE_PREVIEW_SIDE,
+        )
+        data["preview"] = True
+        data["latency_ms"] = round((time.monotonic() - _t0) * 1000)
+        return JSONResponse(content=data)
+    except Exception as e:
+        logger.exception("preview-slippage 처리 실패")
         return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
 
 

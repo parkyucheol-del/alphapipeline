@@ -123,6 +123,22 @@ class Settings:
 
     PORT: int = int(os.getenv("PORT", "8000"))
 
+    # --- 무료 CLI 프리뷰 (check-my-slippage) ---
+    # exit_capacity_audit을 결제 없이 벤치마크 마켓 1개로 고정 노출 - 어뷰징 표면을
+    # 줄이기 위해 임의 마켓 지정은 허용하지 않는다. build_routes()에 등록하지 않아야
+    # PaymentMiddlewareASGI 게이트를 안 타고 무료로 열린다 (main.py 참고).
+    SLIPPAGE_PREVIEW_MARKET_SLUG: str = os.getenv(
+        "SLIPPAGE_PREVIEW_MARKET_SLUG", "will-btc-hit-150k-by-2028"
+    )
+    SLIPPAGE_PREVIEW_OUTCOME: str = os.getenv("SLIPPAGE_PREVIEW_OUTCOME", "yes")
+    SLIPPAGE_PREVIEW_POSITION_SIZE_SHARES: float = float(
+        os.getenv("SLIPPAGE_PREVIEW_POSITION_SIZE_SHARES", "500")
+    )
+    SLIPPAGE_PREVIEW_SIDE: str = os.getenv("SLIPPAGE_PREVIEW_SIDE", "sell")
+    SLIPPAGE_PREVIEW_RATE_LIMIT_PER_MINUTE: int = int(
+        os.getenv("SLIPPAGE_PREVIEW_RATE_LIMIT_PER_MINUTE", "10")
+    )
+
     def is_wallet_configured(self) -> bool:
         addr = self.RECEIVER_WALLET_ADDRESS or ""
         return addr.startswith("0x") and len(addr) == 42 and "YOUR_WALLET" not in addr
