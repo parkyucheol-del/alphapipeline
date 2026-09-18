@@ -805,6 +805,47 @@ async def preview_slippage_endpoint(request: Request):
         return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
 
 
+@app.get("/v1/debug/polymarket-active-markets", tags=["market"])
+async def _debug_polymarket_active_markets():
+    """TEMPORARY (2026-09-18) - probe live active Polymarket markets from Render's
+    working egress to pick a valid SLIPPAGE_PREVIEW_MARKET_SLUG benchmark (the old
+    hardcoded slug 'will-btc-hit-150k-by-2028' no longer resolves). Remove this
+    route once a replacement slug has been picked and config.py updated."""
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                "https://gamma-api.polymarket.com/markets",
+                params={
+                    "active": "true",
+                    "closed": "false",
+                    "limit": 15,
+                    "order": "volume24hr",
+                    "ascending": "false",
+                },
+            )
+            resp.raise_for_status()
+            markets = resp.json()
+        simplified = [
+            {
+                "slug": m.get("slug"),
+                "question": m.get("question"),
+                "endDate": m.get("endDate"),
+                "volume24hr": m.get("volume24hr"),
+                "outcomes": m.get("outcomes"),
+                "negRisk": m.get("negRisk"),
+            }
+            for m in markets
+        ]
+        return JSONResponse(content={"markets": simplified})
+    except Exception as e:
+        return JSONResponse(
+            status_code=502,
+            content={"error": "debug_probe_failed", "message": str(e)},
+        )
+
+
 from app.mcp_server import register_mcp_routes as _register_mcp_routes  # noqa: E402
 
 _register_mcp_routes(app)
