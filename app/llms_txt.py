@@ -115,6 +115,10 @@ Use this when you need to assess whether a token carries dumping risk from token
       "token": "UNI",
       "unlock_supply_pct": 4.8,
       "unlock_amount": 28500000.0,
+      "vesting_deposit_amount": 60000000.0,
+      "vesting_withdrawn_amount": 31500000.0,
+      "vesting_progress_pct": 52.5,
+      "is_insider_vc_team": null,
       "days_until_unlock": null,
       "timing_precision": "pending_schema_verification",
       "risk_level": "MEDIUM",
@@ -123,10 +127,10 @@ Use this when you need to assess whether a token carries dumping risk from token
     }}
   ],
   "data_source": "onchain_sablier",
-  "coverage_notice": "Scanned via on-chain Sablier vesting streams only. Absence from this list does not mean a token has no lockup."
+  "coverage_notice": "Scanned via on-chain Sablier vesting streams only. Absence from this list does not mean a token has no lockup. vesting_progress_pct (withdrawn/deposit * 100) shows how far along the vesting schedule already is."
 }}
 ```
-- IMPORTANT: `days_until_unlock: null` means "unlock timing is currently unknown," not "no risk." Never treat a null value as a safety signal.
+- IMPORTANT: `days_until_unlock: null` and `is_insider_vc_team: null` mean "currently unknown," not "no risk." Never treat a null value as a safety signal. `vesting_deposit_amount`/`vesting_withdrawn_amount`/`vesting_progress_pct` are on-chain-only fields (Sablier) and are also null if that data wasn't available for a given token.
 - Coverage is limited to tokens using supported on-chain vesting mechanisms - always read the `coverage_notice` field in the live response before concluding a token is unlock-free.
 
 ## Quick test (no wallet required)

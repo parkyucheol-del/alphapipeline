@@ -60,6 +60,34 @@ curl -s https://alphapipeline-eu.onrender.com/v1/market/kimchi-alert?symbol=BTC
 
 Full protocol reference: [`/llms.txt`](https://alphapipeline-eu.onrender.com/llms.txt) · [x402 docs](https://docs.x402.org)
 
+### Try it now — no wallet, no signup, no payment
+
+Before wiring up a paying client, run `check-my-slippage` to see this service return real, live data against a production endpoint:
+
+```bash
+npx check-my-slippage
+```
+
+Real output (captured 2026-09-18, straight from production — not a mocked sample):
+
+```
+Checking live Polymarket exit-liquidity via AlphaPipeline...
+
+Market:            will-the-fed-decrease-interest-rates-by-25-bps-after-the-october-2026-meeting-... (sell)
+Position size:     500 shares
+Executable:        true
+Best quote:        $0.0060
+Avg exit price:    $0.0060
+Price impact:      0%
+Data source:       polymarket-clob
+Latency:           88ms
+
+Want this for any market/size, in your own bot?
+-> https://github.com/parkyucheol-del/alphapipeline
+```
+
+This calls the free, rate-limited (10/min per IP) `GET /v1/prediction/preview-slippage` — no payment header, no query params, always runs against a fixed benchmark market so you can judge data quality before paying for [`prediction.exit_capacity_audit`](#tools--endpoints), which takes any market/size you supply. If `npx check-my-slippage` doesn't resolve on your machine, call the endpoint directly instead: `curl https://alphapipeline-eu.onrender.com/v1/prediction/preview-slippage`, or run it from source: `node check-my-slippage/bin/index.js` from a clone of this repo.
+
 ---
 
 ## Tools / Endpoints
@@ -82,6 +110,22 @@ Full protocol reference: [`/llms.txt`](https://alphapipeline-eu.onrender.com/llm
 | `prediction.exit_capacity_audit` | `GET /v1/prediction/exit-capacity-audit` | $0.02 | Walks a Polymarket outcome's live order book to check whether a given position size can actually be filled right now, at what average price and price impact, plus `book_snapshot_time`/`tick_size`/`min_order_size`. Resolves by `token_id` or an exact `market_slug`. |
 
 Every response is timestamped in both UTC and KST, and every priced endpoint's payment prompt reads "Paid in USDC on Base." so a human looking at the 402 screen in a browser isn't left guessing which chain's USDC to send.
+
+### Data sources
+
+Every number returned is either passed through unchanged from one of these upstreams, or a deterministic calculation on top of them — never a third-party estimate presented as our own:
+
+| Domain | Upstream(s) | Notes |
+|---|---|---|
+| `market.kimchi_alert`, `arb.spread_matrix` (CEX leg) | Upbit (KRW) + Coinbase spot, CoinGecko fallback | Not a live Binance orderbook, despite the legacy `binance_price_usdt` field name kept for backward compatibility — see `cex_reference_price_usdt`/`cex_price_source`. |
+| `security.token_risk`, `security.contract_health_audit`, `security.token_diagnostic` | GoPlus Security API, Honeypot.is fallback | Same underlying GoPlus data reused across all three; no independent second opinion. |
+| `derivatives.funding_rate`, `derivatives.funding_apr_matrix` | Bybit v5 (primary), Binance premiumIndex (fallback) | `open_interest_usd` is Bybit-only — always null on the Binance fallback path. |
+| `derivatives.whale_position_audit` | Hyperliquid public API (`clearinghouseState`) | No leaderboard/discovery endpoint exists upstream — you must supply the wallet address. |
+| `dex.liquidity_slippage`, `arb.spread_matrix` (DEX leg) | GeckoTerminal | Liquidity depth is a constant-product (50:50) approximation, not per-token real reserves — disclosed via the response's own `notice` field. |
+| `unlocks.dump_risk` | On-chain Sablier vesting streams (default, free) | VC/team classification and exact unlock timing require a paid DropsTab key (disabled by default) and are otherwise always `null` — never treat `null` as a safety signal. |
+| `calendar.macro_dday` | Static, pre-loaded calendar | No external API call — never fails on an upstream outage, but needs manual updates as events roll off the calendar. |
+| `prediction.neg_risk_arbitrage`, `prediction.exit_capacity_audit` | Polymarket Gamma API (event/market metadata) + Polymarket CLOB API (order book) | `book_snapshot_time`/`tick_size`/`min_order_size` are Polymarket's own reported values, passed through as-is. |
+| `tools.ai_markdown` | The URL you pass in | No third-party data provider — we fetch and convert the page you give us. |
 
 ---
 
