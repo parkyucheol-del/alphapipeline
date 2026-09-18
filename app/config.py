@@ -127,8 +127,15 @@ class Settings:
     # exit_capacity_audit을 결제 없이 벤치마크 마켓 1개로 고정 노출 - 어뷰징 표면을
     # 줄이기 위해 임의 마켓 지정은 허용하지 않는다. build_routes()에 등록하지 않아야
     # PaymentMiddlewareASGI 게이트를 안 타고 무료로 열린다 (main.py 참고).
+    # 2026-09-18: 이전 하드코딩 값("will-btc-hit-150k-by-2028")이 실제 폴리마켓에
+    # 존재하지 않아 이 무료 프리뷰가 502로 계속 실패하던 걸 발견/수정함. 아래 값은
+    # 2026-09-18 기준 실제 활성 마켓(연준 10월 금리 결정, 만기 2026-10-28)으로
+    # 교체한 것 - 만기가 지나면 다시 깨지니, 그 전에 다른 장기 활성 마켓으로
+    # 갱신 필요 (Render 환경변수 SLIPPAGE_PREVIEW_MARKET_SLUG로 코드 배포 없이도
+    # 바로 덮어쓸 수 있음 - env가 우선 적용됨).
     SLIPPAGE_PREVIEW_MARKET_SLUG: str = os.getenv(
-        "SLIPPAGE_PREVIEW_MARKET_SLUG", "will-btc-hit-150k-by-2028"
+        "SLIPPAGE_PREVIEW_MARKET_SLUG",
+        "will-the-fed-decrease-interest-rates-by-25-bps-after-the-october-2026-meeting-20260617190324030",
     )
     SLIPPAGE_PREVIEW_OUTCOME: str = os.getenv("SLIPPAGE_PREVIEW_OUTCOME", "yes")
     SLIPPAGE_PREVIEW_POSITION_SIZE_SHARES: float = float(
