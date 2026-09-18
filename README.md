@@ -4,7 +4,7 @@
 
 # AlphaPipeline
 
-**Pay-per-call ($0.005–$0.03 USDC) market/on-chain data API for AI agents and trading bots — no signup, no API key, no OAuth.** Authenticate and pay in a single request via the [x402 protocol](https://docs.x402.org) (HTTP 402) on Base, or call it as a remote MCP server from Claude Desktop, Cursor, or any MCP client.
+**Pre-trade on-chain risk verification for AI trading agents, plus market/derivatives data — pay-per-call ($0.005–$0.03 USDC), no signup, no API key, no OAuth.** Check a token for honeypot/tax/liquidity risk before a swap, or pull funding rates, DEX slippage, Korea price premiums, and Polymarket arbitrage signals. Authenticate and pay in a single request via the [x402 protocol](https://docs.x402.org) (HTTP 402) on Base, or call it as a remote MCP server from Claude Desktop, Cursor, or any MCP client.
 
 [![Smithery](https://img.shields.io/badge/Smithery-Listed-orange)](https://smithery.ai/servers/parkyucheol/alphapipeline)
 [![x402 Bazaar](https://img.shields.io/badge/x402-Bazaar-blue)](https://www.x402bazaar.org/)
@@ -17,6 +17,8 @@
 AlphaPipeline is a **machine-first data API**. Every endpoint is metered per call using x402: a request without a payment header gets back a standard HTTP 402 response describing exactly how to pay (asset, amount, network, recipient). No account creation, no dashboard, no API key issuance — sign, retry the request with the payment attached, and you get the data back in the same request/response cycle.
 
 It is also exposed as a **remote MCP server** (`POST /mcp`) so agent frameworks (Claude Desktop, Cursor, LangChain, CrewAI, and anything else that speaks MCP) can discover and call it with zero custom integration code.
+
+**The security cluster is the most battle-tested part of this API.** `security.token_risk`, `security.contract_health_audit`, and `security.token_diagnostic` have been run as a live pre-buy safety gate ahead of real on-chain swaps on Base — not just informational data, but an actual pass/fail input wired into a trading pipeline before it risked funds. None of the three return a qualitative verdict field (no `safe_to_execute: true/false`) — they return raw GoPlus/Honeypot.is numbers and leave the buy/no-buy decision to your own code.
 
 - **Discovery is always free.** `initialize` and `tools/list` never require payment — browse the full tool catalog before you decide to pay.
 - **One tool is a permanent free onboarding endpoint** (`unlocks.dump_risk`, see below) so an agent can verify connectivity, latency, and response schema before it starts paying for the rest.
@@ -66,9 +68,9 @@ Full protocol reference: [`/llms.txt`](https://alphapipeline-eu.onrender.com/llm
 |---|---|---|---|
 | `market.kimchi_alert` | `GET /v1/market/kimchi-alert` | $0.01 | Real-time Korea (Upbit) vs global reference price (Coinbase spot, CoinGecko fallback — not a live Binance orderbook) premium — the "kimchi premium" — with reverse-premium and 1h-surge alerts. |
 | `tools.ai_markdown` | `GET /v1/tools/ai-markdown` | $0.005 | Converts any webpage URL into clean, ad-free Markdown optimized for LLM context windows. |
-| `security.token_risk` | `GET /v1/security/token-risk` | $0.02 | GoPlus/Honeypot.is-backed contract security check — honeypot flag, buy/sell tax, mintability, ownership renouncement, plus individual GoPlus signals (cannot_sell_all, hidden_owner, transfer_pausable, selfdestruct, is_blacklisted, slippage_modifiable, owner concentration) folded into risk_flags. |
-| `security.contract_health_audit` | `GET /v1/security/contract-health-audit` | $0.02 | LP (liquidity pool) lock/burn audit reusing the same GoPlus data as token-risk — flags whether liquidity is locked, burned, or freely held by a single wallet. |
-| `security.token_diagnostic` | `GET /v1/security/token-diagnostic` | $0.03 | Bundles token_risk + contract_health_audit into one call (same GoPlus data, no new upstream calls). No composite score or letter grade — just both tools' fields plus a deduped risk_flags union. Cheaper than calling both separately. |
+| `security.token_risk` | `GET /v1/security/token-risk` | $0.02 | **Pre-trade check** — call before buying or swapping: GoPlus/Honeypot.is-backed contract security audit (honeypot flag, buy/sell tax, mintability, ownership renouncement, plus individual GoPlus signals — cannot_sell_all, hidden_owner, transfer_pausable, selfdestruct, is_blacklisted, slippage_modifiable, owner concentration — folded into risk_flags). |
+| `security.contract_health_audit` | `GET /v1/security/contract-health-audit` | $0.02 | **Pre-trade check** — LP (liquidity pool) lock/burn audit reusing the same GoPlus data as token-risk: flags whether liquidity is locked, burned, or freely held by a single wallet before you trust it. |
+| `security.token_diagnostic` | `GET /v1/security/token-diagnostic` | $0.03 | **Pre-trade check** — bundles token_risk + contract_health_audit into one call (same GoPlus data, no new upstream calls) for a single go/no-go input before a swap. No composite score or letter grade — just both tools' fields plus a deduped risk_flags union. Cheaper than calling both separately. |
 | `derivatives.funding_rate` | `GET /v1/derivatives/funding-rate` | $0.01 | Bybit (primary) / Binance (fallback) perpetual futures funding rate, plus `mark_price`/`index_price` (both paths) and `open_interest_usd` (Bybit path only, null on the Binance fallback). |
 | `derivatives.funding_apr_matrix` | `GET /v1/derivatives/funding-apr-matrix` | $0.01 | Annualizes the current funding rate into an APR and computes carry-trade breakeven days against an assumed round-trip trading cost. |
 | `dex.liquidity_slippage` | `GET /v1/dex/liquidity-slippage` | $0.02 | GeckoTerminal-backed DEX pool liquidity and estimated trade slippage, plus fixed $1k/$5k/$10k `slippage_tiers`, `pool_fee_pct`, an `assumed_gas_cost_usd` estimate, and `quote_token_is_stablecoin` (flags when the picked pool isn't USD-quoted and an extra hop is needed) for at-a-glance depth checks. |

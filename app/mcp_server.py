@@ -707,15 +707,16 @@ _TOOLS: list[dict] = [
         "path": "/v1/security/token-diagnostic",
         "price_attr": "PRICE_TOKEN_DIAGNOSTIC_USDC",
         "description": (
-            "Use this tool for a single-call combined security check: runs "
-            "security.token_risk and security.contract_health_audit in parallel "
-            "against the same GoPlus data and returns both, plus a deduped union of "
-            "risk_flags and a plain risk_flags_count. Deliberately does not compute a "
-            "composite score or letter grade - every field is copied unchanged from "
-            "the two underlying tools. Cheaper than calling both separately. Do not "
-            "use for token unlock/vesting risk (use unlocks.dump_risk) or if you only "
-            "need one of the two checks (call that tool directly and pay less). Paid "
-            "in USDC on Base."
+            "Use this tool right before buying or swapping an unfamiliar token when "
+            "you need a single-call combined security check: runs security.token_risk "
+            "and security.contract_health_audit in parallel against the same GoPlus "
+            "data and returns both, plus a deduped union of risk_flags and a plain "
+            "risk_flags_count. Deliberately does not compute a composite score or "
+            "letter grade - every field is copied unchanged from the two underlying "
+            "tools. Cheaper than calling both separately. Do not use for token "
+            "unlock/vesting risk (use unlocks.dump_risk) or if you only need one of "
+            "the two checks (call that tool directly and pay less). Paid in USDC on "
+            "Base."
         ),
         "input_schema": {
             "type": "object",

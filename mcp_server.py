@@ -302,11 +302,12 @@ async def get_token_diagnostic(chain_id: int, contract_address: str) -> dict:
     trip), plus a deduped union of risk_flags. Does not compute a composite
     score/grade - every field is copied unchanged from the two underlying tools.
 
-    Use this instead of calling get_token_risk and get_contract_health_audit
-    separately when you want both honeypot/tax risk AND LP lock/burn status in
-    one call. Do NOT use it if you only need one of the two - call that single
-    tool directly to save a round trip. Does not cover token unlock/vesting
-    risk - use get_token_dump_risk separately for that.
+    Use this right before buying or swapping an unfamiliar token when you want
+    both honeypot/tax risk AND LP lock/burn status in one call, instead of
+    calling get_token_risk and get_contract_health_audit separately. Do NOT
+    use it if you only need one of the two - call that single tool directly
+    to save a round trip. Does not cover token unlock/vesting risk - use
+    get_token_dump_risk separately for that.
 
     Args:
         chain_id: EVM chain id, e.g. 8453 for Base.
