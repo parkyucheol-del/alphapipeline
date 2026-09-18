@@ -6,6 +6,7 @@
 import asyncio
 import json
 import logging
+import re
 import time
 from datetime import datetime, timezone, timedelta
 from app import data_sources as ds
@@ -510,6 +511,16 @@ async def get_symbol_dump_risk(symbol: str) -> dict:
 _premium_history: dict = {}
 
 
+_KIMCHI_CEX_SOURCE_NOTICE = (
+    "binance_price_usdt is a legacy field name kept for backward compatibility - it is "
+    "NOT a live Binance orderbook price. The actual source is Coinbase spot (CoinGecko "
+    "fallback), same as arb-spread-matrix and dex-liquidity-slippage (see "
+    "app/data_sources.py::get_binance_price_usdt for why the name doesn't match the "
+    "source: a past Render shared-IP block from Binance forced the switch). New "
+    "integrations should read cex_reference_price_usdt / cex_price_source instead."
+)
+
+
 @ttl_cached(price_cache, key_fn=lambda symbol="BTC": f"kimchi:{symbol}")
 async def get_kimchi_alert(symbol: str = "BTC") -> dict:
     """
@@ -519,6 +530,11 @@ async def get_kimchi_alert(symbol: str = "BTC") -> dict:
     호출로부터 원가를 방어하는 목적. 캐시와 무관하게 호출자는 매번 x402로
     과금된다 - app/cache.py의 ttl_cached() docstring "왜 이게 순마진 100%
     방어인가" 참고).
+
+    정직하게 밝혀둘 점: 응답 필드 `binance_price_usdt`는 실제로는 바이낸스가
+    아니라 코인베이스 현물가(폴백 CoinGecko)다 - 이름은 하위호환 때문에 유지하고,
+    같은 값을 정직한 이름(`cex_reference_price_usdt`)으로도 같이 내려준다
+    (2026-09-14, 도그푸딩 봇 실사용 피드백 반영).
     """
     upbit_data = await ds.get_upbit_price_krw(f"KRW-{symbol}")
     upbit_price_krw = float(upbit_data.get("trade_price", 0))
@@ -549,6 +565,8 @@ async def get_kimchi_alert(symbol: str = "BTC") -> dict:
         "symbol": symbol,
         "upbit_price_krw": upbit_price_krw,
         "binance_price_usdt": binance_price_usdt,
+        "cex_reference_price_usdt": binance_price_usdt,
+        "cex_price_source": "coinbase_spot_or_coingecko_fallback",
         "usdkrw_rate_estimate": round(usdkrw_rate, 2),
         "kimchi_premium_pct": round(premium_pct, 3),
         "premium_change_1h_pct": surge_1h_pct,
@@ -560,6 +578,7 @@ async def get_kimchi_alert(symbol: str = "BTC") -> dict:
             "reverse_premium_pct": KIMCHI_REVERSE_PREMIUM_THRESHOLD,
             "surge_1h_pct": KIMCHI_SURGE_THRESHOLD,
         },
+        "notice": _KIMCHI_CEX_SOURCE_NOTICE,
     }
     return payload
 
@@ -1141,6 +1160,39 @@ async def get_funding_apr_matrix(
     }
 
 
+_STABLECOIN_QUOTE_SYMBOLS = {"USDC", "USDBC", "USDT", "DAI", "USDE", "FRAX"}
+_POOL_FEE_PCT_PATTERN = re.compile(r"(\d+(?:\.\d+)?)\s*%\s*$")
+
+
+def _pool_fee_pct_from_pool_name(pool_name: str | None) -> float | None:
+    """GeckoTerminal pool_name 끝의 "0.05%" 같은 수수료 티어 표기를 뽑아낸다.
+    라우팅 수수료를 slippage 계산에 반영하는 게 아니라(그러려면 실제 스왑 경로를
+    알아야 함), 최소한 어떤 fee tier 풀이 선택됐는지는 그대로 노출해서 클라이언트가
+    직접 감안할 수 있게 하기 위함. 패턴이 안 맞으면 None(추측 안 함)."""
+    if not pool_name:
+        return None
+    match = _POOL_FEE_PCT_PATTERN.search(pool_name)
+    if not match:
+        return None
+    try:
+        return float(match.group(1))
+    except (TypeError, ValueError):
+        return None
+
+
+def _quote_symbol_from_pool_name(pool_name: str | None) -> str | None:
+    """GeckoTerminal의 pool_name(예: "WETH / USDC 0.05%")에서 quote 쪽 심볼만 뽑아낸다.
+    포맷이 예상과 다르면(구분자 없음 등) 추측하지 않고 None을 반환한다 - 주소 대조 없이
+    문자열만으로 판단하는 만큼, 애매하면 값을 내보내지 않는 쪽을 택한다."""
+    if not pool_name or "/" not in pool_name:
+        return None
+    quote_part = pool_name.split("/", 1)[1].strip()
+    if not quote_part:
+        return None
+    symbol = quote_part.split()[0].strip().upper()
+    return symbol or None
+
+
 def _pick_most_liquid_pool(pools: list[dict]) -> dict | None:
     """토큰의 풀 목록 중 reserve_in_usd(합산 USD 유동성)가 가장 큰 풀을 고른다."""
     best = None
@@ -1166,7 +1218,17 @@ _DEX_SLIPPAGE_NOTICE = (
     "trading. slippage_tiers uses the same approximation at three fixed trade sizes "
     "regardless of the trade_size_usd you passed in; warning_level thresholds (LOW "
     "<1%, MEDIUM 1-3%, HIGH >3%) are AlphaPipeline's own heuristic, not an industry "
-    "standard."
+    "standard. assumed_gas_cost_usd is a flat per-swap estimate (see AlphaPipeline's "
+    "arb-spread-matrix endpoint for the same per-network table), not a live gas "
+    "quote. quote_token_is_stablecoin tells you whether this pool's quote side is a "
+    "USD stablecoin (USDC/USDbC/USDT/DAI/etc.) - if false or null, converting the "
+    "output into USD requires an additional hop/swap through the quote token first, "
+    "which this estimate does not account for; this endpoint always reports the "
+    "single most-liquid pool for a token, which is not guaranteed to be a direct "
+    "USD-quoted pool. pool_fee_pct is the swap fee tier of the selected pool (e.g. "
+    "0.05 for a 0.05% Uniswap v3 tier), parsed from the pool name - it is disclosed "
+    "for your own accounting only and is NOT subtracted from estimated_slippage_pct "
+    "or slippage_tiers."
 )
 
 _SLIPPAGE_TIER_SIZES_USD = (1000.0, 5000.0, 10000.0)
@@ -1226,6 +1288,10 @@ async def get_dex_liquidity_slippage(
                 "trade_size_usd": trade_size_usd,
                 "price_impact_model": "constant_product_50_50_approximation",
                 "slippage_tiers": None,
+                "quote_token_symbol": None,
+                "quote_token_is_stablecoin": None,
+                "pool_fee_pct": None,
+                "assumed_gas_cost_usd": _ASSUMED_GAS_COST_USD.get(network, _DEFAULT_GAS_COST_USD),
                 "data_source": "none",
                 "notice": f"No pool linked to token {token_address} on {network} was found on GeckoTerminal.",
             }
@@ -1249,6 +1315,12 @@ async def get_dex_liquidity_slippage(
             volume_24h_usd = None
 
     pool_name = attrs.get("name")
+    quote_token_symbol = _quote_symbol_from_pool_name(pool_name)
+    quote_token_is_stablecoin = (
+        quote_token_symbol in _STABLECOIN_QUOTE_SYMBOLS if quote_token_symbol else None
+    )
+    assumed_gas_cost_usd = _ASSUMED_GAS_COST_USD.get(network, _DEFAULT_GAS_COST_USD)
+    pool_fee_pct = _pool_fee_pct_from_pool_name(pool_name)
 
     if liquidity_usd <= 0:
         return {
@@ -1263,6 +1335,10 @@ async def get_dex_liquidity_slippage(
             "estimated_slippage_pct": None,
             "price_impact_model": "constant_product_50_50_approximation",
             "slippage_tiers": None,
+            "quote_token_symbol": quote_token_symbol,
+            "quote_token_is_stablecoin": quote_token_is_stablecoin,
+            "pool_fee_pct": pool_fee_pct,
+            "assumed_gas_cost_usd": assumed_gas_cost_usd,
             "data_source": "geckoterminal",
             "notice": _DEX_SLIPPAGE_NOTICE + " (Could not compute slippage because this pool's liquidity data is unavailable.)",
         }
@@ -1282,6 +1358,10 @@ async def get_dex_liquidity_slippage(
         "estimated_slippage_pct": round(estimated_slippage_pct, 4),
         "price_impact_model": "constant_product_50_50_approximation",
         "slippage_tiers": _compute_slippage_tiers(half_liquidity_usd),
+        "quote_token_symbol": quote_token_symbol,
+        "quote_token_is_stablecoin": quote_token_is_stablecoin,
+        "pool_fee_pct": pool_fee_pct,
+        "assumed_gas_cost_usd": assumed_gas_cost_usd,
         "data_source": "geckoterminal",
         "notice": _DEX_SLIPPAGE_NOTICE,
     }

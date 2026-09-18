@@ -35,12 +35,24 @@ class KimchiAlertResponse(BaseModel):
     generated_at: TimestampPair
     symbol: str
     upbit_price_krw: float
-    binance_price_usdt: float
+    binance_price_usdt: float = Field(
+        description=(
+            "Legacy field name kept for backward compatibility - despite the name, this "
+            "is NOT a live Binance price. See notice / cex_price_source."
+        )
+    )
+    cex_reference_price_usdt: float = Field(
+        description="Same value as binance_price_usdt, under an honestly-named field. Prefer this for new integrations."
+    )
+    cex_price_source: str = Field(
+        description="Actual source of the CEX-side reference price, e.g. 'coinbase_spot_or_coingecko_fallback'."
+    )
     usdkrw_rate_estimate: float
     kimchi_premium_pct: float
     premium_change_1h_pct: float
     alerts: KimchiAlerts
     thresholds: KimchiThresholds
+    notice: str | None = None
 
 
 KIMCHI_ALERT_EXAMPLE = {
@@ -48,11 +60,19 @@ KIMCHI_ALERT_EXAMPLE = {
     "symbol": "BTC",
     "upbit_price_krw": 145000000.0,
     "binance_price_usdt": 108000.5,
+    "cex_reference_price_usdt": 108000.5,
+    "cex_price_source": "coinbase_spot_or_coingecko_fallback",
     "usdkrw_rate_estimate": 1345.2,
     "kimchi_premium_pct": 0.15,
     "premium_change_1h_pct": 0.42,
     "alerts": {"reverse_premium": False, "premium_surge_1h": False},
     "thresholds": {"reverse_premium_pct": -1.5, "surge_1h_pct": 3.0},
+    "notice": (
+        "binance_price_usdt is a legacy field name kept for backward compatibility - it "
+        "is NOT a live Binance orderbook price. The actual source is Coinbase spot "
+        "(CoinGecko fallback). New integrations should read cex_reference_price_usdt / "
+        "cex_price_source instead."
+    ),
 }
 
 
@@ -486,6 +506,38 @@ class DexSlippageResponse(BaseModel):
             "agent gauge depth at a glance without multiple calls."
         ),
     )
+    quote_token_symbol: str | None = Field(
+        default=None,
+        description=(
+            "Parsed from GeckoTerminal's pool_name (e.g. 'USDC' from 'WETH / USDC 0.05%'). "
+            "Null when the pool name doesn't match the expected 'BASE / QUOTE' format."
+        ),
+    )
+    quote_token_is_stablecoin: bool | None = Field(
+        default=None,
+        description=(
+            "Whether quote_token_symbol is a known USD stablecoin (USDC/USDbC/USDT/DAI/etc.). "
+            "If false or null, this pool does not quote directly against USD - converting the "
+            "output to USD requires an additional hop/swap that this estimate does not account "
+            "for. This endpoint always picks the single most-liquid pool for a token, which is "
+            "not guaranteed to be USD-quoted."
+        ),
+    )
+    pool_fee_pct: float | None = Field(
+        default=None,
+        description=(
+            "Swap fee tier of the selected pool (e.g. 0.05 for a 0.05% Uniswap v3 tier), "
+            "parsed from pool_name. Disclosed for your own accounting only - NOT "
+            "subtracted from estimated_slippage_pct or slippage_tiers."
+        ),
+    )
+    assumed_gas_cost_usd: float | None = Field(
+        default=None,
+        description=(
+            "Flat per-swap gas cost estimate for this network (same table used by "
+            "arb-spread-matrix), not a live on-chain gas quote."
+        ),
+    )
     data_source: str
     notice: str | None = None
 
@@ -506,6 +558,10 @@ DEX_SLIPPAGE_EXAMPLE = {
         {"trade_size_usd": 5000.0, "estimated_price_impact_pct": 0.04, "warning_level": "LOW"},
         {"trade_size_usd": 10000.0, "estimated_price_impact_pct": 0.08, "warning_level": "LOW"},
     ],
+    "quote_token_symbol": "USDC",
+    "quote_token_is_stablecoin": True,
+    "pool_fee_pct": 0.05,
+    "assumed_gas_cost_usd": 0.05,
     "data_source": "geckoterminal",
     "notice": (
         "Slippage is an approximation computed only from the pool's aggregate USD "
@@ -516,7 +572,10 @@ DEX_SLIPPAGE_EXAMPLE = {
         "trading. slippage_tiers uses the same approximation at three fixed sizes "
         "regardless of the trade_size_usd you passed in; warning_level thresholds (LOW "
         "<1%, MEDIUM 1-3%, HIGH >3%) are AlphaPipeline's own heuristic, not an industry "
-        "standard."
+        "standard. assumed_gas_cost_usd is a flat per-swap estimate, not a live gas "
+        "quote. quote_token_is_stablecoin tells you whether this pool's quote side is a "
+        "USD stablecoin - if false or null, converting to USD requires an additional "
+        "hop this estimate does not account for."
     ),
 }
 

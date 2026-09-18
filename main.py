@@ -230,8 +230,11 @@ async def dump_risk_endpoint():
     summary="Detect Korea-vs-global crypto price arbitrage (kimchi premium)",
     description=(
         "Use this endpoint when you need to know whether a cryptocurrency is trading at a "
-        "premium or discount on Korean exchanges (Upbit) versus the global market, commonly "
-        "known as the 'kimchi premium'. Call this when asked about cross-exchange arbitrage "
+        "premium or discount on Korean exchanges (Upbit) versus a global reference price, "
+        "commonly known as the 'kimchi premium'. The global side is Coinbase spot (CoinGecko "
+        "fallback), NOT a live Binance orderbook - the legacy field name binance_price_usdt is "
+        "kept for backward compatibility only (see cex_reference_price_usdt / cex_price_source "
+        "for the honestly-labeled fields). Call this when asked about cross-exchange arbitrage "
         "opportunities in Korean crypto markets, to detect a reverse premium (localized crash "
         "risk, triggered at -1.5% or below), or to detect a sudden premium surge within the last "
         "hour (3 percentage points or more). Returns the current premium percentage, its 1-hour "
@@ -242,7 +245,7 @@ async def dump_risk_endpoint():
     responses={
         200: {"model": KimchiAlertResponse, "description": "Kimchi premium calculation result"},
         402: {"description": "x402 payment required"},
-        502: {"model": ErrorResponse, "description": "Upstream (Upbit/Binance) error"},
+        502: {"model": ErrorResponse, "description": "Upstream (Upbit/Coinbase) error"},
     },
 )
 async def kimchi_alert_endpoint(symbol: str = Query("BTC", description="e.g. BTC, ETH, SOL")):

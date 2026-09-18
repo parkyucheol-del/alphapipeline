@@ -90,7 +90,16 @@ KIMCHI_ALERT_OUTPUT_SCHEMA = {
         "generated_at": _TIMESTAMP_PAIR_SCHEMA,
         "symbol": {"type": "string"},
         "upbit_price_krw": {"type": "number"},
-        "binance_price_usdt": {"type": "number"},
+        "binance_price_usdt": {
+            "type": "number",
+            "description": "Legacy field name kept for backward compatibility - NOT a live Binance price, see notice/cex_price_source.",
+        },
+        "cex_reference_price_usdt": {
+            "type": "number",
+            "description": "Same value as binance_price_usdt under an honestly-named field.",
+        },
+        "cex_price_source": {"type": "string"},
+        "notice": {"type": "string"},
         "usdkrw_rate_estimate": {"type": "number"},
         "kimchi_premium_pct": {"type": "number"},
         "premium_change_1h_pct": {"type": "number"},
@@ -273,6 +282,22 @@ DEX_SLIPPAGE_OUTPUT_SCHEMA = {
                 },
                 "required": ["trade_size_usd"],
             },
+        },
+        "quote_token_symbol": {
+            "type": ["string", "null"],
+            "description": "Parsed from pool_name (e.g. 'USDC' from 'WETH / USDC 0.05%').",
+        },
+        "quote_token_is_stablecoin": {
+            "type": ["boolean", "null"],
+            "description": "If false or null, this pool isn't USD-quoted - an extra hop is needed to reach USD, not accounted for in the slippage estimate.",
+        },
+        "pool_fee_pct": {
+            "type": ["number", "null"],
+            "description": "Swap fee tier of the selected pool, parsed from pool_name. Disclosed for reference only - not subtracted from the slippage estimate.",
+        },
+        "assumed_gas_cost_usd": {
+            "type": ["number", "null"],
+            "description": "Flat per-swap gas estimate for this network, not a live gas quote.",
         },
         "data_source": {"type": "string"},
         "notice": {"type": ["string", "null"]},
@@ -493,10 +518,12 @@ _TOOLS: list[dict] = [
         "price_attr": "PRICE_KIMCHI_ALERT_USDC",
         "description": (
             "Use this tool when evaluating Korean exchange price premiums, the 'kimchi "
-            "premium', Upbit price gaps vs Binance/OKX, cross-border crypto arbitrage, or "
-            "sudden Korea-specific price anomalies. Real-time Upbit vs global price "
-            "spread with reverse-premium and surge alerts. Do not use for general USD "
-            "spot prices or on-chain DEX swaps. Paid in USDC on Base."
+            "premium', Upbit price gaps vs a global reference price, cross-border crypto "
+            "arbitrage, or sudden Korea-specific price anomalies. Real-time Upbit vs "
+            "Coinbase spot (CoinGecko fallback) - NOT a live Binance orderbook, despite "
+            "the legacy binance_price_usdt field name kept for backward compatibility - "
+            "with reverse-premium and surge alerts. Do not use for general USD spot "
+            "prices or on-chain DEX swaps. Paid in USDC on Base."
         ),
         "input_schema": {
             "type": "object",

@@ -56,7 +56,7 @@ If you are using an official or third-party x402 client SDK, you do not need any
 
 ### GET {base_url}/v1/market/kimchi-alert — ${price_kimchi} USDC/call
 
-Use this when you need to know whether a cryptocurrency is trading at a premium or discount on Korean exchanges (Upbit) versus the global market, commonly called the "kimchi premium." Also use it to detect a reverse premium (possible localized crash risk) or a fast intraday premium surge.
+Use this when you need to know whether a cryptocurrency is trading at a premium or discount on Korean exchanges (Upbit) versus a global reference price (Coinbase spot, CoinGecko fallback - NOT a live Binance orderbook), commonly called the "kimchi premium." Also use it to detect a reverse premium (possible localized crash risk) or a fast intraday premium surge.
 
 - Query params: `symbol` (string, optional, default `BTC`) - e.g. `BTC`, `ETH`, `SOL`
 - Example request: `GET /v1/market/kimchi-alert?symbol=BTC`
@@ -67,13 +67,17 @@ Use this when you need to know whether a cryptocurrency is trading at a premium 
   "symbol": "BTC",
   "upbit_price_krw": 145000000.0,
   "binance_price_usdt": 108000.5,
+  "cex_reference_price_usdt": 108000.5,
+  "cex_price_source": "coinbase_spot_or_coingecko_fallback",
   "usdkrw_rate_estimate": 1345.2,
   "kimchi_premium_pct": 0.15,
   "premium_change_1h_pct": 0.42,
   "alerts": {{"reverse_premium": false, "premium_surge_1h": false}},
-  "thresholds": {{"reverse_premium_pct": -1.5, "surge_1h_pct": 3.0}}
+  "thresholds": {{"reverse_premium_pct": -1.5, "surge_1h_pct": 3.0}},
+  "notice": "binance_price_usdt is a legacy field name kept for backward compatibility - it is NOT a live Binance price. See cex_reference_price_usdt / cex_price_source."
 }}
 ```
+- Note: `binance_price_usdt` is a legacy field name kept for backward compatibility only - despite the name, it is not a live Binance price. Use `cex_reference_price_usdt` / `cex_price_source` for the honestly-labeled fields.
 - Do NOT call this for non-Korean-exchange comparisons or for historical/backtesting data - this is a live snapshot only.
 
 ### GET {base_url}/v1/tools/ai-markdown — ${price_markdown} USDC/call

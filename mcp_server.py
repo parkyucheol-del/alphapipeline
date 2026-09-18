@@ -200,9 +200,12 @@ async def get_token_dump_risk(symbol: str) -> dict:
 async def get_kimchi_alert(symbol: str = "BTC") -> dict:
     """
     Detect Korea-vs-global crypto price arbitrage (the "kimchi premium"):
-    whether a coin trades at a premium or discount on Upbit vs the global
-    market, a reverse-premium crash-risk flag (-1.5% or below), and a
-    premium-surge flag (+3 percentage points within the last hour).
+    whether a coin trades at a premium or discount on Upbit vs a global
+    reference price (Coinbase spot, CoinGecko fallback - NOT a live Binance
+    orderbook, despite the legacy binance_price_usdt field name kept for
+    backward compatibility), a reverse-premium crash-risk flag (-1.5% or
+    below), and a premium-surge flag (+3 percentage points within the last
+    hour).
 
     Use this when asked about cross-exchange arbitrage opportunities in Korean
     crypto markets, to detect a reverse-premium crash risk, or a sudden premium
@@ -215,8 +218,10 @@ async def get_kimchi_alert(symbol: str = "BTC") -> dict:
 
     Returns:
         On success: {"success": true, "symbol", "upbit_price_krw",
-            "binance_price_usdt", "kimchi_premium_pct", "premium_change_1h_pct",
-            "alerts", "thresholds", ...}
+            "binance_price_usdt" (legacy name, actually Coinbase/CoinGecko),
+            "cex_reference_price_usdt" (same value, honest name),
+            "cex_price_source", "kimchi_premium_pct", "premium_change_1h_pct",
+            "alerts", "thresholds", "notice", ...}
         On failure: {"success": false, "error": {"type", "message"}}
     """
     return await _safe_call("get_kimchi_alert", _logic_kimchi_alert(str(symbol).upper()))
@@ -397,6 +402,12 @@ async def get_dex_liquidity_slippage(
     trade size, and slippage_tiers at fixed $1k/$5k/$10k sizes. Approximated
     under a documented constant-product (50:50) assumption since GeckoTerminal's
     free API exposes only combined USD liquidity, not per-token reserves.
+
+    Also returns quote_token_is_stablecoin (false/null means this pool isn't
+    USD-quoted - an extra hop is needed to reach USD, not accounted for here),
+    pool_fee_pct (the pool's swap fee tier, disclosed for reference only - not
+    subtracted from the slippage estimate), and assumed_gas_cost_usd (a flat
+    per-network estimate, not a live quote).
 
     Use this before sizing a trade or comparing pools for a given token, to
     check depth before swapping. Do NOT treat estimated_slippage_pct or
