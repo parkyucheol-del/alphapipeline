@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Instantly check live Polymarket exit-liquidity/slippage on a benchmark market - powered by AlphaPipeline (x402).",
   "bin": {
-    "check-my-slippage": "./bin/index.js"
+    "check-my-slippage": "bin/index.js"
   },
   "engines": {
     "node": ">=18"
