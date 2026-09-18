@@ -155,6 +155,16 @@ TOKEN_RISK_OUTPUT_SCHEMA = {
         "owner_address": {"type": ["string", "null"]},
         "holder_count": {"type": ["integer", "null"]},
         "is_in_dex": {"type": ["boolean", "null"]},
+        "cannot_buy": {"type": ["boolean", "null"], "description": "GoPlus-only, null on Honeypot.is fallback. Feeds risk_flags."},
+        "cannot_sell_all": {"type": ["boolean", "null"], "description": "GoPlus-only, null on Honeypot.is fallback. Feeds risk_flags."},
+        "hidden_owner": {"type": ["boolean", "null"], "description": "GoPlus-only, null on Honeypot.is fallback. Feeds risk_flags."},
+        "transfer_pausable": {"type": ["boolean", "null"], "description": "GoPlus-only, null on Honeypot.is fallback. Feeds risk_flags."},
+        "selfdestruct": {"type": ["boolean", "null"], "description": "GoPlus-only, null on Honeypot.is fallback. Feeds risk_flags."},
+        "is_proxy": {"type": ["boolean", "null"], "description": "GoPlus-only, null on Honeypot.is fallback. Informational only - does not feed risk_flags."},
+        "is_blacklisted": {"type": ["boolean", "null"], "description": "GoPlus-only, null on Honeypot.is fallback. Feeds risk_flags."},
+        "slippage_modifiable": {"type": ["boolean", "null"], "description": "GoPlus-only, null on Honeypot.is fallback. Feeds risk_flags."},
+        "trading_cooldown": {"type": ["boolean", "null"], "description": "GoPlus-only, null on Honeypot.is fallback. Informational only - does not feed risk_flags."},
+        "owner_percent": {"type": ["number", "null"], "description": "Owner's % of total supply, GoPlus-only. Feeds 'high_owner_concentration' risk_flag at >=50%."},
         "risk_level": {"type": "string"},
         "risk_flags": {"type": "array", "items": {"type": "string"}},
         "data_source": {"type": "string"},
@@ -233,6 +243,18 @@ FUNDING_RATE_OUTPUT_SCHEMA = {
         "predicted_rate": {"type": ["number", "null"]},
         "next_funding_time": {"anyOf": [_TIMESTAMP_PAIR_SCHEMA, {"type": "null"}]},
         "funding_interval_hours": {"type": ["integer", "null"]},
+        "mark_price": {
+            "type": ["number", "null"],
+            "description": "Perpetual futures mark price at lookup time. Populated on both the Bybit and Binance paths.",
+        },
+        "index_price": {
+            "type": ["number", "null"],
+            "description": "Underlying spot index price feeding the perpetual's funding calculation. Populated on both the Bybit and Binance paths.",
+        },
+        "open_interest_usd": {
+            "type": ["number", "null"],
+            "description": "Total open interest in USD notional. Only available via the Bybit path - always null on the Binance fallback, since Binance's premiumIndex endpoint does not report open interest.",
+        },
         "data_source": {"type": "string"},
         "notice": {"type": ["string", "null"]},
     },
@@ -324,6 +346,13 @@ ARB_SPREAD_OUTPUT_SCHEMA = {
         "dex_price_usd": {"type": ["number", "null"]},
         "trade_size_usd": {"type": "number"},
         "assumed_gas_cost_usd": {"type": "number"},
+        "pool_fee_pct": {
+            "type": ["number", "null"],
+            "description": (
+                "DEX pool's fee tier (e.g. 0.05 for 0.05%), parsed from the pool name. "
+                "Informational only - net_spread_pct does not subtract it."
+            ),
+        },
         "min_spread_threshold_pct": {"type": "number"},
         "data_source": {"type": "string"},
         "notice": {"type": ["string", "null"]},
@@ -352,8 +381,21 @@ NEG_RISK_ARBITRAGE_OUTPUT_SCHEMA = {
         "sell_basket_capacity_shares": {"type": "number"},
         "buy_basket_capacity_notional_usd": {"type": ["number", "null"]},
         "sell_basket_capacity_notional_usd": {"type": ["number", "null"]},
+        "buy_basket_capacity_vwap_notional_usd": {
+            "type": ["number", "null"],
+            "description": (
+                "Volume-weighted price of filling buy_basket_capacity_shares by walking "
+                "the order book depth, instead of pricing it at top-of-book like "
+                "buy_basket_capacity_notional_usd does - more realistic actual fill cost."
+            ),
+        },
+        "sell_basket_capacity_vwap_notional_usd": {"type": ["number", "null"]},
         "opportunity": {"type": "string"},
         "arbitrage_viable": {"type": "boolean"},
+        "oldest_book_snapshot_time": {
+            "anyOf": [_TIMESTAMP_PAIR_SCHEMA, {"type": "null"}],
+            "description": "The oldest of each leg's own order-book snapshot timestamp - the staleness bottleneck across all legs, since the whole basket calculation is only as fresh as its stalest leg. Null if no leg reported a timestamp.",
+        },
         "data_source": {"type": "string"},
         "notice": {"type": ["string", "null"]},
     },
@@ -377,6 +419,18 @@ EXIT_CAPACITY_AUDIT_OUTPUT_SCHEMA = {
         "avg_exit_price": {"type": ["number", "null"]},
         "price_impact_pct": {"type": ["number", "null"]},
         "max_executable_shares": {"type": "number"},
+        "book_snapshot_time": {
+            "anyOf": [_TIMESTAMP_PAIR_SCHEMA, {"type": "null"}],
+            "description": "The order book's own reported snapshot timestamp, so you can judge how fresh this read is.",
+        },
+        "tick_size": {
+            "type": ["number", "null"],
+            "description": "Polymarket's own reported minimum price increment for this market. Null if the book response didn't include it.",
+        },
+        "min_order_size": {
+            "type": ["number", "null"],
+            "description": "Polymarket's own reported minimum order size for this market. Null if the book response didn't include it.",
+        },
         "data_source": {"type": "string"},
         "notice": {"type": ["string", "null"]},
     },
@@ -410,7 +464,15 @@ WHALE_AUDIT_OUTPUT_SCHEMA = {
                     "position_value_usd": {"type": ["number", "null"]},
                     "leverage": {"type": ["number", "null"]},
                     "leverage_type": {"type": "string"},
+                    "max_leverage": {
+                        "type": ["number", "null"],
+                        "description": "Hyperliquid's own reported leverage ceiling for this asset/account setting - not the leverage actually in use.",
+                    },
                     "unrealized_pnl_usd": {"type": ["number", "null"]},
+                    "return_on_equity_pct": {
+                        "type": ["number", "null"],
+                        "description": "Hyperliquid's own reported ROE for this position, as a percentage - not derived by this tool.",
+                    },
                     "liquidation_price": {"type": ["number", "null"]},
                     "distance_to_liquidation_pct": {"type": ["number", "null"]},
                 },
@@ -492,6 +554,18 @@ DUMP_RISK_OUTPUT_SCHEMA = {
                     "timing_precision": {"type": ["string", "null"]},
                     "unlock_supply_pct": {"type": "number"},
                     "unlock_amount": {"type": ["number", "null"]},
+                    "vesting_deposit_amount": {
+                        "type": ["number", "null"],
+                        "description": "On-chain-only field (Sablier's depositAmount, aggregated across streams). Total amount originally scheduled to vest. Null on the DropsTab path and when unavailable.",
+                    },
+                    "vesting_withdrawn_amount": {
+                        "type": ["number", "null"],
+                        "description": "On-chain-only field (Sablier's withdrawnAmount, aggregated across streams). Amount already claimed/withdrawn so far. Null on the DropsTab path and when unavailable.",
+                    },
+                    "vesting_progress_pct": {
+                        "type": ["number", "null"],
+                        "description": "On-chain-only field: vesting_withdrawn_amount / vesting_deposit_amount * 100 - how far along the vesting schedule already is. Null on the DropsTab path and when deposit data wasn't available.",
+                    },
                     "is_insider_vc_team": {"type": ["boolean", "null"]},
                     "category": {"type": "string"},
                     "risk_level": {"type": "string"},
@@ -571,8 +645,13 @@ _TOOLS: list[dict] = [
             "Use this tool before executing any on-chain swap to verify if an ERC-20 "
             "contract is a honeypot, rug-pull risk, or has malicious buy/sell taxes and "
             "mintability backdoors. GoPlus/Honeypot.is-backed security audit for a given "
-            "contract address. Do not use for market price discovery or liquidity "
-            "depth. Paid in USDC on Base."
+            "contract address - beyond is_honeypot, also surfaces individual GoPlus risk "
+            "signals (cannot_buy, cannot_sell_all, hidden_owner, transfer_pausable, "
+            "selfdestruct, is_blacklisted, slippage_modifiable, owner_percent) into "
+            "risk_flags, plus is_proxy/trading_cooldown as informational-only fields (not "
+            "flagged, since both are common in legitimate contracts). All of these are "
+            "null when the Honeypot.is fallback path is used. Do not use for market price "
+            "discovery or liquidity depth. Paid in USDC on Base."
         ),
         "input_schema": {
             "type": "object",
@@ -663,8 +742,10 @@ _TOOLS: list[dict] = [
             "Use this tool when analyzing perpetual futures funding rates, long/short "
             "market sentiment crowding, or timing hedging strategies before settlement "
             "periods. Aggregates Bybit (primary) and Binance (fallback) perpetual "
-            "funding rates. Do not use for spot market volume or token security "
-            "checks. Paid in USDC on Base."
+            "funding rates, plus mark_price/index_price (both paths) and "
+            "open_interest_usd (Bybit path only - null on the Binance fallback). "
+            "Do not use for spot market volume or token security checks. Paid in "
+            "USDC on Base."
         ),
         "input_schema": {
             "type": "object",
@@ -760,8 +841,11 @@ _TOOLS: list[dict] = [
             "whether a global reference price (Coinbase spot, CoinGecko fallback - not a "
             "specific exchange orderbook) and a DEX pool price diverge enough to be "
             "worth trading after an assumed flat gas cost. Returns gross/net spread "
-            "percentages and an is_profitable boolean. Do not use for DEX-only liquidity "
-            "depth checks or contract security. Paid in USDC on Base."
+            "percentages and an is_profitable boolean - note net_spread_pct does NOT "
+            "subtract the DEX pool's own swap fee (see pool_fee_pct), CEX trading fees, "
+            "or slippage, so a spread that clears the threshold before those costs may "
+            "not clear it after. Do not use for DEX-only liquidity depth checks or "
+            "contract security. Paid in USDC on Base."
         ),
         "input_schema": {
             "type": "object",
@@ -802,10 +886,12 @@ _TOOLS: list[dict] = [
         "price_attr": "PRICE_WHALE_AUDIT_USDC",
         "description": (
             "Use this tool to audit a Hyperliquid wallet address you already know: "
-            "every open perpetual position with side, size, leverage, unrealized PnL, "
-            "liquidation price, and distance-to-liquidation percentage. This does not "
-            "discover or rank 'smart money' wallets - Hyperliquid's public API has no "
-            "leaderboard or large-trader disclosure endpoint, so it only audits an "
+            "every open perpetual position with side, size, leverage, max_leverage, "
+            "unrealized PnL, return_on_equity_pct, liquidation price, and "
+            "distance-to-liquidation percentage (max_leverage and return_on_equity_pct "
+            "are Hyperliquid's own reported fields, not derived by this tool). This does "
+            "not discover or rank 'smart money' wallets - Hyperliquid's public API has "
+            "no leaderboard or large-trader disclosure endpoint, so it only audits an "
             "address you supply. risk_flags (HIGH_LEVERAGE, NEAR_LIQUIDATION) come from "
             "fixed numeric thresholds only. Do not use for spot price data or any "
             "exchange other than Hyperliquid. Paid in USDC on Base."
@@ -849,9 +935,13 @@ _TOOLS: list[dict] = [
             "settles to exactly $1, so a basket price away from $1 (after costs) is "
             "a near risk-free edge. Also returns buy/sell_basket_capacity_shares, "
             "the actual liquidity-bottleneck size executable right now, so this "
-            "isn't just a top-of-book mirage. Polymarket only. Do not use for "
-            "binary Yes/No markets (no basket to arbitrage) or for Kalshi (its "
-            "Data ToS forbids this use). Paid in USDC on Base."
+            "isn't just a top-of-book mirage - note *_capacity_notional_usd still "
+            "prices that size at top-of-book (optimistic), so use "
+            "*_capacity_vwap_notional_usd for the realistic fill cost. Also returns "
+            "oldest_book_snapshot_time, the staleness bottleneck across all legs. "
+            "Polymarket only. Do not use for binary Yes/No markets (no basket to "
+            "arbitrage) or for Kalshi (its Data ToS forbids this use). Paid in USDC "
+            "on Base."
         ),
         "input_schema": {
             "type": "object",
@@ -889,7 +979,10 @@ _TOOLS: list[dict] = [
             "Walk a single Polymarket outcome's live order book to determine how "
             "much of a given position size can actually be filled right now, at "
             "what average price, and with how much price impact versus the best "
-            "quote - a live snapshot, not historical liquidity. Accepts either a "
+            "quote - a live snapshot, not historical liquidity. Also returns "
+            "book_snapshot_time (the book's own reported timestamp) and Polymarket's "
+            "own tick_size/min_order_size for this market (null if the book response "
+            "didn't include them). Accepts either a "
             "raw token_id or a market_slug (+ outcome) to resolve it automatically "
             "- exact slug only, no fuzzy keyword search. Do not use for "
             "multi-outcome basket arbitrage detection (use "
@@ -929,11 +1022,21 @@ _TOOLS: list[dict] = [
         "path": "/v1/unlocks/dump-risk",
         "price_attr": "PRICE_DUMP_RISK_USDC",
         "description": (
-            "Use this tool to evaluate token unlock schedules, vesting cliffs, and "
-            "upcoming VC/team dump pressure relative to circulating supply. Analyzes "
-            "supply overhang risk before taking mid-to-long term positions. Do not use "
-            "for intra-day slippage or real-time transaction simulation. Paid in USDC "
-            "on Base."
+            "Use this tool to evaluate token unlock/vesting supply overhang risk before "
+            "taking mid-to-long term positions - returns tokens whose currently-locked or "
+            "unlock-eligible supply exceeds a materiality threshold, each with a computed "
+            "risk_level (LOW/MEDIUM/HIGH). Default data source (on-chain Sablier vesting, "
+            "the current configuration - no DropsTab key set) does NOT classify VC/team vs. "
+            "other holders (is_insider_vc_team is always null) and does NOT provide exact "
+            "unlock timing (days_until_unlock is always null, "
+            "timing_precision='pending_schema_verification') - it only reports the currently-"
+            "locked supply ratio. It does report vesting_deposit_amount/"
+            "vesting_withdrawn_amount (Sablier's own depositAmount/withdrawnAmount, "
+            "aggregated across streams) and vesting_progress_pct (withdrawn/deposit * 100), "
+            "showing how far along the vesting schedule already is. Treat a null value as "
+            "'unknown', never as 'no risk'. Always check the response's coverage_notice "
+            "field. Do not use for intra-day slippage or real-time transaction simulation. "
+            "Paid in USDC on Base (free while DUMP_RISK_ENABLED=false)."
         ),
         "input_schema": {"type": "object", "properties": {}, "required": []},
         "output_schema": DUMP_RISK_OUTPUT_SCHEMA,

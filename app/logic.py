@@ -226,6 +226,8 @@ async def _refresh_unlock_cache_onchain() -> dict:
     # 심볼별로 잠긴 물량(intactAmount, decimals 반영)을 합산
     locked_by_symbol: dict[str, float] = {}
     contract_by_symbol: dict[str, str] = {}
+    deposit_by_symbol: dict[str, float] = {}
+    withdrawn_by_symbol: dict[str, float] = {}
     for s in streams:
         asset = s.get("asset") or {}
         symbol = str(asset.get("symbol") or "").upper()
@@ -241,6 +243,14 @@ async def _refresh_unlock_cache_onchain() -> dict:
             continue
         locked_by_symbol[symbol] = locked_by_symbol.get(symbol, 0.0) + intact
         contract_by_symbol.setdefault(symbol, asset.get("address", ""))
+        try:
+            deposit_raw = float(s.get("depositAmount") or 0) / (10 ** int(decimals))
+            withdrawn_raw = float(s.get("withdrawnAmount") or 0) / (10 ** int(decimals))
+        except (TypeError, ValueError):
+            deposit_raw = 0.0
+            withdrawn_raw = 0.0
+        deposit_by_symbol[symbol] = deposit_by_symbol.get(symbol, 0.0) + deposit_raw
+        withdrawn_by_symbol[symbol] = withdrawn_by_symbol.get(symbol, 0.0) + withdrawn_raw
 
     results = []
     for symbol, locked_amount in locked_by_symbol.items():
@@ -261,6 +271,12 @@ async def _refresh_unlock_cache_onchain() -> dict:
         if unlock_supply_pct < DUMP_RISK_SUPPLY_PCT_THRESHOLD:
             continue
 
+        deposit_total = deposit_by_symbol.get(symbol, 0.0)
+        withdrawn_total = withdrawn_by_symbol.get(symbol, 0.0)
+        vesting_progress_pct = (
+            round(withdrawn_total / deposit_total * 100, 2) if deposit_total > 0 else None
+        )
+
         results.append({
             "token": symbol,
             "onchain_contract": contract_by_symbol.get(symbol),
@@ -269,6 +285,9 @@ async def _refresh_unlock_cache_onchain() -> dict:
             "timing_precision": "pending_schema_verification",
             "unlock_supply_pct": unlock_supply_pct,
             "unlock_amount": round(locked_amount, 4),
+            "vesting_deposit_amount": round(deposit_total, 4) if deposit_total > 0 else None,
+            "vesting_withdrawn_amount": round(withdrawn_total, 4) if deposit_total > 0 else None,
+            "vesting_progress_pct": vesting_progress_pct,
             "is_insider_vc_team": None,
             "category": "onchain_vesting_stream (unclassified)",
             "risk_level": _risk_level(unlock_supply_pct, False, None),
@@ -290,7 +309,10 @@ async def _refresh_unlock_cache_onchain() -> dict:
             "lockups, etc.) are not covered, so a token's absence from this list does "
             "not mean it has no lockup. Exact unlock timing (D-day) is not yet "
             "provided; this only computes the 'currently locked' supply ratio "
-            "(timing_precision=pending_schema_verification)."
+            "(timing_precision=pending_schema_verification). vesting_progress_pct "
+            "(withdrawn_amount / deposit_amount * 100, aggregated across a token's "
+            "Sablier streams) shows how far along the vesting schedule already is - "
+            "null when deposit data wasn't available."
         ),
     }
     unlock_cache["dump_risk"] = payload
@@ -361,6 +383,8 @@ async def _get_symbol_dump_risk_onchain(symbol: str) -> dict:
         }
 
     total_locked = 0.0
+    total_deposit = 0.0
+    total_withdrawn = 0.0
     matched_contract = None
     for chain, address in platforms.items():
         try:
@@ -380,6 +404,11 @@ async def _get_symbol_dump_risk_onchain(symbol: str) -> dict:
             if intact > 0:
                 total_locked += intact
                 matched_contract = matched_contract or address
+                try:
+                    total_deposit += float(s.get("depositAmount") or 0) / (10 ** int(decimals))
+                    total_withdrawn += float(s.get("withdrawnAmount") or 0) / (10 ** int(decimals))
+                except (TypeError, ValueError):
+                    pass
 
     if total_locked <= 0:
         return {
@@ -396,6 +425,9 @@ async def _get_symbol_dump_risk_onchain(symbol: str) -> dict:
         }
 
     unlock_supply_pct = round((total_locked / circulating_supply) * 100, 2)
+    vesting_progress_pct = (
+        round(total_withdrawn / total_deposit * 100, 2) if total_deposit > 0 else None
+    )
     return {
         "available": True,
         "symbol": symbol,
@@ -405,6 +437,9 @@ async def _get_symbol_dump_risk_onchain(symbol: str) -> dict:
         "timing_precision": "pending_schema_verification",
         "unlock_supply_pct": unlock_supply_pct,
         "unlock_amount": round(total_locked, 4),
+        "vesting_deposit_amount": round(total_deposit, 4) if total_deposit > 0 else None,
+        "vesting_withdrawn_amount": round(total_withdrawn, 4) if total_deposit > 0 else None,
+        "vesting_progress_pct": vesting_progress_pct,
         "is_insider_vc_team": None,
         "category": "onchain_vesting_stream (unclassified)",
         "sell_pressure_risk_level": _risk_level(unlock_supply_pct, False, None),
@@ -620,6 +655,22 @@ async def get_token_risk(chain_id: int, contract_address: str) -> dict:
         is_in_dex = _bool_or_none(gp.get("is_in_dex"))
         token_name = gp.get("token_name") or None
         token_symbol = gp.get("token_symbol") or None
+        # 2026-09-18 추가: GoPlus 응답에 이미 들어있는데 그동안 버려지던 개별
+        # 위험 신호들 - is_honeypot 하나로는 놓칠 수 있는 신호를 노출한다
+        # (추가 업스트림 호출 없음, 이 응답 안에 이미 있던 필드들).
+        cannot_buy = _bool_or_none(gp.get("cannot_buy"))
+        cannot_sell_all = _bool_or_none(gp.get("cannot_sell_all"))
+        hidden_owner = _bool_or_none(gp.get("hidden_owner"))
+        transfer_pausable = _bool_or_none(gp.get("transfer_pausable"))
+        selfdestruct = _bool_or_none(gp.get("selfdestruct"))
+        is_proxy = _bool_or_none(gp.get("is_proxy"))
+        is_blacklisted = _bool_or_none(gp.get("is_blacklisted"))
+        slippage_modifiable = _bool_or_none(gp.get("slippage_modifiable"))
+        trading_cooldown = _bool_or_none(gp.get("trading_cooldown"))
+        try:
+            owner_percent = round(float(gp.get("owner_percent") or 0) * 100, 2)
+        except (TypeError, ValueError):
+            owner_percent = None
     except Exception as e:
         logger.warning("GoPlus 조회 실패, Honeypot.is로 폴백합니다: %s", e)
         try:
@@ -650,6 +701,17 @@ async def get_token_risk(chain_id: int, contract_address: str) -> dict:
         token_symbol = token_info.get("symbol")
         data_source = "honeypot_is"
         notice = "GoPlus lookup failed; using Honeypot.is fallback data (narrower field coverage)."
+        # Honeypot.is 폴백 경로는 아래 GoPlus 전용 필드를 제공하지 않는다 - 항상 null.
+        cannot_buy = None
+        cannot_sell_all = None
+        hidden_owner = None
+        transfer_pausable = None
+        selfdestruct = None
+        is_proxy = None
+        is_blacklisted = None
+        slippage_modifiable = None
+        trading_cooldown = None
+        owner_percent = None
 
     flags = []
     if is_honeypot:
@@ -664,6 +726,27 @@ async def get_token_risk(chain_id: int, contract_address: str) -> dict:
         flags.append("high_buy_tax")
     if sell_tax and sell_tax >= 10:
         flags.append("high_sell_tax")
+    # 2026-09-18 추가: 새로 노출한 GoPlus 필드 중 그 자체로 명확한 위험 신호인
+    # 것만 risk_flags/risk_level 판정에 반영한다 - is_proxy(업그레이드 가능
+    # 컨트랙트는 정상적인 DeFi 프로젝트에도 흔함)와 trading_cooldown(봇 방지
+    # 목적으로도 흔히 쓰임)은 그 자체로 위험 신호가 아니므로 반영하지 않고
+    # 원본 값만 노출한다(오탐으로 정상 토큰을 MEDIUM으로 밀어올리는 것 방지).
+    if cannot_buy:
+        flags.append("cannot_buy")
+    if cannot_sell_all:
+        flags.append("cannot_sell_all")
+    if hidden_owner:
+        flags.append("hidden_owner")
+    if transfer_pausable:
+        flags.append("transfer_pausable")
+    if selfdestruct:
+        flags.append("selfdestruct")
+    if is_blacklisted:
+        flags.append("is_blacklisted")
+    if slippage_modifiable:
+        flags.append("slippage_modifiable")
+    if owner_percent is not None and owner_percent >= 50:
+        flags.append("high_owner_concentration")
 
     if is_honeypot or (sell_tax and sell_tax >= 50):
         risk_level = "HIGH"
@@ -687,6 +770,16 @@ async def get_token_risk(chain_id: int, contract_address: str) -> dict:
         "owner_address": owner_address if data_source == "goplus" else None,
         "holder_count": holder_count,
         "is_in_dex": is_in_dex,
+        "cannot_buy": cannot_buy,
+        "cannot_sell_all": cannot_sell_all,
+        "hidden_owner": hidden_owner,
+        "transfer_pausable": transfer_pausable,
+        "selfdestruct": selfdestruct,
+        "is_proxy": is_proxy,
+        "is_blacklisted": is_blacklisted,
+        "slippage_modifiable": slippage_modifiable,
+        "trading_cooldown": trading_cooldown,
+        "owner_percent": owner_percent,
         "risk_level": risk_level,
         "risk_flags": flags,
         "data_source": data_source,
@@ -811,7 +904,11 @@ _WHALE_AUDIT_NOTICE = (
     "this response), so it can lag the true mark price briefly during fast moves. "
     "risk_flags are computed from fixed numeric thresholds only (leverage >= 20x -> "
     "HIGH_LEVERAGE, distance_to_liquidation_pct < 15 -> NEAR_LIQUIDATION), not a "
-    "judgment call about the trader."
+    "judgment call about the trader. max_leverage and return_on_equity_pct are "
+    "Hyperliquid's own reported fields (not derived by this tool) - max_leverage is "
+    "the ceiling the trader's account/asset settings allow, not the leverage actually "
+    "in use, and return_on_equity_pct is Hyperliquid's own ROE definition, which can "
+    "differ from a naive unrealized_pnl_usd / margin_used calculation."
 )
 
 
@@ -872,8 +969,13 @@ async def get_whale_position_audit(address: str) -> dict:
         leverage_obj = pos.get("leverage") or {}
         leverage_value = _f(leverage_obj.get("value"))
         leverage_type = leverage_obj.get("type") or "unknown"
+        max_leverage = _f(pos.get("maxLeverage"))
         unrealized_pnl = _f(pos.get("unrealizedPnl"))
         liquidation_price = _f(pos.get("liquidationPx"))
+        return_on_equity_raw = _f(pos.get("returnOnEquity"))
+        return_on_equity_pct = (
+            round(return_on_equity_raw * 100, 2) if return_on_equity_raw is not None else None
+        )
 
         mark_price = (
             round(position_value / size, 6) if position_value is not None and size else None
@@ -899,7 +1001,9 @@ async def get_whale_position_audit(address: str) -> dict:
                 "position_value_usd": position_value,
                 "leverage": leverage_value,
                 "leverage_type": leverage_type,
+                "max_leverage": max_leverage,
                 "unrealized_pnl_usd": unrealized_pnl,
+                "return_on_equity_pct": return_on_equity_pct,
                 "liquidation_price": liquidation_price,
                 "distance_to_liquidation_pct": distance_to_liquidation_pct,
             }
@@ -1022,7 +1126,9 @@ async def get_funding_rate(symbol: str) -> dict:
     base_notice = (
         "The funding rate is the rate that will apply at the next settlement "
         "(next_funding_time). Neither Bybit nor Binance provides a separate "
-        "'predicted' field, so predicted_rate is always the same value as funding_rate."
+        "'predicted' field, so predicted_rate is always the same value as funding_rate. "
+        "open_interest_usd is only available via the Bybit path - it is null on the "
+        "Binance fallback because Binance's premiumIndex endpoint does not include it."
     )
 
     try:
@@ -1034,6 +1140,20 @@ async def get_funding_rate(symbol: str) -> dict:
         )
         data_source = "bybit"
         notice = base_notice
+        try:
+            mark_price = float(data["markPrice"]) if data.get("markPrice") else None
+        except (TypeError, ValueError):
+            mark_price = None
+        try:
+            index_price = float(data["indexPrice"]) if data.get("indexPrice") else None
+        except (TypeError, ValueError):
+            index_price = None
+        try:
+            open_interest_usd = (
+                float(data["openInterestValue"]) if data.get("openInterestValue") else None
+            )
+        except (TypeError, ValueError):
+            open_interest_usd = None
     except Exception as e:
         logger.warning("Bybit 펀딩비 조회 실패, 바이낸스로 폴백합니다: %s", e)
         try:
@@ -1048,6 +1168,15 @@ async def get_funding_rate(symbol: str) -> dict:
                 "return a 451 block on this server's IP range, so this value does "
                 "not always succeed either.)"
             )
+            try:
+                mark_price = float(data["markPrice"]) if data.get("markPrice") else None
+            except (TypeError, ValueError):
+                mark_price = None
+            try:
+                index_price = float(data["indexPrice"]) if data.get("indexPrice") else None
+            except (TypeError, ValueError):
+                index_price = None
+            open_interest_usd = None
         except Exception as e2:
             return {
                 "generated_at": _timestamp_now(),
@@ -1064,6 +1193,9 @@ async def get_funding_rate(symbol: str) -> dict:
         "predicted_rate": funding_rate,
         "next_funding_time": next_funding_time,
         "funding_interval_hours": funding_interval_hours,
+        "mark_price": mark_price,
+        "index_price": index_price,
+        "open_interest_usd": open_interest_usd,
         "data_source": data_source,
         "notice": notice,
     }
@@ -1371,8 +1503,10 @@ _ARB_SPREAD_NOTICE = (
     "CEX-side price is Coinbase spot (CoinGecko fallback), not a specific exchange "
     "orderbook - it does not reflect actual tradable depth on any single exchange. "
     "DEX-side price is read from GeckoTerminal's pool price fields. net_spread_pct "
-    "only subtracts an assumed flat gas cost - it excludes CEX deposit/withdrawal "
-    "availability, trading fees, and slippage beyond trade_size_usd. Re-verify with "
+    "only subtracts an assumed flat gas cost - it does NOT subtract the DEX pool's "
+    "own swap fee (see pool_fee_pct, typically 0.05-1%), CEX trading fees, CEX "
+    "deposit/withdrawal availability, or slippage beyond trade_size_usd. A spread "
+    "that looks profitable before the pool fee may not be after it - re-verify with "
     "live quotes before executing a real trade."
 )
 
@@ -1457,6 +1591,7 @@ async def get_arb_spread_matrix(
             "is_profitable": False,
             "trade_size_usd": trade_size_usd,
             "assumed_gas_cost_usd": _ASSUMED_GAS_COST_USD.get(network, _DEFAULT_GAS_COST_USD),
+            "pool_fee_pct": None,
             "min_spread_threshold_pct": min_spread_threshold_pct,
             "data_source": "none",
             "notice": _ARB_SPREAD_NOTICE,
@@ -1476,6 +1611,7 @@ async def get_arb_spread_matrix(
                 "is_profitable": False,
                 "trade_size_usd": trade_size_usd,
                 "assumed_gas_cost_usd": _ASSUMED_GAS_COST_USD.get(network, _DEFAULT_GAS_COST_USD),
+                "pool_fee_pct": None,
                 "min_spread_threshold_pct": min_spread_threshold_pct,
                 "data_source": "none",
                 "notice": _ARB_SPREAD_NOTICE,
@@ -1487,6 +1623,8 @@ async def get_arb_spread_matrix(
 
     dex_price_usd = _extract_dex_token_price_usd(pool_data, token_address)
     gas_cost_usd = _ASSUMED_GAS_COST_USD.get(network, _DEFAULT_GAS_COST_USD)
+    pool_name = (pool_data.get("attributes") or {}).get("name")
+    pool_fee_pct = _pool_fee_pct_from_pool_name(pool_name)
 
     if not dex_price_usd or not cex_price_usd or cex_price_usd <= 0:
         return {
@@ -1500,6 +1638,7 @@ async def get_arb_spread_matrix(
             "dex_price_usd": dex_price_usd,
             "trade_size_usd": trade_size_usd,
             "assumed_gas_cost_usd": gas_cost_usd,
+            "pool_fee_pct": pool_fee_pct,
             "min_spread_threshold_pct": min_spread_threshold_pct,
             "data_source": "geckoterminal" if dex_price_usd is None else "coinbase+geckoterminal",
             "notice": _ARB_SPREAD_NOTICE,
@@ -1531,6 +1670,7 @@ async def get_arb_spread_matrix(
         "dex_price_usd": round(dex_price_usd, 8),
         "trade_size_usd": trade_size_usd,
         "assumed_gas_cost_usd": gas_cost_usd,
+        "pool_fee_pct": pool_fee_pct,
         "min_spread_threshold_pct": min_spread_threshold_pct,
         "data_source": "coinbase+geckoterminal",
         "notice": _ARB_SPREAD_NOTICE,
@@ -1695,15 +1835,26 @@ _NEG_RISK_ARBITRAGE_NOTICE = (
     "*_capacity_shares is how many full baskets (1 share of every outcome) you "
     "could execute right now within max_slippage_pct of each leg's best price - "
     "arbitrage_viable=false with a positive edge usually means the edge is real "
-    "but too thin to size meaningfully. Cross-check the specific leg you intend "
-    "to trade with prediction.exit_capacity_audit before sizing a real position."
+    "but too thin to size meaningfully. *_capacity_notional_usd prices that "
+    "capacity at each leg's top-of-book price, which is optimistic for any size "
+    "beyond the first price level - *_capacity_vwap_notional_usd instead prices "
+    "it by walking the same depth used to compute capacity_shares, so it reflects "
+    "the actual average cost of filling that size (null if depth data was "
+    "insufficient). oldest_book_snapshot_time is the staleness bottleneck across "
+    "all legs - the oldest of each leg's own order-book snapshot timestamp, since "
+    "the whole basket calculation is only as fresh as its stalest leg (null if no "
+    "leg reported a timestamp). Cross-check the specific leg you intend to trade with "
+    "prediction.exit_capacity_audit before sizing a real position."
 )
 
 _EXIT_CAPACITY_AUDIT_NOTICE = (
     "executable=false means the current book cannot fully fill this size - "
     "max_executable_shares is how much you could get out of (or into) right now "
     "at the prices already walked through above. This is a live, point-in-time "
-    "snapshot, not an average or historical liquidity figure."
+    "snapshot, not an average or historical liquidity figure - book_snapshot_time is "
+    "the order book's own reported snapshot timestamp, so you can judge how fresh this "
+    "read is. tick_size and min_order_size are Polymarket's own reported order-sizing "
+    "constraints for this market (null if the book response didn't include them)."
 )
 
 
@@ -1752,6 +1903,36 @@ def _leg_capacity_shares(levels: list[dict], best_price: float, max_slippage_pct
     return sum(l["size"] for l in levels if l["price"] >= cutoff)
 
 
+def _leg_vwap_price_for_shares(levels: list[dict], shares: float) -> float | None:
+    """
+    한 레그 오더북에서 shares 수량을 실제로 체결한다고 가정했을 때의
+    수량가중평균가(VWAP)를 계산한다. levels는 이미 유리한 순서로 정렬돼
+    있다고 가정한다(ask=오름차순, bid=내림차순 - _parse_book_levels 참고).
+
+    top-of-book 가격 하나로 capacity_notional_usd를 계산하면(기존 방식) 실제로
+    그 수량을 체결할 때의 진짜 비용보다 낙관적인 값이 나온다 - capacity_shares
+    자체는 슬리피지 한도 내 depth를 정확히 걷어 계산하지만, notional은 top 가격만
+    쓰기 때문. 이 함수로 같은 depth를 다시 걸어서 실제 체결 비용을 구한다.
+    """
+    if not levels or shares <= 0:
+        return None
+    remaining = shares
+    cost = 0.0
+    filled = 0.0
+    for level in levels:
+        take = min(remaining, level["size"])
+        if take <= 0:
+            continue
+        cost += take * level["price"]
+        filled += take
+        remaining -= take
+        if remaining <= 1e-9:
+            break
+    if filled <= 0:
+        return None
+    return cost / filled
+
+
 async def get_neg_risk_arbitrage(
     event_slug: str,
     assumed_round_trip_cost_pct: float = 1.5,
@@ -1793,6 +1974,7 @@ async def get_neg_risk_arbitrage(
     bid_levels_per_leg: list[list[dict]] = []
     best_asks: list[float] = []
     best_bids: list[float] = []
+    book_timestamps_ms: list[int] = []
     for book in books:
         asks = _parse_book_levels(book.get("asks") or [], reverse=False)
         bids = _parse_book_levels(book.get("bids") or [], reverse=True)
@@ -1802,6 +1984,14 @@ async def get_neg_risk_arbitrage(
             best_asks.append(asks[0]["price"])
         if bids:
             best_bids.append(bids[0]["price"])
+        try:
+            book_timestamps_ms.append(int(book.get("timestamp")))
+        except (TypeError, ValueError):
+            pass
+
+    oldest_book_snapshot_time = (
+        _ms_epoch_to_timestamp_pair(min(book_timestamps_ms)) if book_timestamps_ms else None
+    )
 
     basket_ask_sum = sum(best_asks) if len(best_asks) == n else None
     basket_bid_sum = sum(best_bids) if len(best_bids) == n else None
@@ -1814,20 +2004,36 @@ async def get_neg_risk_arbitrage(
     sell_net_edge = (sell_gross_edge - cost_frac) if sell_gross_edge is not None else None
 
     buy_basket_capacity_shares = 0.0
+    buy_basket_capacity_vwap_sum: float | None = None
     if len(best_asks) == n:
         leg_caps = [
             _leg_capacity_shares(levels, best, max_slippage_pct, "ask")
             for levels, best in zip(ask_levels_per_leg, best_asks)
         ]
         buy_basket_capacity_shares = min(leg_caps) if leg_caps else 0.0
+        if buy_basket_capacity_shares > 0:
+            leg_vwaps = [
+                _leg_vwap_price_for_shares(levels, buy_basket_capacity_shares)
+                for levels in ask_levels_per_leg
+            ]
+            if all(v is not None for v in leg_vwaps):
+                buy_basket_capacity_vwap_sum = sum(leg_vwaps)
 
     sell_basket_capacity_shares = 0.0
+    sell_basket_capacity_vwap_sum: float | None = None
     if len(best_bids) == n:
         leg_caps = [
             _leg_capacity_shares(levels, best, max_slippage_pct, "bid")
             for levels, best in zip(bid_levels_per_leg, best_bids)
         ]
         sell_basket_capacity_shares = min(leg_caps) if leg_caps else 0.0
+        if sell_basket_capacity_shares > 0:
+            leg_vwaps = [
+                _leg_vwap_price_for_shares(levels, sell_basket_capacity_shares)
+                for levels in bid_levels_per_leg
+            ]
+            if all(v is not None for v in leg_vwaps):
+                sell_basket_capacity_vwap_sum = sum(leg_vwaps)
 
     opportunity = "none"
     arbitrage_viable = False
@@ -1866,8 +2072,17 @@ async def get_neg_risk_arbitrage(
         "sell_basket_capacity_notional_usd": (
             round(sell_basket_capacity_shares * basket_bid_sum, 2) if basket_bid_sum is not None else None
         ),
+        "buy_basket_capacity_vwap_notional_usd": (
+            round(buy_basket_capacity_shares * buy_basket_capacity_vwap_sum, 2)
+            if buy_basket_capacity_vwap_sum is not None else None
+        ),
+        "sell_basket_capacity_vwap_notional_usd": (
+            round(sell_basket_capacity_shares * sell_basket_capacity_vwap_sum, 2)
+            if sell_basket_capacity_vwap_sum is not None else None
+        ),
         "opportunity": opportunity,
         "arbitrage_viable": arbitrage_viable,
+        "oldest_book_snapshot_time": oldest_book_snapshot_time,
         "data_source": "polymarket-gamma+clob",
         "notice": _NEG_RISK_ARBITRAGE_NOTICE,
     }
@@ -1905,6 +2120,21 @@ async def get_exit_capacity_audit(
     levels_raw = (book.get("bids") if side == "sell" else book.get("asks")) or []
     levels = _parse_book_levels(levels_raw, reverse=(side == "sell"))
 
+    try:
+        book_snapshot_time = _ms_epoch_to_timestamp_pair(int(book.get("timestamp")))
+    except (TypeError, ValueError):
+        book_snapshot_time = None
+    try:
+        tick_size = float(book["tick_size"]) if book.get("tick_size") is not None else None
+    except (TypeError, ValueError):
+        tick_size = None
+    try:
+        min_order_size = (
+            float(book["min_order_size"]) if book.get("min_order_size") is not None else None
+        )
+    except (TypeError, ValueError):
+        min_order_size = None
+
     if not levels:
         return {
             "generated_at": _timestamp_now(),
@@ -1917,6 +2147,9 @@ async def get_exit_capacity_audit(
             "avg_exit_price": None,
             "price_impact_pct": None,
             "max_executable_shares": 0.0,
+            "book_snapshot_time": book_snapshot_time,
+            "tick_size": tick_size,
+            "min_order_size": min_order_size,
             "data_source": "polymarket-clob",
             "notice": _EXIT_CAPACITY_AUDIT_NOTICE
             + f" No {'bids' if side == 'sell' else 'asks'} on the book right now - position is currently stuck.",
@@ -1953,6 +2186,9 @@ async def get_exit_capacity_audit(
         "avg_exit_price": round(avg_price, 4) if avg_price is not None else None,
         "price_impact_pct": round(impact_pct, 3) if impact_pct is not None else None,
         "max_executable_shares": round(filled_shares, 4),
+        "book_snapshot_time": book_snapshot_time,
+        "tick_size": tick_size,
+        "min_order_size": min_order_size,
         "data_source": "polymarket-clob",
         "notice": _EXIT_CAPACITY_AUDIT_NOTICE,
     }

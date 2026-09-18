@@ -166,12 +166,20 @@ async def get_token_dump_risk(symbol: str) -> dict:
     circulating supply, and a sell-pressure score against real-time volume,
     returned as a concise summary report.
 
-    Use this to evaluate token unlock schedules, vesting cliffs, and upcoming
-    VC/team dump pressure relative to circulating supply before taking mid-to-
-    long term positions. Do NOT use it for intra-day slippage or real-time
-    transaction simulation - use dex.liquidity_slippage for that instead. This
-    tool is free (no payment) as an onboarding check; every other tool here is
-    a normal read-only call against app/logic.py.
+    Use this to evaluate token unlock/vesting supply overhang risk before
+    taking mid-to-long term positions. Default data source (on-chain Sablier
+    vesting, the current configuration - no DropsTab key set) does NOT classify
+    VC/team vs. other holders and does NOT provide exact unlock timing
+    (days_until_unlock stays null) - it only reports the currently-locked
+    supply ratio; treat a null value as "unknown," never as "no risk." On this
+    on-chain path it also reports vesting_deposit_amount/vesting_withdrawn_amount
+    (Sablier's own depositAmount/withdrawnAmount, aggregated across streams) and
+    vesting_progress_pct (withdrawn/deposit * 100) showing how far along the
+    vesting schedule already is - null when deposit data wasn't available. Do
+    NOT use it for intra-day slippage or real-time transaction simulation - use
+    dex.liquidity_slippage for that instead. This tool is free (no payment) as
+    an onboarding check; every other tool here is a normal read-only call
+    against app/logic.py.
 
     Args:
         symbol: Token ticker symbol (e.g. "ATH", "AO", "CPOOL"). Case-insensitive.
@@ -179,7 +187,7 @@ async def get_token_dump_risk(symbol: str) -> dict:
     Returns:
         Success & data available: {"success": true, "available": true, "symbol",
             "unlock_date_utc", "days_until_unlock", "unlock_supply_pct",
-            "volume_impact_pct", "sell_pressure_risk_level", ...}
+            "vesting_progress_pct", "volume_impact_pct", "sell_pressure_risk_level", ...}
         Success but not yet available:
             {"success": true, "available": false, "reason", "message"}
             (e.g. the paid data source isn't connected yet, by business decision)
@@ -232,8 +240,13 @@ async def get_token_risk(chain_id: int, contract_address: str) -> dict:
     """
     Check a token contract for honeypot/scam risk before buying: is_honeypot,
     buy/sell tax, mintability, open-source status, ownership renouncement,
-    holder count, and a summarized risk_level (LOW/MEDIUM/HIGH/UNKNOWN).
-    Data source: GoPlus Security, falling back to Honeypot.is.
+    holder count, individual GoPlus risk signals (cannot_buy, cannot_sell_all,
+    hidden_owner, transfer_pausable, selfdestruct, is_blacklisted,
+    slippage_modifiable, owner_percent - all feed into risk_flags), is_proxy
+    and trading_cooldown (informational only, not flagged - both are common in
+    legitimate contracts), and a summarized risk_level (LOW/MEDIUM/HIGH/UNKNOWN).
+    Data source: GoPlus Security, falling back to Honeypot.is (the GoPlus-only
+    fields above are always null on the fallback path).
 
     Use this right before entering a position on an unfamiliar or newly-listed
     token. Do NOT treat a null field as "safe" - it means that field could not
@@ -312,8 +325,10 @@ async def get_token_diagnostic(chain_id: int, contract_address: str) -> dict:
 async def get_whale_position_audit(address: str) -> dict:
     """
     Audit a Hyperliquid wallet's open perpetual futures positions: side,
-    size, leverage, unrealized PnL, liquidation price, and distance-to-
-    liquidation percentage for every open position.
+    size, leverage, max_leverage, unrealized PnL, return_on_equity_pct,
+    liquidation price, and distance-to-liquidation percentage for every open
+    position (max_leverage and return_on_equity_pct are Hyperliquid's own
+    reported fields, not derived by this tool).
 
     Use this only when you already have a specific Hyperliquid/EVM wallet address
     (from an explorer, a screenshot, on-chain sleuthing, etc.) and want to audit
@@ -345,7 +360,10 @@ async def get_funding_rate(symbol: str) -> dict:
     it already calls this internally, so calling both is redundant. Check the
     data_source field to see whether Bybit or the Binance fallback answered;
     predicted_rate equals funding_rate because neither exchange exposes a
-    separate forecast field (not a bug).
+    separate forecast field (not a bug). Also returns mark_price/index_price
+    (populated on both the Bybit and Binance paths) and open_interest_usd
+    (Bybit path only - always null on the Binance fallback, since Binance's
+    premiumIndex endpoint doesn't report open interest).
 
     Args:
         symbol: e.g. "BTC", "ETH", or "BTCUSDT" (non-USDT symbols are
@@ -353,7 +371,8 @@ async def get_funding_rate(symbol: str) -> dict:
 
     Returns:
         On success: {"success": true, "funding_rate_percentage",
-            "funding_interval_hours", "data_source", ...}
+            "funding_interval_hours", "mark_price", "index_price",
+            "open_interest_usd", "data_source", ...}
         On failure: {"success": false, "error": {"type", "message"}}
     """
     return await _safe_call("get_funding_rate", _logic_funding_rate(symbol))
@@ -457,10 +476,12 @@ async def get_arb_spread_matrix(
 
     Use this before executing a cross-venue arbitrage trade, or for kimchi-style
     premium checks on non-Korean venues (use market.kimchi_alert instead for the
-    Upbit-specific case). Does NOT account for CEX deposit/withdrawal
-    availability, trading fees, or slippage beyond trade_size_usd - always
-    re-verify with live quotes before executing. Requires exactly one of
-    pool_address or token_address; passing neither raises "invalid_input".
+    Upbit-specific case). net_spread_pct does NOT subtract the DEX pool's own
+    swap fee (see pool_fee_pct, typically 0.05-1%), CEX trading fees, CEX
+    deposit/withdrawal availability, or slippage beyond trade_size_usd - a
+    spread that clears the threshold before those costs may not clear it after,
+    so always re-verify with live quotes before executing. Requires exactly one
+    of pool_address or token_address; passing neither raises "invalid_input".
 
     Args:
         symbol: Ticker symbol, e.g. "SUI", "BTC", "ETH".
@@ -525,7 +546,11 @@ async def get_neg_risk_arbitrage(
     from $1 (after costs) is a near risk-free edge. Also computes
     buy/sell_basket_capacity_shares - the actual liquidity-bottleneck size the
     thinnest outcome's order book can support within max_slippage_pct - so
-    this isn't just a top-of-book mirage. Polymarket only.
+    this isn't just a top-of-book mirage. Note *_capacity_notional_usd still
+    prices that size at top-of-book (optimistic beyond the first price level) -
+    use *_capacity_vwap_notional_usd for the realistic average fill cost. Also
+    returns oldest_book_snapshot_time, the staleness bottleneck across all legs
+    (the oldest of each leg's own order-book snapshot timestamp). Polymarket only.
 
     Use this to scan a specific multi-outcome event you already know the slug
     for. Do NOT use for binary Yes/No markets (no basket to arbitrage, this
@@ -571,7 +596,10 @@ async def get_exit_capacity_audit(
     Walk a single Polymarket outcome's live order book to determine how much
     of a given position size can actually be filled right now, at what
     average price, and with how much price impact versus the best quote - a
-    live, point-in-time snapshot, not historical/average liquidity.
+    live, point-in-time snapshot, not historical/average liquidity. Also
+    returns book_snapshot_time (the book's own reported snapshot timestamp)
+    and Polymarket's own tick_size/min_order_size for this market (null if the
+    book response didn't include them).
 
     Use this to validate one leg of an opportunity found by
     prediction.neg_risk_arbitrage before committing capital, or whenever you

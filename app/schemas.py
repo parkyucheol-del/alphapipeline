@@ -107,6 +107,18 @@ class DumpRiskUnlockItem(BaseModel):
     timing_precision: Optional[str] = None
     unlock_supply_pct: float
     unlock_amount: Optional[float] = None
+    vesting_deposit_amount: Optional[float] = Field(
+        default=None,
+        description="On-chain-only field (Sablier's depositAmount, aggregated across streams). Total amount originally scheduled to vest. Null on the DropsTab path and when unavailable.",
+    )
+    vesting_withdrawn_amount: Optional[float] = Field(
+        default=None,
+        description="On-chain-only field (Sablier's withdrawnAmount, aggregated across streams). Amount already claimed/withdrawn so far. Null on the DropsTab path and when unavailable.",
+    )
+    vesting_progress_pct: Optional[float] = Field(
+        default=None,
+        description="On-chain-only field: vesting_withdrawn_amount / vesting_deposit_amount * 100. Shows how far along the vesting schedule already is. Null on the DropsTab path and when deposit data wasn't available.",
+    )
     is_insider_vc_team: Optional[bool] = None
     category: str
     risk_level: str
@@ -144,6 +156,9 @@ DUMP_RISK_EXAMPLE = {
             "timing_precision": "pending_schema_verification",
             "unlock_supply_pct": 4.8,
             "unlock_amount": 28500000.0,
+            "vesting_deposit_amount": 60000000.0,
+            "vesting_withdrawn_amount": 31500000.0,
+            "vesting_progress_pct": 52.5,
             "is_insider_vc_team": None,
             "category": "onchain_vesting_stream (unclassified)",
             "risk_level": "MEDIUM",
@@ -154,7 +169,9 @@ DUMP_RISK_EXAMPLE = {
     "data_source": "onchain_sablier",
     "coverage_notice": (
         "Scanned via on-chain Sablier vesting streams only. Absence from this list "
-        "does not mean a token has no lockup - other vesting mechanisms are not covered."
+        "does not mean a token has no lockup - other vesting mechanisms are not covered. "
+        "vesting_progress_pct (withdrawn/deposit * 100) shows how far along the vesting "
+        "schedule already is."
     ),
 }
 
@@ -185,6 +202,16 @@ class TokenRiskResponse(BaseModel):
     owner_address: str | None = None
     holder_count: int | None = None
     is_in_dex: bool | None = None
+    cannot_buy: bool | None = Field(default=None, description="GoPlus-only field, null on Honeypot.is fallback. Contributes to risk_flags when true.")
+    cannot_sell_all: bool | None = Field(default=None, description="GoPlus-only field, null on Honeypot.is fallback. Contributes to risk_flags when true.")
+    hidden_owner: bool | None = Field(default=None, description="GoPlus-only field, null on Honeypot.is fallback. Contributes to risk_flags when true.")
+    transfer_pausable: bool | None = Field(default=None, description="GoPlus-only field, null on Honeypot.is fallback. Contributes to risk_flags when true.")
+    selfdestruct: bool | None = Field(default=None, description="GoPlus-only field, null on Honeypot.is fallback. Contributes to risk_flags when true.")
+    is_proxy: bool | None = Field(default=None, description="GoPlus-only field, null on Honeypot.is fallback. Informational only - does NOT contribute to risk_flags (upgradeable proxies are common in legitimate contracts).")
+    is_blacklisted: bool | None = Field(default=None, description="GoPlus-only field, null on Honeypot.is fallback. Contributes to risk_flags when true.")
+    slippage_modifiable: bool | None = Field(default=None, description="GoPlus-only field, null on Honeypot.is fallback. Contributes to risk_flags when true.")
+    trading_cooldown: bool | None = Field(default=None, description="GoPlus-only field, null on Honeypot.is fallback. Informational only - does NOT contribute to risk_flags (also used as a legitimate anti-bot measure).")
+    owner_percent: float | None = Field(default=None, description="Percentage of total supply held by the owner address, GoPlus-only (null on Honeypot.is fallback). Contributes 'high_owner_concentration' to risk_flags at >=50%.")
     risk_level: str
     risk_flags: list[str] = []
     data_source: str
@@ -206,6 +233,16 @@ TOKEN_RISK_EXAMPLE = {
     "owner_address": None,
     "holder_count": 125000,
     "is_in_dex": True,
+    "cannot_buy": False,
+    "cannot_sell_all": False,
+    "hidden_owner": False,
+    "transfer_pausable": False,
+    "selfdestruct": False,
+    "is_proxy": False,
+    "is_blacklisted": False,
+    "slippage_modifiable": False,
+    "trading_cooldown": False,
+    "owner_percent": 0.0,
     "risk_level": "LOW",
     "risk_flags": [],
     "data_source": "goplus",
@@ -274,7 +311,22 @@ class WhalePosition(BaseModel):
     position_value_usd: float
     leverage: float
     leverage_type: str = Field(description="cross or isolated, as reported by Hyperliquid.")
+    max_leverage: float | None = Field(
+        default=None,
+        description=(
+            "Hyperliquid's own reported leverage ceiling for this asset/account setting - "
+            "not the leverage actually in use (see 'leverage' for that)."
+        ),
+    )
     unrealized_pnl_usd: float
+    return_on_equity_pct: float | None = Field(
+        default=None,
+        description=(
+            "Hyperliquid's own reported return-on-equity for this position, as a "
+            "percentage. This is Hyperliquid's own ROE definition, which can differ from "
+            "a naive unrealized_pnl_usd / margin_used calculation."
+        ),
+    )
     liquidation_price: float | None = None
     distance_to_liquidation_pct: float | None = Field(
         default=None,
@@ -316,7 +368,9 @@ WHALE_AUDIT_EXAMPLE = {
             "position_value_usd": 100.03,
             "leverage": 20.0,
             "leverage_type": "isolated",
+            "max_leverage": 50.0,
             "unrealized_pnl_usd": -0.0134,
+            "return_on_equity_pct": -2.68,
             "liquidation_price": 2866.27,
             "distance_to_liquidation_pct": 4.02,
         }
@@ -331,7 +385,8 @@ WHALE_AUDIT_EXAMPLE = {
         "this response), so it can lag the true mark price briefly during fast moves. "
         "risk_flags are computed from fixed numeric thresholds only (leverage >= 20x -> "
         "HIGH_LEVERAGE, distance_to_liquidation_pct < 15 -> NEAR_LIQUIDATION), not a "
-        "judgment call about the trader."
+        "judgment call about the trader. max_leverage and return_on_equity_pct are "
+        "Hyperliquid's own reported fields (not derived by this tool)."
     ),
 }
 
@@ -406,6 +461,28 @@ class FundingRateResponse(BaseModel):
     predicted_rate: float | None = None
     next_funding_time: TimestampPair | None = None
     funding_interval_hours: int | None = None
+    mark_price: float | None = Field(
+        default=None,
+        description=(
+            "Perpetual futures mark price at lookup time. Populated on both the Bybit "
+            "and Binance paths."
+        ),
+    )
+    index_price: float | None = Field(
+        default=None,
+        description=(
+            "Underlying spot index price feeding the perpetual's funding calculation. "
+            "Populated on both the Bybit and Binance paths."
+        ),
+    )
+    open_interest_usd: float | None = Field(
+        default=None,
+        description=(
+            "Total open interest in USD notional. Only available via the Bybit path "
+            "(Bybit's openInterestValue field) - always null on the Binance fallback, "
+            "since Binance's premiumIndex endpoint does not report open interest."
+        ),
+    )
     data_source: str
     notice: str | None = None
 
@@ -418,11 +495,15 @@ FUNDING_RATE_EXAMPLE = {
     "predicted_rate": 0.0001,
     "next_funding_time": {"utc": "2026-09-04T16:00:00Z", "kst": "2026-09-05 01:00:00 KST"},
     "funding_interval_hours": 8,
+    "mark_price": 64250.5,
+    "index_price": 64248.1,
+    "open_interest_usd": 1234567890.0,
     "data_source": "bybit",
     "notice": (
         "funding_rate is the rate scheduled to take effect at the next settlement "
         "(next_funding_time). Neither Bybit nor Binance exposes a separate 'predicted' "
-        "field, so predicted_rate is identical to funding_rate."
+        "field, so predicted_rate is identical to funding_rate. open_interest_usd is "
+        "only available via the Bybit path - it is null on the Binance fallback."
     ),
 }
 
@@ -594,6 +675,13 @@ class ArbSpreadResponse(BaseModel):
     dex_price_usd: float | None = None
     trade_size_usd: float
     assumed_gas_cost_usd: float
+    pool_fee_pct: float | None = Field(
+        default=None,
+        description=(
+            "DEX pool's fee tier parsed from GeckoTerminal's pool name (e.g. 0.05 for "
+            "a 0.05% pool). Informational only - net_spread_pct does NOT subtract it."
+        ),
+    )
     min_spread_threshold_pct: float
     data_source: str
     notice: str | None = None
@@ -613,15 +701,18 @@ ARB_SPREAD_EXAMPLE = {
     "dex_price_usd": 3.503,
     "trade_size_usd": 1000.0,
     "assumed_gas_cost_usd": 0.05,
+    "pool_fee_pct": 0.3,
     "min_spread_threshold_pct": 0.8,
     "data_source": "coinbase+geckoterminal",
     "notice": (
         "CEX-side price is Coinbase spot (CoinGecko fallback), not a specific exchange "
         "orderbook - it does not reflect actual tradable depth on any single exchange. "
         "DEX-side price is read from GeckoTerminal's pool price fields. net_spread_pct "
-        "only subtracts an assumed flat gas cost - it excludes CEX deposit/withdrawal "
-        "availability, trading fees, and slippage beyond trade_size_usd. Re-verify with "
-        "live quotes before executing a real trade."
+        "only subtracts an assumed flat gas cost - it does NOT subtract the DEX pool's "
+        "own swap fee (see pool_fee_pct), CEX trading fees, CEX deposit/withdrawal "
+        "availability, or slippage beyond trade_size_usd. A spread that looks profitable "
+        "before the pool fee may not be after it - re-verify with live quotes before "
+        "executing a real trade."
     ),
 }
 
@@ -707,8 +798,32 @@ class PredictionNegRiskArbitrageResponse(BaseModel):
     sell_basket_capacity_shares: float
     buy_basket_capacity_notional_usd: float | None = None
     sell_basket_capacity_notional_usd: float | None = None
+    buy_basket_capacity_vwap_notional_usd: float | None = Field(
+        default=None,
+        description=(
+            "Same capacity as buy_basket_capacity_shares, but priced by walking the "
+            "actual order-book depth (volume-weighted) instead of using each leg's "
+            "top-of-book price - a more realistic fill cost than "
+            "buy_basket_capacity_notional_usd. Null if depth data was insufficient."
+        ),
+    )
+    sell_basket_capacity_vwap_notional_usd: float | None = Field(
+        default=None,
+        description=(
+            "VWAP-priced equivalent of sell_basket_capacity_notional_usd - see "
+            "buy_basket_capacity_vwap_notional_usd."
+        ),
+    )
     opportunity: str
     arbitrage_viable: bool
+    oldest_book_snapshot_time: TimestampPair | None = Field(
+        default=None,
+        description=(
+            "The oldest of each leg's own order-book snapshot timestamp - the staleness "
+            "bottleneck across all legs, since the whole basket calculation is only as "
+            "fresh as its stalest leg. Null if no leg reported a timestamp."
+        ),
+    )
     data_source: str
     notice: str | None = None
 
@@ -728,15 +843,24 @@ NEG_RISK_ARBITRAGE_EXAMPLE = {
     "sell_basket_capacity_shares": 0.0,
     "buy_basket_capacity_notional_usd": 39.48,
     "sell_basket_capacity_notional_usd": 0.0,
+    "buy_basket_capacity_vwap_notional_usd": 39.71,
+    "sell_basket_capacity_vwap_notional_usd": None,
     "opportunity": "buy_basket",
     "arbitrage_viable": True,
+    "oldest_book_snapshot_time": {"utc": "2026-09-08T11:59:58Z", "kst": "2026-09-08 20:59:58 KST"},
     "data_source": "polymarket-gamma+clob",
     "notice": (
         "*_capacity_shares is how many full baskets (1 share of every outcome) you could "
         "execute right now within max_slippage_pct of each leg's best price - "
         "arbitrage_viable=false with a positive edge usually means the edge is real but "
-        "too thin to size meaningfully. Cross-check the specific leg you intend to trade "
-        "with prediction.exit_capacity_audit before sizing a real position."
+        "too thin to size meaningfully. *_capacity_notional_usd prices that capacity at "
+        "each leg's top-of-book price, which is optimistic for any size beyond the first "
+        "price level - *_capacity_vwap_notional_usd instead prices it by walking the same "
+        "depth used to compute capacity_shares, so it reflects the actual average cost of "
+        "filling that size (null if depth data was insufficient). oldest_book_snapshot_time "
+        "is the staleness bottleneck across all legs. Cross-check the specific "
+        "leg you intend to trade with prediction.exit_capacity_audit before sizing a real "
+        "position."
     ),
 }
 
@@ -752,6 +876,18 @@ class PredictionExitCapacityAuditResponse(BaseModel):
     avg_exit_price: float | None = None
     price_impact_pct: float | None = None
     max_executable_shares: float
+    book_snapshot_time: TimestampPair | None = Field(
+        default=None,
+        description="The order book's own reported snapshot timestamp, so you can judge how fresh this read is.",
+    )
+    tick_size: float | None = Field(
+        default=None,
+        description="Polymarket's own reported minimum price increment for this market. Null if the book response didn't include it.",
+    )
+    min_order_size: float | None = Field(
+        default=None,
+        description="Polymarket's own reported minimum order size for this market. Null if the book response didn't include it.",
+    )
     data_source: str
     notice: str | None = None
 
@@ -767,11 +903,18 @@ EXIT_CAPACITY_AUDIT_EXAMPLE = {
     "avg_exit_price": 0.609,
     "price_impact_pct": 1.77,
     "max_executable_shares": 500.0,
+    "book_snapshot_time": {"utc": "2026-09-08T11:59:59Z", "kst": "2026-09-08 20:59:59 KST"},
+    "tick_size": 0.01,
+    "min_order_size": 5.0,
     "data_source": "polymarket-clob",
     "notice": (
         "executable=false means the current book cannot fully fill this size - "
         "max_executable_shares is how much you could get out of (or into) right now at "
         "the prices already walked through above. This is a live, point-in-time "
-        "snapshot, not an average or historical liquidity figure."
+        "snapshot, not an average or historical liquidity figure - book_snapshot_time is "
+        "the order book's own reported snapshot timestamp, so you can judge how fresh "
+        "this read is. tick_size and min_order_size are Polymarket's own reported "
+        "order-sizing constraints for this market (null if the book response didn't "
+        "include them)."
     ),
 }
