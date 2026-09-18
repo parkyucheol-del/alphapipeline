@@ -10,7 +10,7 @@ from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from threading import Lock
 from fastapi import FastAPI, Query, Request
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
 from app.config import settings
 from app.scheduler import start_scheduler
@@ -118,9 +118,107 @@ async def add_disclaimer_header(request: Request, call_next):
     return response
 
 
+# 2026-09-19: 이 서비스는 원래 "기계 우선(machine-first)" API라 루트(/)가 JSON
+# 상태체크만 반환하도록 설계했는데, 사람이 awesome-list 등 큐레이션 사이트에서
+# 직접 이 링크를 클릭해 들어오는 경우가 실제로 생기면서 다른(사람용 홈페이지가
+# 있는) 서비스들 옆에서 밋밋해 보인다는 피드백으로 추가함. 에이전트/curl 등
+# 기존 소비자는 절대 깨지지 않도록: Accept 헤더가 명확히 "text/html"로 시작하는
+# 요청(=브라우저의 주소창 직접 접속)에만 사람용 랜딩페이지를 보여주고, 그 외
+# (Accept 헤더 없음, */*, application/json 등 — 즉 지금까지의 모든 실사용
+# 소비자)는 기존과 동일한 JSON을 그대로 반환한다. 응답 스키마/필드는 전혀
+# 안 바뀜 - 순수 추가 기능.
+def _render_root_landing_html(payload: dict) -> str:
+    prices = payload["price_per_call_usdc"]
+
+    def _price_label(v: float) -> str:
+        return "Free" if not v else f"${v:.3f}".rstrip("0").rstrip(".")
+
+    rows = "\n".join(
+        f'<tr><td><code>{path}</code></td><td>{_price_label(price)}</td></tr>'
+        for path, price in prices.items()
+    )
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AlphaPipeline &mdash; pay-per-call data API for AI trading agents</title>
+<style>
+  :root {{ color-scheme: dark; }}
+  * {{ box-sizing: border-box; }}
+  body {{
+    margin: 0; padding: 2.5rem 1.25rem 4rem;
+    background: #0b0d10; color: #e6e8eb;
+    font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }}
+  main {{ max-width: 720px; margin: 0 auto; }}
+  h1 {{ font-size: 1.6rem; margin: 0 0 .5rem; }}
+  .tag {{ color: #9aa4b2; font-size: 1.02rem; margin: 0 0 1.75rem; }}
+  .badges a {{ color: #7dd3fc; text-decoration: none; margin-right: 1rem; font-size: .92rem; }}
+  .badges a:hover {{ text-decoration: underline; }}
+  .card {{
+    background: #14171c; border: 1px solid #24282f; border-radius: 12px;
+    padding: 1.25rem 1.4rem; margin: 1.25rem 0;
+  }}
+  .card h2 {{ font-size: .95rem; text-transform: uppercase; letter-spacing: .04em;
+    color: #9aa4b2; margin: 0 0 .9rem; }}
+  pre {{
+    background: #0b0d10; border: 1px solid #24282f; border-radius: 8px;
+    padding: .9rem 1rem; overflow-x: auto; font-size: .88rem; color: #d1fae5;
+  }}
+  table {{ width: 100%; border-collapse: collapse; font-size: .9rem; }}
+  td {{ padding: .35rem 0; border-bottom: 1px solid #1c1f25; }}
+  td:last-child {{ text-align: right; color: #9aa4b2; }}
+  code {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }}
+  .links a {{
+    display: inline-block; margin: 0 .6rem .5rem 0; padding: .5rem .9rem;
+    border: 1px solid #24282f; border-radius: 8px; color: #e6e8eb; text-decoration: none; font-size: .9rem;
+  }}
+  .links a:hover {{ border-color: #7dd3fc; }}
+  footer {{ color: #6b7280; font-size: .8rem; margin-top: 2rem; }}
+</style>
+</head>
+<body>
+<main>
+  <h1>AlphaPipeline</h1>
+  <p class="tag">Pre-trade on-chain risk verification for AI trading agents, plus market/derivatives data &mdash; pay-per-call USDC on Base, no signup, no API key, no OAuth.</p>
+  <div class="badges">
+    <a href="https://github.com/parkyucheol-del/alphapipeline">GitHub</a>
+    <a href="/docs">API docs</a>
+    <a href="/llms.txt">llms.txt</a>
+  </div>
+
+  <div class="card">
+    <h2>Try it now &mdash; no wallet needed</h2>
+    <pre>npx check-my-slippage</pre>
+    <p style="color:#9aa4b2; font-size:.9rem; margin:.5rem 0 0;">Runs a real, live query against this service&rsquo;s free preview endpoint so you can see actual data before paying for anything.</p>
+  </div>
+
+  <div class="card">
+    <h2>Endpoints &amp; pricing</h2>
+    <table>{rows}</table>
+  </div>
+
+  <div class="card">
+    <h2>Connect as an MCP server</h2>
+    <pre>{{"mcpServers": {{"alphapipeline": {{"url": "https://alphapipeline-eu.onrender.com/mcp"}}}}}}</pre>
+  </div>
+
+  <div class="links">
+    <a href="/docs">Swagger / OpenAPI</a>
+    <a href="/openapi.json">openapi.json</a>
+    <a href="https://github.com/parkyucheol-del/alphapipeline#readme">Full README</a>
+  </div>
+
+  <footer>This is a read-only data API &mdash; informational and research purposes only, no trade execution, brokerage, or gambling services. Machine clients: this same URL returns JSON when called without an HTML Accept header.</footer>
+</main>
+</body>
+</html>"""
+
+
 @app.get("/")
-async def root():
-    return {
+async def root(request: Request):
+    payload = {
         "service": "AlphaPipeline",
         "status": "ok",
         # 2026-09부터 전 엔드포인트 단일가가 아니라 데이터 가치 기반 차등 요금제로
@@ -174,6 +272,10 @@ async def root():
         "openapi_spec": "/openapi.json",
         "agent_spec": "/llms.txt",
     }
+    accept = request.headers.get("accept", "")
+    if accept.strip().lower().startswith("text/html"):
+        return HTMLResponse(content=_render_root_landing_html(payload))
+    return JSONResponse(content=payload)
 
 
 @app.get("/healthz")
