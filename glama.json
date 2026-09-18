@@ -1,5 +1,8 @@
 {
   "$schema": "https://glama.ai/mcp/schemas/server.json",
+  "maintainers": [
+    "parkyucheol-del"
+  ],
   "name": "AlphaPipeline",
   "description": "Deterministic L2 Slippage & Risk Guard for Polymarket Trading Agents, DEX Liquidity & Cross-Venue Arbitrage (x402 Remote MCP)",
   "keywords": [
