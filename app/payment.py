@@ -343,13 +343,19 @@ def _make_route_config(*, service_name: str, tags: list[str], icon_url: str | No
     return RouteConfig(**kwargs, **supported_metadata)
 
 
-def build_routes(dump_risk_enabled: bool) -> dict[str, RouteConfig]:
+def build_routes(dump_risk_enabled: bool, kimchi_alert_enabled: bool = False) -> dict[str, RouteConfig]:
     """
     PaymentMiddlewareASGI에 넘길 라우트별 결제 스펙 + Bazaar 노출 메타데이터.
     여기 등록된 "METHOD /path" 조합만 결제가 필요해지고, 등록되지 않은 라우트는
     미들웨어를 그냥 통과한다 - dump_risk_enabled=False일 때 dump-risk를 이 dict에서
     빼두면, 그 요청은 결제 검사 없이 바로 핸들러로 가서 (온체인/DropsTab) 데이터를
     무료로 내보낸다 (main.py/app/logic.py의 dump-risk 재설계 참고).
+
+    kimchi_alert_enabled도 동일한 패턴 (2026-09-19 추가) - 제미나이 PMF 진단
+    (claude/gemini-pmf-diagnosis-2026-09-19.md) 결과 kimchi-alert가 도그푸딩
+    봇의 실거래 전략으로 단 한 번도 전환되지 못한 실사용 신호가 확인되어,
+    기본값 False(무료 온보딩 엔드포인트)로 전환한다 - 유료 핵심 자산인 보안
+    3종(token_risk/contract_health_audit/token_diagnostic)에 포지셔닝을 집중.
 
     각 라우트의 output_schema는 app/schemas.py의 Pydantic 모델에서 그대로 뽑아써서
     (model_json_schema()), Bazaar/OpenAPI에 노출되는 스펙이 실제 응답 모양과
@@ -398,33 +404,6 @@ def build_routes(dump_risk_enabled: bool) -> dict[str, RouteConfig]:
             ),
             service_name="AlphaPipeline Macro Calendar",
             tags=["macro", "calendar", "fomc", "cpi", "nfp"],
-        ),
-        "GET /v1/market/kimchi-alert": _make_route_config(
-            accepts=[kimchi_option],
-            mime_type="application/json",
-            description=(
-                "Real-time Korea (Upbit) vs global crypto price premium - the "
-                "'kimchi premium' - with reverse-premium and 1h-surge alerts. "
-                "Paid in USDC on Base."
-            ),
-            resource=_resource_url("/v1/market/kimchi-alert"),
-            extensions=_bazaar_extension(
-                input_example={"symbol": "BTC"},
-                input_schema={
-                    "type": "object",
-                    "properties": {
-                        "symbol": {
-                            "type": "string",
-                            "description": "Crypto ticker symbol to check, e.g. BTC, ETH, SOL. Defaults to BTC.",
-                        }
-                    },
-                    "required": [],
-                },
-                output_example=KIMCHI_ALERT_EXAMPLE,
-                output_schema=_inline_schema_defs(KimchiAlertResponse.model_json_schema()),
-            ),
-            service_name="AlphaPipeline Kimchi Alert",
-            tags=["crypto", "arbitrage", "korea", "realtime"],
         ),
         "GET /v1/tools/ai-markdown": _make_route_config(
             accepts=[ai_markdown_option],
@@ -875,5 +854,33 @@ def build_routes(dump_risk_enabled: bool) -> dict[str, RouteConfig]:
             ),
             service_name="AlphaPipeline Dump Risk",
             tags=["crypto", "token-unlock", "risk"],
+        )
+    if kimchi_alert_enabled:
+        routes["GET /v1/market/kimchi-alert"] = _make_route_config(
+            accepts=[kimchi_option],
+            mime_type="application/json",
+            description=(
+                "Real-time Korea (Upbit) vs global crypto price premium - the "
+                "'kimchi premium' - with reverse-premium and 1h-surge alerts. "
+                "Paid in USDC on Base."
+            ),
+            resource=_resource_url("/v1/market/kimchi-alert"),
+            extensions=_bazaar_extension(
+                input_example={"symbol": "BTC"},
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "symbol": {
+                            "type": "string",
+                            "description": "Crypto ticker symbol to check, e.g. BTC, ETH, SOL. Defaults to BTC.",
+                        }
+                    },
+                    "required": [],
+                },
+                output_example=KIMCHI_ALERT_EXAMPLE,
+                output_schema=_inline_schema_defs(KimchiAlertResponse.model_json_schema()),
+            ),
+            service_name="AlphaPipeline Kimchi Alert",
+            tags=["crypto", "arbitrage", "korea", "realtime"],
         )
     return routes

@@ -99,7 +99,10 @@ if not settings.PAYMENT_BYPASS_FOR_TESTING:
     from x402.http.middleware.fastapi import PaymentMiddlewareASGI
 
     _x402_server = build_resource_server()
-    _x402_routes = build_routes(dump_risk_enabled=settings.DUMP_RISK_ENABLED)
+    _x402_routes = build_routes(
+        dump_risk_enabled=settings.DUMP_RISK_ENABLED,
+        kimchi_alert_enabled=settings.KIMCHI_ALERT_ENABLED,
+    )
     app.add_middleware(PaymentMiddlewareASGI, routes=_x402_routes, server=_x402_server)
 
 
@@ -181,7 +184,7 @@ def _render_root_landing_html(payload: dict) -> str:
 <body>
 <main>
   <h1>AlphaPipeline</h1>
-  <p class="tag">Pre-trade on-chain risk verification for AI trading agents, plus market/derivatives data &mdash; pay-per-call USDC on Base, no signup, no API key, no OAuth.</p>
+  <p class="tag">A pre-flight safety gate for on-chain trading agents &mdash; rug-pull/honeypot checks before you buy, plus market/derivatives data &mdash; pay-per-call USDC on Base, no signup, no API key, no OAuth.</p>
   <div class="badges">
     <a href="https://github.com/parkyucheol-del/alphapipeline">GitHub</a>
     <a href="/docs">API docs</a>
@@ -225,25 +228,30 @@ async def root(request: Request):
         # 전환함 (app/payment.py의 build_routes 참고) - 그래서 단일 숫자 대신
         # 엔드포인트별 가격표를 내려준다.
         "price_per_call_usdc": {
-            "/v1/market/kimchi-alert": settings.PRICE_KIMCHI_ALERT_USDC,
+            # 2026-09-19: 제미나이 PMF 진단(claude/gemini-pmf-diagnosis-2026-09-19.md) 결과에
+            # 따라 유료 핵심 자산인 보안 3종을 맨 위로 재정렬 - 이 dict의 순서가 "/" 응답과
+            # 랜딩페이지에 그대로 노출되므로, 실제로 검증된 제품이 먼저 보이게 한다.
+            "/v1/security/token-risk": settings.PRICE_TOKEN_RISK_USDC,
+            "/v1/security/contract-health-audit": settings.PRICE_CONTRACT_HEALTH_USDC,
+            "/v1/security/token-diagnostic": settings.PRICE_TOKEN_DIAGNOSTIC_USDC,
+            "/v1/dex/liquidity-slippage": settings.PRICE_DEX_SLIPPAGE_USDC,
+            "/v1/derivatives/whale-position-audit": settings.PRICE_WHALE_AUDIT_USDC,
+            "/v1/derivatives/funding-rate": settings.PRICE_FUNDING_RATE_USDC,
+            "/v1/derivatives/funding-apr-matrix": settings.PRICE_FUNDING_APR_USDC,
+            "/v1/arb/spread-matrix": settings.PRICE_ARB_SPREAD_USDC,
+            "/v1/prediction/neg-risk-arbitrage": settings.PRICE_NEG_RISK_ARBITRAGE_USDC,
+            "/v1/prediction/exit-capacity-audit": settings.PRICE_EXIT_CAPACITY_AUDIT_USDC,
+            "/v1/calendar/macro-dday": settings.PRICE_MACRO_DDAY_USDC,
             "/v1/tools/ai-markdown": settings.PRICE_AI_MARKDOWN_USDC,
-            # DUMP_RISK_ENABLED가 실제 과금 여부를 결정하는 것과 동일한 플래그를
-            # 그대로 참조한다 - PRICE_DUMP_RISK_USDC 값과 무관하게 이 필드가 항상
-            # 실제 서빙 상태와 일치하도록 (app/payment.py의 build_routes 참고).
+            # KIMCHI_ALERT_ENABLED/DUMP_RISK_ENABLED가 실제 과금 여부를 결정하는 것과
+            # 동일한 플래그를 그대로 참조한다 - PRICE_*_USDC 값과 무관하게 이 필드가
+            # 항상 실제 서빙 상태와 일치하도록 (app/payment.py의 build_routes 참고).
+            "/v1/market/kimchi-alert": (
+                settings.PRICE_KIMCHI_ALERT_USDC if settings.KIMCHI_ALERT_ENABLED else 0.0
+            ),
             "/v1/unlocks/dump-risk": (
                 settings.PRICE_DUMP_RISK_USDC if settings.DUMP_RISK_ENABLED else 0.0
             ),
-            "/v1/security/token-risk": settings.PRICE_TOKEN_RISK_USDC,
-            "/v1/security/contract-health-audit": settings.PRICE_CONTRACT_HEALTH_USDC,
-            "/v1/derivatives/funding-rate": settings.PRICE_FUNDING_RATE_USDC,
-            "/v1/derivatives/funding-apr-matrix": settings.PRICE_FUNDING_APR_USDC,
-            "/v1/dex/liquidity-slippage": settings.PRICE_DEX_SLIPPAGE_USDC,
-            "/v1/calendar/macro-dday": settings.PRICE_MACRO_DDAY_USDC,
-            "/v1/arb/spread-matrix": settings.PRICE_ARB_SPREAD_USDC,
-            "/v1/derivatives/whale-position-audit": settings.PRICE_WHALE_AUDIT_USDC,
-            "/v1/security/token-diagnostic": settings.PRICE_TOKEN_DIAGNOSTIC_USDC,
-            "/v1/prediction/neg-risk-arbitrage": settings.PRICE_NEG_RISK_ARBITRAGE_USDC,
-            "/v1/prediction/exit-capacity-audit": settings.PRICE_EXIT_CAPACITY_AUDIT_USDC,
         },
         "payment": {
             "protocol": "x402",
@@ -252,20 +260,20 @@ async def root(request: Request):
             "bypassed_for_testing": settings.PAYMENT_BYPASS_FOR_TESTING,
         },
         "endpoints": [
-            "/v1/unlocks/dump-risk",
-            "/v1/market/kimchi-alert",
-            "/v1/tools/ai-markdown",
             "/v1/security/token-risk",
             "/v1/security/contract-health-audit",
+            "/v1/security/token-diagnostic",
+            "/v1/dex/liquidity-slippage",
+            "/v1/derivatives/whale-position-audit",
             "/v1/derivatives/funding-rate",
             "/v1/derivatives/funding-apr-matrix",
-            "/v1/dex/liquidity-slippage",
-            "/v1/calendar/macro-dday",
             "/v1/arb/spread-matrix",
-            "/v1/derivatives/whale-position-audit",
-            "/v1/security/token-diagnostic",
             "/v1/prediction/neg-risk-arbitrage",
             "/v1/prediction/exit-capacity-audit",
+            "/v1/calendar/macro-dday",
+            "/v1/tools/ai-markdown",
+            "/v1/market/kimchi-alert",
+            "/v1/unlocks/dump-risk",
         ],
         "coming_soon_endpoints": [],
         "docs": "/docs",
@@ -346,17 +354,22 @@ async def dump_risk_endpoint():
         "hour (3 percentage points or more). Returns the current premium percentage, its 1-hour "
         "change, and boolean alert flags. Input: optional `symbol` query parameter (e.g. BTC, "
         "ETH, SOL - default BTC). This is a live snapshot only - do not call it for historical "
-        "or backtesting data, or for non-Korean-exchange comparisons."
+        "or backtesting data, or for non-Korean-exchange comparisons. Free by default "
+        "(KIMCHI_ALERT_ENABLED=false) as an onboarding tool - see the root `/` response's "
+        "price_per_call_usdc for the live price, which is always authoritative regardless of "
+        "what this static doc says."
     ),
     responses={
         200: {"model": KimchiAlertResponse, "description": "Kimchi premium calculation result"},
-        402: {"description": "x402 payment required"},
+        402: {"description": "x402 payment required (only if KIMCHI_ALERT_ENABLED=true)"},
         502: {"model": ErrorResponse, "description": "Upstream (Upbit/Coinbase) error"},
     },
 )
 async def kimchi_alert_endpoint(symbol: str = Query("BTC", description="e.g. BTC, ETH, SOL")):
-    # 결제 검증은 이제 main.py 상단에서 장착한 x402 PaymentMiddlewareASGI가
-    # 라우트 진입 전에 처리한다 - 여기까지 왔다는 건 이미 결제가 확인됐다는 뜻.
+    # KIMCHI_ALERT_ENABLED=false(기본값)이면 app/payment.py의 build_routes()가 이 경로를
+    # 결제 게이트 dict에 아예 등록하지 않으므로, x402 PaymentMiddlewareASGI를 그냥
+    # 통과해서 무료로 여기까지 온다 - dump-risk와 동일한 패턴. true로 켜면 미들웨어가
+    # 라우트 진입 전에 결제를 검증하고, 여기까지 왔다는 건 결제가 확인됐다는 뜻이 된다.
     try:
         data = await get_kimchi_alert(symbol.upper())
         return JSONResponse(content=data)

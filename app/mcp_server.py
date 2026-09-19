@@ -597,7 +597,8 @@ _TOOLS: list[dict] = [
             "Coinbase spot (CoinGecko fallback) - NOT a live Binance orderbook, despite "
             "the legacy binance_price_usdt field name kept for backward compatibility - "
             "with reverse-premium and surge alerts. Do not use for general USD spot "
-            "prices or on-chain DEX swaps. Paid in USDC on Base."
+            "prices or on-chain DEX swaps. Paid in USDC on Base (free while "
+            "KIMCHI_ALERT_ENABLED=false)."
         ),
         "input_schema": {
             "type": "object",
@@ -611,6 +612,7 @@ _TOOLS: list[dict] = [
         },
         "output_schema": KIMCHI_ALERT_OUTPUT_SCHEMA,
         "annotations": _READ_ONLY_ANNOTATIONS,
+        "kimchi_alert_only": True,
     },
     {
         "name": "tools.ai_markdown",
@@ -1054,6 +1056,13 @@ def _dump_risk_enabled() -> bool:
     return bool(getattr(settings, "DUMP_RISK_ENABLED", True))
 
 
+def _kimchi_alert_enabled() -> bool:
+    # 2026-09-19 추가 - dump-risk와 동일한 패턴. 제미나이 PMF 진단
+    # (claude/gemini-pmf-diagnosis-2026-09-19.md) 결과에 따라 kimchi-alert를
+    # 유료 핵심 자산(보안 3종)에서 분리해 무료 온보딩 도구로 전환.
+    return bool(getattr(settings, "KIMCHI_ALERT_ENABLED", True))
+
+
 def _build_tool_list() -> list[dict]:
     # 2026-09 수정: dump_risk_enabled=False는 "기능 꺼짐"이 아니라 app/payment.py
     # build_routes()의 실제 의미대로 "결제 게이트 없이 무료로 서빙 중"이다(REST와
@@ -1062,7 +1071,11 @@ def _build_tool_list() -> list[dict]:
     # "이 도구는 없다"고 하면 표면 간에 사실이 어긋난다.
     tools = []
     for t in _TOOLS:
-        is_free_now = bool(t.get("dump_risk_only")) and not _dump_risk_enabled()
+        is_free_now = (
+            bool(t.get("dump_risk_only")) and not _dump_risk_enabled()
+        ) or (
+            bool(t.get("kimchi_alert_only")) and not _kimchi_alert_enabled()
+        )
         if is_free_now:
             price = 0.0
             description = t["description"].replace(

@@ -105,6 +105,13 @@ class Settings:
     # 실제 수요/매출을 검증한 뒤, 검증되면 이 값을 true로 바꾸고 DROPSTAB_API_KEY를 넣어 켠다.
     DUMP_RISK_ENABLED: bool = _get_bool("DUMP_RISK_ENABLED", False)
 
+    # kimchi-alert 엔드포인트에 x402 과금을 적용할지 여부 (2026-09-19 추가).
+    # 제미나이 PMF 진단(claude/gemini-pmf-diagnosis-2026-09-19.md) 결과 kimchi-alert가
+    # 도그푸딩 봇의 실거래 전략으로 단 한 번도 전환되지 못했다는 실사용 신호가 확인되어,
+    # 유료 핵심 자산(보안 3종)에 포지셔닝을 집중하기 위해 dump-risk와 동일한 패턴으로
+    # 기본값 False(무료 온보딩 엔드포인트)로 전환. true로 바꾸면 과금이 부활한다.
+    KIMCHI_ALERT_ENABLED: bool = _get_bool("KIMCHI_ALERT_ENABLED", False)
+
     # DropsTab API 키 (락업 해제 데이터 소스). Builders Program(무료, 승인제) 신청하거나
     # 유료 Advanced 플랜(월 $59~, Basic $19에는 tokenUnlocks 미포함)으로 발급받아 넣는다. 없으면 dump-risk 엔드포인트는
     # "데이터 소스 미설정" 상태로 빈 결과를 반환한다.

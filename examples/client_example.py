@@ -21,8 +21,13 @@ API에게 결제 신호를 보내는 예제 클라이언트 (x402 공식 SDK 사
     싶다면 서버 쪽 CDP 설정을 그쪽으로 바꿔야 한다 - 이 스크립트 자체는 서버가
     반환하는 결제 조건을 그대로 따른다.
 
-호출 대상 엔드포인트는 아래 ENDPOINT 상수로 바꿀 수 있다 (기본값: kimchi-alert,
-가장 가격이 저렴하고 안정적으로 동작 확인된 엔드포인트).
+호출 대상 엔드포인트는 아래 ENDPOINT 상수로 바꿀 수 있다 (기본값: macro-dday,
+$0.01로 가장 저렴한 축이면서 입력 파라미터도 없고 외부 API 호출 없이 정적
+캘린더만 참조해서 업스트림 장애로 실패할 일이 없는 엔드포인트 - 결제 흐름
+자체를 보여주는 데모 목적에 가장 안정적이다. 2026-09-19: kimchi-alert는
+온보딩용 무료 엔드포인트로 전환되어 더 이상 결제 데모로 적합하지 않아
+교체함 - README.md의 'Note on unlocks.dump_risk and market.kimchi_alert'
+참고).
 """
 import asyncio
 import os
@@ -36,7 +41,7 @@ from x402.mechanisms.evm import EthAccountSigner
 from x402.mechanisms.evm.exact.register import register_exact_evm_client
 
 API_BASE = os.getenv("ALPHAPIPELINE_API_BASE", "http://localhost:8000")
-ENDPOINT = "/v1/market/kimchi-alert?symbol=BTC"
+ENDPOINT = "/v1/calendar/macro-dday"
 
 MNEMONIC_HD_PATH = "m/44'/60'/0'/0/0"
 
