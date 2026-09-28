@@ -1,0 +1,16 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.parkyucheol-del/alphapipeline",
+  "description": "Pay-per-call x402 API for AI trading agents — pre-trade honeypot/rug-pull safety checks before you buy, plus DEX slippage, funding rates, Polymarket arbitrage, and Hyperliquid HIP-4 prediction-market odds.",
+  "version": "1.2.0",
+  "repository": {
+    "url": "https://github.com/parkyucheol-del/alphapipeline",
+    "source": "github"
+  },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://alphapipeline-eu.onrender.com/mcp"
+    }
+  ]
+}
