@@ -53,6 +53,10 @@ class Settings:
     # 단일 오더북 조회라 token-risk/dex-slippage와 같은 중간 티어로 매겼다.
     PRICE_NEG_RISK_ARBITRAGE_USDC: float = float(os.getenv("PRICE_NEG_RISK_ARBITRAGE_USDC", "0.03"))
     PRICE_EXIT_CAPACITY_AUDIT_USDC: float = float(os.getenv("PRICE_EXIT_CAPACITY_AUDIT_USDC", "0.02"))
+    # 2026-09-28 예측시장 확장 Wave 2. Hyperliquid HIP-4 무료 info API 두 개를
+    # 조합해서 재구조화만 하는 엔드포인트라(자체 오더북 조회/바스켓 계산 없음),
+    # funding_rate/macro_dday와 같은 기본 티어로 매겼다.
+    PRICE_HIP4_SNAPSHOT_USDC: float = float(os.getenv("PRICE_HIP4_SNAPSHOT_USDC", "0.01"))
 
     # ===== x402 공식 결제 레이어 (Coinbase CDP Facilitator) =====
     # Coinbase Developer Platform(https://portal.cdp.coinbase.com)에서 발급받는 API 키.
@@ -94,6 +98,11 @@ class Settings:
     # outcome 레그를 병렬 조회할 때/exit_capacity_audit이 직후 같은 토큰을 다시
     # 조회할 때만 중복 호출을 흡수하고, 오더북 실시간성은 거의 그대로 유지한다.
     POLYMARKET_BOOK_CACHE_TTL_SECONDS: int = int(os.getenv("POLYMARKET_BOOK_CACHE_TTL_SECONDS", "3"))
+
+    # Hyperliquid HIP-4 outcomeMeta/allMids 캐시 TTL(초, 2026-09-28). allMids는
+    # 실시간 가격이라 너무 길면 신선도를 잃고, 너무 짧으면 Hyperliquid 무료 API를
+    # 불필요하게 자주 때린다 - 짧게 잡아 실시간성 위주로 절충.
+    HIP4_CACHE_TTL_SECONDS: int = int(os.getenv("HIP4_CACHE_TTL_SECONDS", "15"))
 
     # 락업 해제(dump-risk) 스캔 주기(시간). 언락 일정은 몇 주 전에 미리 확정되는
     # 경우가 대부분이라 실시간일 필요가 없음 - 기본값 24시간(하루 1회)이 이미

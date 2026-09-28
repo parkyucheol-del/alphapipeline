@@ -22,6 +22,7 @@ from app.logic import (
     get_exit_capacity_audit,
     get_funding_apr_matrix,
     get_funding_rate,
+    get_hip4_snapshot,
     get_kimchi_alert,
     get_macro_calendar_dday,
     get_neg_risk_arbitrage,
@@ -45,6 +46,7 @@ from app.schemas import (
     MacroDdayResponse,
     MarkdownResponse,
     PredictionExitCapacityAuditResponse,
+    PredictionHip4SnapshotResponse,
     PredictionNegRiskArbitrageResponse,
     TokenDiagnosticResponse,
     TokenRiskResponse,
@@ -241,6 +243,7 @@ async def root(request: Request):
             "/v1/arb/spread-matrix": settings.PRICE_ARB_SPREAD_USDC,
             "/v1/prediction/neg-risk-arbitrage": settings.PRICE_NEG_RISK_ARBITRAGE_USDC,
             "/v1/prediction/exit-capacity-audit": settings.PRICE_EXIT_CAPACITY_AUDIT_USDC,
+            "/v1/prediction/hip4-snapshot": settings.PRICE_HIP4_SNAPSHOT_USDC,
             "/v1/calendar/macro-dday": settings.PRICE_MACRO_DDAY_USDC,
             "/v1/tools/ai-markdown": settings.PRICE_AI_MARKDOWN_USDC,
             # KIMCHI_ALERT_ENABLED/DUMP_RISK_ENABLED가 실제 과금 여부를 결정하는 것과
@@ -270,6 +273,7 @@ async def root(request: Request):
             "/v1/arb/spread-matrix",
             "/v1/prediction/neg-risk-arbitrage",
             "/v1/prediction/exit-capacity-audit",
+            "/v1/prediction/hip4-snapshot",
             "/v1/calendar/macro-dday",
             "/v1/tools/ai-markdown",
             "/v1/market/kimchi-alert",
@@ -851,6 +855,53 @@ async def exit_capacity_audit_endpoint(
         return JSONResponse(content=data)
     except Exception as e:
         logger.exception("exit-capacity-audit 처리 실패")
+        return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
+
+
+@app.get(
+    "/v1/prediction/hip4-snapshot",
+    tags=["market"],
+    summary="Real-time probability snapshot of Hyperliquid HIP-4 outcome markets",
+    description=(
+        "Use this endpoint to pull a live snapshot of Hyperliquid's HIP-4 outcome "
+        "(prediction) markets - crypto price binaries, sports game winners, tournament "
+        "winners, Fed rate decisions, and any other market type Hyperliquid adds, all in "
+        "one call. There is no curated market list: every field under `fields` on each "
+        "row is parsed verbatim from Hyperliquid's own 'key:value|key2:value2' "
+        "description string, so new HIP-4 market types appear automatically without any "
+        "change on our side. Standalone two-sided markets (most crypto/sports games) are "
+        "returned under `standalone_markets`; mutually-exclusive multi-outcome groups "
+        "(e.g. a league winner, a rate-decision) are returned under `grouped_questions` "
+        "with each named possibility's price plus a `fallback` for 'none of the above'. "
+        "Input: optional `template` (substring filter on the market type, e.g. "
+        "'sportsContestWinner'), `underlying` (asset symbol filter for crypto markets, "
+        "e.g. 'BTC'), and `limit` (default 100, max 500, applied separately to each "
+        "list). No wallet or API key needed upstream. Read the response `notice` field - "
+        "the mapping used to join Hyperliquid's market metadata to its live prices is not "
+        "documented by Hyperliquid and was reverse-engineered from live data."
+    ),
+    responses={
+        200: {"model": PredictionHip4SnapshotResponse, "description": "HIP-4 outcome market snapshot"},
+        402: {"description": "x402 payment required"},
+        502: {"model": ErrorResponse, "description": "Upstream (Hyperliquid) error"},
+    },
+)
+async def hip4_snapshot_endpoint(
+    template: str | None = Query(
+        None, description="Optional substring filter on the market's template name (e.g. 'sportsContestWinner', 'priceBinary')."
+    ),
+    underlying: str | None = Query(
+        None, description="Optional asset symbol filter for crypto markets (e.g. 'BTC', 'ETH', 'SOL', 'HYPE')."
+    ),
+    limit: int = Query(100, description="Max rows per list (standalone_markets / grouped_questions each). Max 500."),
+):
+    _t0 = time.monotonic()
+    try:
+        data = await get_hip4_snapshot(template=template, underlying=underlying, limit=limit)
+        data["latency_ms"] = round((time.monotonic() - _t0) * 1000)
+        return JSONResponse(content=data)
+    except Exception as e:
+        logger.exception("hip4-snapshot 처리 실패")
         return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
 
 

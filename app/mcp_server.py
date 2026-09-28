@@ -440,6 +440,72 @@ EXIT_CAPACITY_AUDIT_OUTPUT_SCHEMA = {
     ],
 }
 
+_HIP4_SIDE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "name": {"type": "string"},
+        "price": {"type": ["number", "null"]},
+    },
+    "required": ["name"],
+}
+
+_HIP4_NAMED_OUTCOME_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "outcome_id": {"type": "integer"},
+        "label": {"type": "string"},
+        "price": {"type": ["number", "null"]},
+    },
+    "required": ["outcome_id", "label"],
+}
+
+HIP4_SNAPSHOT_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "generated_at": _TIMESTAMP_PAIR_SCHEMA,
+        "template_filter": {"type": ["string", "null"]},
+        "underlying_filter": {"type": ["string", "null"]},
+        "standalone_count": {"type": "integer"},
+        "grouped_question_count": {"type": "integer"},
+        "standalone_markets": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "outcome_id": {"type": "integer"},
+                    "template": {"type": "string"},
+                    "fields": {"type": "object", "additionalProperties": {"type": "string"}},
+                    "sides": {"type": "array", "items": _HIP4_SIDE_SCHEMA},
+                },
+                "required": ["outcome_id", "template", "fields", "sides"],
+            },
+        },
+        "grouped_questions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "question_id": {"type": "integer"},
+                    "template": {"type": "string"},
+                    "fields": {"type": "object", "additionalProperties": {"type": "string"}},
+                    "fallback": {
+                        "anyOf": [_HIP4_NAMED_OUTCOME_SCHEMA, {"type": "null"}],
+                        "description": "The residual 'none of the named outcomes' price.",
+                    },
+                    "outcomes": {"type": "array", "items": _HIP4_NAMED_OUTCOME_SCHEMA},
+                },
+                "required": ["question_id", "template", "fields", "outcomes"],
+            },
+        },
+        "data_source": {"type": "string"},
+        "notice": {"type": ["string", "null"]},
+    },
+    "required": [
+        "generated_at", "standalone_count", "grouped_question_count",
+        "standalone_markets", "grouped_questions", "data_source",
+    ],
+}
+
 WHALE_AUDIT_OUTPUT_SCHEMA = {
     "type": "object",
     "properties": {
@@ -1018,6 +1084,45 @@ _TOOLS: list[dict] = [
             "required": ["position_size_shares"],
         },
         "output_schema": EXIT_CAPACITY_AUDIT_OUTPUT_SCHEMA,
+        "annotations": _READ_ONLY_ANNOTATIONS,
+    },
+    {
+        "name": "prediction.hip4_snapshot",
+        "path": "/v1/prediction/hip4-snapshot",
+        "price_attr": "PRICE_HIP4_SNAPSHOT_USDC",
+        "description": (
+            "Real-time probability snapshot of Hyperliquid's HIP-4 outcome (prediction) "
+            "markets - crypto price binaries, sports game winners, tournament winners, "
+            "Fed rate decisions, and any other market type Hyperliquid adds, all in one "
+            "call. No curated market list - every field under 'fields' on each row is "
+            "parsed verbatim from Hyperliquid's own description string, so new HIP-4 "
+            "market types appear automatically. standalone_markets covers two-sided "
+            "markets (most crypto/sports games); grouped_questions covers "
+            "mutually-exclusive multi-outcome groups (e.g. a league winner) with a "
+            "fallback price for 'none of the above'. Optional template/underlying "
+            "filters narrow the result. Do not use for Polymarket data (use "
+            "prediction.neg_risk_arbitrage/exit_capacity_audit instead). Paid in USDC "
+            "on Base."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "template": {
+                    "type": "string",
+                    "description": "Optional substring filter on the market's template name (e.g. 'sportsContestWinner', 'priceBinary').",
+                },
+                "underlying": {
+                    "type": "string",
+                    "description": "Optional asset symbol filter for crypto markets (e.g. 'BTC', 'ETH', 'SOL', 'HYPE').",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max rows per list (standalone_markets / grouped_questions each). Defaults to 100, max 500.",
+                },
+            },
+            "required": [],
+        },
+        "output_schema": HIP4_SNAPSHOT_OUTPUT_SCHEMA,
         "annotations": _READ_ONLY_ANNOTATIONS,
     },
     {

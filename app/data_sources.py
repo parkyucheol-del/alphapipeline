@@ -16,7 +16,7 @@ import logging
 
 import httpx
 from app.config import settings
-from app.cache import goplus_cache, polymarket_book_cache, ttl_cached
+from app.cache import goplus_cache, hip4_cache, polymarket_book_cache, ttl_cached
 
 logger = logging.getLogger("alphapipeline")
 
@@ -506,6 +506,43 @@ async def get_polymarket_market(market_slug: str) -> dict:
     if not markets:
         raise ValueError(f"Polymarket에서 마켓 slug '{market_slug}'를 찾지 못했습니다")
     return markets[0] if isinstance(markets, list) else markets
+
+
+# ============================================================================
+# prediction.hip4_snapshot (2026-09-28) - 예측시장 확장 Wave 2. Hyperliquid
+# 공식 HIP-4(outcome/prediction market) 무료 info API 두 개만 쓴다 - 인증도
+# 지갑도 불필요. Wave 1(Polymarket)과 달리 이건 Hyperliquid 온체인 무기한선물
+# 데이터를 이미 쓰고 있는 derivatives.whale_position_audit/funding_rate와
+# 같은 업스트림(HYPERLIQUID_INFO_URL)이라 신규 의존성이 없다.
+#
+# outcomeMeta: 전체 아웃컴/질문의 정적 메타데이터(무엇에 대한 마켓인지).
+# allMids: 일반 무기한선물 티커와 HIP-4 아웃컴 가격이 섞여서 오는 실시간
+# 중간가 - 아웃컴 쪽은 "#<id>" 형태의 키를 쓴다. 이 두 응답을 잇는 매핑
+# 규칙(outcome_id -> allMids 키)은 Hyperliquid 공식 문서에 명시돼 있지 않아
+# 2026-09-28에 실제 라이브 데이터를 교차검증해서 역추적했다 (app/logic.py의
+# get_hip4_snapshot 참고).
+# ============================================================================
+
+
+@ttl_cached(hip4_cache, key_fn=lambda: "hip4:outcomeMeta")
+async def get_hyperliquid_outcome_meta() -> dict:
+    """HIP-4 아웃컴/질문 전체 메타데이터 (공식 무료 info API, 인증 불필요)."""
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        r = await client.post(HYPERLIQUID_INFO_URL, json={"type": "outcomeMeta"})
+        r.raise_for_status()
+        return r.json()
+
+
+@ttl_cached(hip4_cache, key_fn=lambda: "hip4:allMids")
+async def get_hyperliquid_all_mids() -> dict:
+    """
+    전종목 실시간 중간가 - 일반 무기한선물 티커(예: "BTC")와 HIP-4 아웃컴
+    가격("#12090" 등)이 한 딕셔너리에 섞여서 온다 (공식 무료 info API).
+    """
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        r = await client.post(HYPERLIQUID_INFO_URL, json={"type": "allMids"})
+        r.raise_for_status()
+        return r.json()
 
 
 @ttl_cached(polymarket_book_cache, key_fn=lambda token_id: f"book:{token_id}")

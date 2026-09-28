@@ -104,6 +104,7 @@ from app.schemas import (
     EXIT_CAPACITY_AUDIT_EXAMPLE,
     FUNDING_APR_EXAMPLE,
     FUNDING_RATE_EXAMPLE,
+    HIP4_SNAPSHOT_EXAMPLE,
     KIMCHI_ALERT_EXAMPLE,
     MACRO_DDAY_EXAMPLE,
     MARKDOWN_EXAMPLE,
@@ -121,6 +122,7 @@ from app.schemas import (
     MacroDdayResponse,
     MarkdownResponse,
     PredictionExitCapacityAuditResponse,
+    PredictionHip4SnapshotResponse,
     PredictionNegRiskArbitrageResponse,
     TokenDiagnosticResponse,
     TokenRiskResponse,
@@ -382,6 +384,7 @@ def build_routes(dump_risk_enabled: bool, kimchi_alert_enabled: bool = False) ->
     token_diagnostic_option = _payment_option(settings.PRICE_TOKEN_DIAGNOSTIC_USDC)
     neg_risk_arbitrage_option = _payment_option(settings.PRICE_NEG_RISK_ARBITRAGE_USDC)
     exit_capacity_audit_option = _payment_option(settings.PRICE_EXIT_CAPACITY_AUDIT_USDC)
+    hip4_snapshot_option = _payment_option(settings.PRICE_HIP4_SNAPSHOT_USDC)
 
     macro_dday_option = _payment_option(settings.PRICE_MACRO_DDAY_USDC)
     routes: dict[str, RouteConfig] = {
@@ -834,6 +837,54 @@ def build_routes(dump_risk_enabled: bool, kimchi_alert_enabled: bool = False) ->
             ),
             service_name="AlphaPipeline Exit Capacity Audit",
             tags=["prediction-market", "polymarket", "liquidity"],
+        ),
+        "GET /v1/prediction/hip4-snapshot": _make_route_config(
+            accepts=[hip4_snapshot_option],
+            mime_type="application/json",
+            description=(
+                "Real-time probability snapshot of Hyperliquid's HIP-4 outcome "
+                "(prediction) markets - crypto price binaries, sports game winners, "
+                "tournament winners, Fed rate decisions, and more, all in one call. No "
+                "curated market list - every field under `fields` is parsed verbatim "
+                "from Hyperliquid's own description string, so new HIP-4 market types "
+                "appear automatically. Optional `template` (substring filter on the "
+                "market type, e.g. 'sportsContestWinner') and `underlying` (asset symbol "
+                "filter for crypto markets, e.g. 'BTC') narrow the result; `limit` caps "
+                "how many rows come back (default 100, max 500). Paid in USDC on Base."
+            ),
+            resource=_resource_url("/v1/prediction/hip4-snapshot"),
+            extensions=_bazaar_extension(
+                input_example={"underlying": "BTC"},
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "template": {
+                            "type": "string",
+                            "description": (
+                                "Optional substring filter on the market's template name "
+                                "(e.g. 'sportsContestWinner', 'priceBinary', "
+                                "'policyRateDecision')."
+                            ),
+                        },
+                        "underlying": {
+                            "type": "string",
+                            "description": (
+                                "Optional asset symbol filter for crypto markets (e.g. "
+                                "'BTC', 'ETH', 'SOL', 'HYPE')."
+                            ),
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Max rows per list (standalone_markets / grouped_questions each). Defaults to 100, max 500.",
+                        },
+                    },
+                    "required": [],
+                },
+                output_example=HIP4_SNAPSHOT_EXAMPLE,
+                output_schema=_inline_schema_defs(PredictionHip4SnapshotResponse.model_json_schema()),
+            ),
+            service_name="AlphaPipeline HIP-4 Snapshot",
+            tags=["prediction-market", "hyperliquid", "hip4"],
         ),
     }
     if dump_risk_enabled:

@@ -2192,3 +2192,223 @@ async def get_exit_capacity_audit(
         "data_source": "polymarket-clob",
         "notice": _EXIT_CAPACITY_AUDIT_NOTICE,
     }
+
+
+# ============================================================================
+# prediction.hip4_snapshot (2026-09-28) - 예측시장 확장 Wave 2. Hyperliquid
+# 공식 HIP-4(outcome/prediction market) 무료 info API만 쓴다(인증/지갑 불필요).
+# 상세 조사/데이터 검증 기록은 프로젝트 노트
+# claude/session-log-2026-09-28-hip4-and-bazaar-followup.md 참고.
+#
+# 왜 하드코딩된 마켓 목록이 없는가: 이 프로젝트의 "완전 자동화, 유지보수 0분"
+# 원칙(dump-risk/kimchi-alert와 동일)을 그대로 따른다 - HIP-4의 outcome
+# description은 "key:value|key2:value2" 형태로 이미 구조화돼 있어서, 이걸
+# 그대로 파싱해 돌려주는 범용 어댑터로 만들면 Hyperliquid가 새 마켓 타입
+# (신규 스포츠 리그, 신규 자산 등)을 추가해도 이 코드는 손댈 필요가 없다.
+#
+# allMids 키 매핑("#<outcome_id*10 + side_index>")은 Hyperliquid 공식 문서에
+# 명시돼 있지 않다 - 2026-09-28에 실제 라이브 응답 여러 건(EPL/FOMC/NFL/일간
+# 암호화폐 이진마켓)을 교차검증해서 역추적한 규칙이다. Hyperliquid가 이 내부
+# 규칙을 공지 없이 바꿀 가능성은 남아있으므로, 이 사실을 notice에 항상 명시한다.
+# ============================================================================
+
+_HIP4_SNAPSHOT_NOTICE = (
+    "Every field under `fields` is parsed verbatim from Hyperliquid's own "
+    "'key:value|key2:value2'-structured description string for that outcome/"
+    "question - there is no curated market list here, so new HIP-4 market types "
+    "show up automatically without any code change on our side. `price` is the "
+    "live mid-price for that specific side (0.0-1.0, i.e. an implied "
+    "probability) - for `standalone_markets`, `sides` covers every side "
+    "Hyperliquid defined for that outcome (usually Yes/No, sometimes two named "
+    "competitors); for `grouped_questions`, each entry in `outcomes` is one "
+    "named possibility in a mutually-exclusive group (e.g. one team winning a "
+    "league) and `fallback` is the residual 'none of the named outcomes' price. "
+    "The mapping used to join Hyperliquid's outcomeMeta (market metadata) to "
+    "its allMids (live prices) is not documented by Hyperliquid - it was "
+    "reverse-engineered from live data on 2026-09-28 and could silently change "
+    "upstream. Thinly-traded outcomes can show stale or non-consensus prices "
+    "(e.g. a lone policy-rate market showing an implausibly high probability) - "
+    "treat any single price as a signal to cross-check, not a certainty."
+)
+
+
+def _parse_hip4_description(description: str | None) -> dict:
+    """
+    HIP-4 outcome/question의 description은 'key:value|key2:value2' 형태의
+    파이프 구분 key-value 문자열이다(값이 없는 'other', 완전히 빈 문자열도
+    있음). 하드코딩된 마켓 타입 파서 없이 그대로 파싱해서, 새 템플릿이
+    추가돼도 이 함수는 손댈 필요가 없게 한다.
+    """
+    if not description:
+        return {}
+    fields: dict[str, str] = {}
+    for token in description.split("|"):
+        if ":" not in token:
+            continue
+        key, _, value = token.partition(":")
+        key = key.strip()
+        if key:
+            fields[key] = value.strip()
+    return fields
+
+
+def _hip4_side_name(raw_name: str, fields: dict) -> str:
+    """
+    sideSpecs의 name은 'template:Yes' 같은 리터럴이거나, 'template:{shortNameA}'
+    처럼 description 필드값을 그대로 꽂아 넣으라는 플레이스홀더다(예: NFL 경기의
+    두 팀 이름). 후자는 fields에서 실제 값을 찾아 치환한다.
+    """
+    name = (raw_name or "").removeprefix("template:")
+    if name.startswith("{") and name.endswith("}"):
+        return fields.get(name[1:-1], name)
+    return name or "unknown"
+
+
+def _hip4_outcome_label(outcome: dict, fields: dict) -> str:
+    """
+    그룹 질문(questions[]) 안의 named outcome 하나를 사람이 읽을 라벨로.
+    participant 필드(예: 'Arsenal')가 있으면 그걸 쓰고, 없으면(예: FOMC의
+    NoChange/Decrease/Increase처럼 값이 이름 자체에 있는 경우) 그 outcome
+    자신의 template 이름에서 'template:' 접두어만 벗겨서 쓴다.
+    """
+    if fields.get("participant"):
+        return fields["participant"]
+    name = (outcome.get("name") or "").removeprefix("template:")
+    return name or f"outcome-{outcome.get('outcome')}"
+
+
+def _hip4_price(all_mids: dict, outcome_id: int, side_index: int) -> float | None:
+    raw = all_mids.get(f"#{outcome_id * 10 + side_index}")
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+async def get_hip4_snapshot(
+    template: str | None = None,
+    underlying: str | None = None,
+    limit: int = 100,
+) -> dict:
+    """
+    Hyperliquid HIP-4 예측시장(outcome market) 전체의 실시간 확률 스냅샷.
+    GET /v1/prediction/hip4-snapshot이 사용한다 (main.py 참고).
+
+    outcomeMeta(정적 메타데이터)와 allMids(실시간 중간가) 두 무료 API를
+    조합한다 - 인증/지갑 불필요. 하드코딩된 마켓 목록이 없는 범용 어댑터라서
+    Hyperliquid가 새 마켓 타입을 추가해도 코드 수정이 필요 없다 (위 모듈
+    docstring 참고).
+
+    questions[]에 속한(namedOutcomes/fallbackOutcome로 묶인) outcome들은
+    standalone_markets에서 빠지고 grouped_questions에서만 나온다 - 같은
+    outcome이 두 군데 중복 노출되지 않도록.
+    """
+    meta, all_mids = await asyncio.gather(
+        ds.get_hyperliquid_outcome_meta(),
+        ds.get_hyperliquid_all_mids(),
+    )
+    outcomes_by_id = {o["outcome"]: o for o in meta.get("outcomes", [])}
+    questions = meta.get("questions", [])
+
+    grouped_outcome_ids: set[int] = set()
+    for q in questions:
+        if q.get("fallbackOutcome") is not None:
+            grouped_outcome_ids.add(q["fallbackOutcome"])
+        grouped_outcome_ids.update(q.get("namedOutcomes") or [])
+
+    template_filter = template.strip().lower() if template else None
+    underlying_filter = underlying.strip().upper() if underlying else None
+
+    def _passes_filters(name: str, fields: dict) -> bool:
+        if template_filter and template_filter not in (name or "").lower():
+            return False
+        if underlying_filter:
+            asset = (fields.get("underlying") or fields.get("perp") or "").upper()
+            if asset != underlying_filter:
+                return False
+        return True
+
+    limit = max(1, min(limit or 100, 500))
+
+    standalone_markets = []
+    for outcome_id in sorted(outcomes_by_id):
+        if outcome_id in grouped_outcome_ids:
+            continue
+        o = outcomes_by_id[outcome_id]
+        name = o.get("name", "")
+        fields = _parse_hip4_description(o.get("description"))
+        if not _passes_filters(name, fields):
+            continue
+        sides = [
+            {
+                "name": _hip4_side_name(spec.get("name", ""), fields),
+                "price": _hip4_price(all_mids, outcome_id, idx),
+            }
+            for idx, spec in enumerate(o.get("sideSpecs") or [])
+        ]
+        standalone_markets.append(
+            {
+                "outcome_id": outcome_id,
+                "template": name,
+                "fields": fields,
+                "sides": sides,
+            }
+        )
+        if len(standalone_markets) >= limit:
+            break
+
+    grouped_questions = []
+    for q in questions:
+        name = q.get("name", "")
+        fields = _parse_hip4_description(q.get("description"))
+        if not _passes_filters(name, fields):
+            continue
+
+        fallback_id = q.get("fallbackOutcome")
+        fallback = None
+        if fallback_id is not None and fallback_id in outcomes_by_id:
+            fallback = {
+                "outcome_id": fallback_id,
+                "label": "none_of_the_above",
+                "price": _hip4_price(all_mids, fallback_id, 0),
+            }
+
+        named_outcomes = []
+        for oid in q.get("namedOutcomes") or []:
+            o = outcomes_by_id.get(oid)
+            if o is None:
+                continue
+            o_fields = _parse_hip4_description(o.get("description"))
+            named_outcomes.append(
+                {
+                    "outcome_id": oid,
+                    "label": _hip4_outcome_label(o, o_fields),
+                    "price": _hip4_price(all_mids, oid, 0),
+                }
+            )
+
+        grouped_questions.append(
+            {
+                "question_id": q.get("question"),
+                "template": name,
+                "fields": fields,
+                "fallback": fallback,
+                "outcomes": named_outcomes,
+            }
+        )
+        if len(grouped_questions) >= limit:
+            break
+
+    return {
+        "generated_at": _timestamp_now(),
+        "template_filter": template,
+        "underlying_filter": underlying,
+        "standalone_count": len(standalone_markets),
+        "grouped_question_count": len(grouped_questions),
+        "standalone_markets": standalone_markets,
+        "grouped_questions": grouped_questions,
+        "data_source": "hyperliquid_info_api",
+        "notice": _HIP4_SNAPSHOT_NOTICE,
+    }

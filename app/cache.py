@@ -43,6 +43,12 @@ goplus_cache: TTLCache = TTLCache(maxsize=256, ttl=settings.GOPLUS_CACHE_TTL_SEC
 # 징수되므로 마진에는 영향 없다(위 ttl_cached() 설명 참고).
 polymarket_book_cache: TTLCache = TTLCache(maxsize=256, ttl=settings.POLYMARKET_BOOK_CACHE_TTL_SECONDS)
 
+# Hyperliquid HIP-4 outcomeMeta/allMids 원본 응답 캐시. prediction.hip4_snapshot이
+# 매 호출마다 두 API를 새로 때리지 않도록 짧은 TTL로 흡수한다(2026-09-28) - allMids는
+# 실시간성이 중요해서 TTL을 짧게 잡았다. x402 결제는 캐시 히트와 무관하게 매 호출
+# 그대로 징수되므로 마진에는 영향 없다(위 ttl_cached() 설명 참고).
+hip4_cache: TTLCache = TTLCache(maxsize=4, ttl=settings.HIP4_CACHE_TTL_SECONDS)
+
 
 def ttl_cached(cache: TTLCache, key_fn: Callable[..., str] | None = None):
     """

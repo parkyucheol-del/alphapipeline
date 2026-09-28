@@ -918,3 +918,87 @@ EXIT_CAPACITY_AUDIT_EXAMPLE = {
         "include them)."
     ),
 }
+
+
+class Hip4Side(BaseModel):
+    name: str = Field(description="Side label - usually 'Yes'/'No', sometimes a competitor's short name.")
+    price: float | None = Field(
+        default=None, description="Live mid-price for this side (0.0-1.0, an implied probability)."
+    )
+
+
+class Hip4StandaloneMarket(BaseModel):
+    outcome_id: int
+    template: str = Field(description="Hyperliquid's own market-type name for this outcome, verbatim.")
+    fields: dict[str, str] = Field(
+        description="Parsed 'key:value' pairs from Hyperliquid's own description string, verbatim - not curated."
+    )
+    sides: list[Hip4Side]
+
+
+class Hip4NamedOutcome(BaseModel):
+    outcome_id: int
+    label: str = Field(description="Participant name if available, else the outcome's own template name.")
+    price: float | None = None
+
+
+class Hip4Fallback(BaseModel):
+    outcome_id: int
+    label: str = "none_of_the_above"
+    price: float | None = None
+
+
+class Hip4GroupedQuestion(BaseModel):
+    question_id: int
+    template: str
+    fields: dict[str, str]
+    fallback: Hip4Fallback | None = None
+    outcomes: list[Hip4NamedOutcome]
+
+
+class PredictionHip4SnapshotResponse(BaseModel):
+    generated_at: TimestampPair
+    template_filter: str | None = None
+    underlying_filter: str | None = None
+    standalone_count: int
+    grouped_question_count: int
+    standalone_markets: list[Hip4StandaloneMarket]
+    grouped_questions: list[Hip4GroupedQuestion]
+    data_source: str
+    notice: str | None = None
+
+
+HIP4_SNAPSHOT_EXAMPLE = {
+    "generated_at": {"utc": "2026-09-28T15:30:00Z", "kst": "2026-09-29 00:30:00 KST"},
+    "template_filter": None,
+    "underlying_filter": "BTC",
+    "standalone_count": 1,
+    "grouped_question_count": 0,
+    "standalone_markets": [
+        {
+            "outcome_id": 6297,
+            "template": "Recurring",
+            "fields": {
+                "class": "priceBinary",
+                "underlying": "BTC",
+                "expiry": "20260929-0600",
+                "targetPrice": "83142",
+                "period": "1d",
+            },
+            "sides": [
+                {"name": "Yes", "price": 0.399},
+                {"name": "No", "price": 0.601},
+            ],
+        }
+    ],
+    "grouped_questions": [],
+    "data_source": "hyperliquid_info_api",
+    "notice": (
+        "Every field under `fields` is parsed verbatim from Hyperliquid's own "
+        "'key:value|key2:value2'-structured description string for that outcome/question - "
+        "there is no curated market list here. `price` is the live mid-price for that "
+        "specific side (0.0-1.0, i.e. an implied probability). The mapping used to join "
+        "outcomeMeta to allMids is not documented by Hyperliquid and was reverse-engineered "
+        "from live data - treat any single price as a signal to cross-check, not a certainty."
+    ),
+}

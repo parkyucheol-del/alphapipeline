@@ -7,7 +7,7 @@ Also the exact server Glama's automated Docker build test introspects for
 this listing's "Server" score, so its tool count should track app/mcp_server.py
 (the paid remote server) 1:1 even though calls here bypass payment entirely.
 
-14 tools provided (same coverage as the paid remote /mcp server, just called
+15 tools provided (same coverage as the paid remote /mcp server, just called
 directly against app/logic.py instead of going through x402 payment):
   1.  convert_to_markdown(url)                              -> app/markdown_tool.py: url_to_markdown
   2.  get_token_dump_risk(symbol)                            -> app/logic.py: get_symbol_dump_risk
@@ -23,6 +23,7 @@ directly against app/logic.py instead of going through x402 payment):
   12. get_macro_dday()                                       -> app/logic.py: get_macro_calendar_dday
   13. get_neg_risk_arbitrage(event_slug, ...)                -> app/logic.py: get_neg_risk_arbitrage
   14. get_exit_capacity_audit(position_size_shares, ...)     -> app/logic.py: get_exit_capacity_audit
+  15. get_hip4_snapshot(template, underlying, limit)         -> app/logic.py: get_hip4_snapshot
 
 Note (important, stated honestly):
   - This MCP server is a separate "distribution build" from the paid x402 HTTP
@@ -58,6 +59,7 @@ from app.logic import (
     get_exit_capacity_audit as _logic_exit_capacity_audit,
     get_funding_apr_matrix as _logic_funding_apr_matrix,
     get_funding_rate as _logic_funding_rate,
+    get_hip4_snapshot as _logic_hip4_snapshot,
     get_kimchi_alert as _logic_kimchi_alert,
     get_macro_calendar_dday as _logic_macro_calendar_dday,
     get_neg_risk_arbitrage as _logic_neg_risk_arbitrage,
@@ -636,6 +638,49 @@ async def get_exit_capacity_audit(
             outcome=outcome,
             side=side,
         ),
+    )
+
+
+@mcp.tool(name="prediction.hip4_snapshot")
+async def get_hip4_snapshot(
+    template: str | None = None,
+    underlying: str | None = None,
+    limit: int = 100,
+) -> dict:
+    """
+    Real-time probability snapshot of Hyperliquid's HIP-4 outcome (prediction)
+    markets - crypto price binaries, sports game winners, tournament winners,
+    Fed rate decisions, and any other market type Hyperliquid adds, all in one
+    call. No curated market list: every field under "fields" on each row is
+    parsed verbatim from Hyperliquid's own "key:value|key2:value2" description
+    string, so new HIP-4 market types appear automatically without any code
+    change here. standalone_markets covers two-sided markets (most crypto/
+    sports games); grouped_questions covers mutually-exclusive multi-outcome
+    groups (e.g. a league winner) with a fallback price for "none of the
+    above".
+
+    Do NOT use for Polymarket data (use prediction.neg_risk_arbitrage /
+    prediction.exit_capacity_audit instead). No wallet or API key needed
+    upstream - always check the response's `notice` field, since the mapping
+    used to join Hyperliquid's market metadata to its live prices is not
+    documented by Hyperliquid and was reverse-engineered from live data.
+
+    Args:
+        template: Optional substring filter on the market's template name
+            (e.g. "sportsContestWinner", "priceBinary").
+        underlying: Optional asset symbol filter for crypto markets (e.g.
+            "BTC", "ETH", "SOL", "HYPE").
+        limit: Max rows per list (standalone_markets / grouped_questions
+            each). Defaults to 100, max 500.
+
+    Returns:
+        On success: {"success": true, "standalone_markets", "grouped_questions",
+            "standalone_count", "grouped_question_count", ...}
+        On failure: {"success": false, "error": {"type", "message"}}
+    """
+    return await _safe_call(
+        "get_hip4_snapshot",
+        _logic_hip4_snapshot(template=template, underlying=underlying, limit=limit),
     )
 
 
