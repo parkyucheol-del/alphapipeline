@@ -306,6 +306,23 @@ async def llms_txt_endpoint():
 
 
 @app.get(
+    "/.well-known/glama.json",
+    include_in_schema=False,  # Glama 도메인 소유권 검증용 정적 파일 - 결제 대상 아님
+)
+async def glama_domain_claim():
+    # Glama가 alphapipeline-eu.onrender.com 도메인 소유권을 확인하기 위한 HTTP-file
+    # 검증 라우트. 결제 게이트에 절대 등록하지 않는다 (llms_txt_endpoint와 동일 이유).
+    # 이 값이 바뀌면(재검증 등) Glama Admin > Claim ownership 화면에서 새 JSON을 받아
+    # 이 dict만 교체하면 된다.
+    return JSONResponse(
+        content={
+            "$schema": "https://glama.ai/mcp/schemas/connector.json",
+            "claim": "glama_claim_OLBVDF7dRebQ7V_nlcjJYzRAjeS02n7I",
+        }
+    )
+
+
+@app.get(
     "/v1/unlocks/dump-risk",
     tags=["market"],
     summary="Detect tokens at risk of sell pressure from unlocks/vesting",
