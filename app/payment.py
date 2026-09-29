@@ -441,8 +441,8 @@ def build_routes(dump_risk_enabled: bool, kimchi_alert_enabled: bool = False) ->
             description=(
                 "GoPlus/Honeypot.is-backed token security check - honeypot flag, "
                 "buy/sell tax, mintability, and ownership renouncement for a given "
-                "contract address, so a bot can decide before it buys. Paid in "
-                "USDC on Base."
+                "contract address. A pre-trade safety check a bot runs before it "
+                "buys. Paid in USDC on Base."
             ),
             resource=_resource_url("/v1/security/token-risk"),
             extensions=_bazaar_extension(
@@ -468,7 +468,7 @@ def build_routes(dump_risk_enabled: bool, kimchi_alert_enabled: bool = False) ->
                 output_schema=_inline_schema_defs(TokenRiskResponse.model_json_schema()),
             ),
             service_name="AlphaPipeline Token Risk Scanner",
-            tags=["crypto", "security", "honeypot", "token-risk"],
+            tags=["crypto", "security", "honeypot", "token-risk", "pre-trade-signal"],
         ),
         "GET /v1/security/contract-health-audit": _make_route_config(
             accepts=[contract_health_option],
@@ -510,7 +510,7 @@ def build_routes(dump_risk_enabled: bool, kimchi_alert_enabled: bool = False) ->
             accepts=[token_diagnostic_option],
             mime_type="application/json",
             description=(
-                "Single-call combined security check - runs token-risk and "
+                "Single-call combined pre-trade security check - runs token-risk and "
                 "contract-health-audit in parallel against the same GoPlus data and "
                 "returns both, plus a deduped union of risk_flags. No composite score "
                 "or letter grade is computed - every field is copied unchanged from "
@@ -540,7 +540,7 @@ def build_routes(dump_risk_enabled: bool, kimchi_alert_enabled: bool = False) ->
                 output_schema=_inline_schema_defs(TokenDiagnosticResponse.model_json_schema()),
             ),
             service_name="AlphaPipeline Token Diagnostic",
-            tags=["crypto", "security", "diagnostic", "no-score"],
+            tags=["crypto", "security", "diagnostic", "no-score", "pre-trade-signal"],
         ),
         "GET /v1/derivatives/funding-rate": _make_route_config(
             accepts=[funding_rate_option],
@@ -788,12 +788,12 @@ def build_routes(dump_risk_enabled: bool, kimchi_alert_enabled: bool = False) ->
             accepts=[exit_capacity_audit_option],
             mime_type="application/json",
             description=(
-                "Walk a single Polymarket outcome's live order book to determine how much "
-                "of a given position size can actually be filled right now, at what "
-                "average price, and with how much price impact versus the best quote. "
-                "Accepts either a raw token_id or a market_slug (+ outcome) to resolve it "
-                "automatically - exact slug only, no fuzzy keyword search. Paid in USDC "
-                "on Base."
+                "Pre-trade liquidity check: walk a single Polymarket outcome's live order "
+                "book to determine how much of a given position size can actually be "
+                "filled right now, at what average price, and with how much price impact "
+                "versus the best quote. Accepts either a raw token_id or a market_slug "
+                "(+ outcome) to resolve it automatically - exact slug only, no fuzzy "
+                "keyword search. Paid in USDC on Base."
             ),
             resource=_resource_url("/v1/prediction/exit-capacity-audit"),
             extensions=_bazaar_extension(
@@ -836,18 +836,18 @@ def build_routes(dump_risk_enabled: bool, kimchi_alert_enabled: bool = False) ->
                 output_schema=_inline_schema_defs(PredictionExitCapacityAuditResponse.model_json_schema()),
             ),
             service_name="AlphaPipeline Exit Capacity Audit",
-            tags=["prediction-market", "polymarket", "liquidity"],
+            tags=["prediction-market", "polymarket", "liquidity", "pre-trade-signal"],
         ),
         "GET /v1/prediction/hip4-snapshot": _make_route_config(
             accepts=[hip4_snapshot_option],
             mime_type="application/json",
             description=(
-                "Real-time probability snapshot of Hyperliquid's HIP-4 outcome "
-                "(prediction) markets - crypto price binaries, sports game winners, "
-                "tournament winners, Fed rate decisions, and more, all in one call. No "
-                "curated market list - every field under `fields` is parsed verbatim "
-                "from Hyperliquid's own description string, so new HIP-4 market types "
-                "appear automatically. Optional `template` (substring filter on the "
+                "Real-time pre-trade signal: a probability snapshot of Hyperliquid's "
+                "HIP-4 outcome (prediction) markets - crypto price binaries, sports game "
+                "winners, tournament winners, Fed rate decisions, and more, all in one "
+                "call. No curated market list - every field under `fields` is parsed "
+                "verbatim from Hyperliquid's own description string, so new HIP-4 market "
+                "types appear automatically. Optional `template` (substring filter on the "
                 "market type, e.g. 'sportsContestWinner') and `underlying` (asset symbol "
                 "filter for crypto markets, e.g. 'BTC') narrow the result; `limit` caps "
                 "how many rows come back (default 100, max 500). Paid in USDC on Base."
@@ -884,7 +884,7 @@ def build_routes(dump_risk_enabled: bool, kimchi_alert_enabled: bool = False) ->
                 output_schema=_inline_schema_defs(PredictionHip4SnapshotResponse.model_json_schema()),
             ),
             service_name="AlphaPipeline HIP-4 Snapshot",
-            tags=["prediction-market", "hyperliquid", "hip4"],
+            tags=["prediction-market", "hyperliquid", "hip4", "pre-trade-signal"],
         ),
     }
     if dump_risk_enabled:
