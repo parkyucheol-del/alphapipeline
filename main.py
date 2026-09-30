@@ -131,12 +131,13 @@ async def add_disclaimer_header(request: Request, call_next):
     return response
 
 
-# 2026-09-30 임시 디버그 미들웨어 - Render Logs 검색이 app/payment.py의
-# [x402-debug] logger.warning() 줄을 전혀 찾지 못하는 원인 불명 문제 때문에,
-# CDP Facilitator에 실제로 보낸 payload/requirements를 (성공/실패 관계없이)
-# 응답 헤더 X-Debug-Payload-Sent(base64 JSON, payment-required 헤더와 동일한
-# 인코딩)에 실어서 클라이언트가 직접 받게 한다. X402_DEBUG_LOG_PAYLOADS=true일
-# 때만 동작 - 서명이 포함되므로 원인 파악 후 반드시 되돌릴 것.
+# 2026-09-30 temporary debug middleware - Render Logs search never surfaces
+# app/payment.py's [x402-debug] logger.warning() lines (cause unknown), so this
+# echoes the payload/requirements actually sent to CDP Facilitator (success or
+# failure) back as a response header X-Debug-Payload-Sent (base64 JSON, same
+# encoding as the payment-required header) so the client can read it directly.
+# Only active when X402_DEBUG_LOG_PAYLOADS=true - contains a signature, so
+# revert once the root cause is found.
 if settings.X402_DEBUG_LOG_PAYLOADS:
     from app.payment import pop_last_debug_capture, reset_last_debug_capture
 
@@ -152,7 +153,7 @@ if settings.X402_DEBUG_LOG_PAYLOADS:
                 ).decode("ascii")
             except Exception:
                 logging.getLogger("alphapipeline").exception(
-                    "[x402-debug] 응답 헤더에 payload 첨부 중 오류"
+                    "[x402-debug] error attaching payload to response header"
                 )
         return response
 

@@ -134,12 +134,14 @@ from app.schemas import (
 
 logger = logging.getLogger("alphapipeline")
 
-# 2026-09-30 임시 디버그용 - Render 로그 검색이 우리 [x402-debug] 로그 줄을 전혀
-# 찾지 못하는 문제(원인 미상, 같은 코드 경로에서 실행된 게 확실한데도 검색 결과 0건)
-# 때문에, 로그 대신 "마지막으로 verify()에 넘어간 payload/requirements"를 전역
-# 변수에 담아뒀다가 main.py의 응답 헤더 미들웨어가 그대로 클라이언트에게 돌려주는
-# 방식으로 우회한다. 단일 요청 흐름을 전제로 한 임시 진단용이라 동시 요청 안전성은
-# 신경 쓰지 않았다 - 원인 파악 후 이 변수와 관련 함수들을 전부 되돌릴 것.
+# 2026-09-30 temporary debug scaffolding - Render's log search UI never surfaces
+# our [x402-debug] log lines (cause unknown; we've confirmed the code path runs
+# but search still returns 0 hits). As a workaround, stash the payload/requirements
+# from the most recent verify() call in this module-level var, and let main.py's
+# response-header middleware echo it straight back to the client instead of
+# relying on logs. This assumes a single in-flight request (no concurrency
+# safety) since it's purely a short-lived diagnostic - revert this var and its
+# helper functions once the root cause is found.
 _last_debug_capture: dict | None = None
 
 
@@ -187,19 +189,22 @@ ACTIVE_NETWORK = settings.X402_NETWORK if USE_CDP_FACILITATOR else TESTNET_FALLB
 
 
 class _DebugLoggingFacilitatorClient(HTTPFacilitatorClient):
-    """임시 디버그용 래퍼 - verify() 직전에 실제로 CDP에 보낼 payload/requirements를
-    통째로 로그에 찍는다 (2026-09-30, hip4-alerts/subscribe 결제 검증 400 원인 파악용).
+    """Temporary debug wrapper - logs the exact payload/requirements about to be
+    sent to CDP right before verify() (2026-09-30, added while tracking down the
+    hip4-alerts/subscribe payment-verification 400).
 
-    민감한 서명이 로그에 남으므로 원인 파악 후 곧바로 되돌릴 것 - env var
-    X402_DEBUG_LOG_PAYLOADS=true 로만 켜지므로 기본값(false)에서는 아무 영향 없다.
+    The signature ends up in logs, so revert this as soon as the root cause is
+    found - only active when env var X402_DEBUG_LOG_PAYLOADS=true (no effect at
+    the default of false).
     """
 
     async def verify(self, payload, requirements):  # type: ignore[override]
         global _last_debug_capture
         dumped_payload = payload.model_dump(by_alias=True, exclude_none=True)
         dumped_requirements = requirements.model_dump(by_alias=True, exclude_none=True)
-        # 로그 검색이 안 통하므로, 성공/실패 관계없이 여기서 바로 전역에 담아둔다 -
-        # main.py의 add_debug_payload_header 미들웨어가 응답 헤더로 그대로 실어 보낸다.
+        # Log search isn't working, so stash this here unconditionally (success
+        # or failure) - main.py's add_debug_payload_header middleware echoes it
+        # back as a response header.
         _last_debug_capture = {
             "payload": dumped_payload,
             "requirements": dumped_requirements,
@@ -211,13 +216,13 @@ class _DebugLoggingFacilitatorClient(HTTPFacilitatorClient):
                 dumped_requirements,
             )
         except Exception:
-            logger.exception("[x402-debug] verify() 로깅 중 오류 (검증 자체는 계속 진행)")
+            logger.exception("[x402-debug] error while logging inside verify() (verification itself continues)")
         try:
             return await super().verify(payload, requirements)
         except Exception as e:
-            # Render 로그가 안 보일 때를 대비해, 실패 시 실제로 보낸 payload를
-            # 예외 메시지 자체에 실어서 402 응답의 "error" 필드로 클라이언트에게
-            # 직접 돌려준다 - 서버 로그 접근 없이도 원인 파악 가능하게.
+            # In case Render logs are unreachable, embed the actual payload we
+            # sent directly in the exception message, which flows into the 402
+            # response's "error" field - lets us see it without server log access.
             raise type(e)(
                 f"{e} || DEBUG_PAYLOAD_SENT={json.dumps(dumped_payload, default=str)}"
             ) from e
