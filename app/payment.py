@@ -516,6 +516,37 @@ def build_routes(
             service_name="AlphaPipeline Diag",
             tags=["diagnostic"],
         ),
+        # 2026-09-30 round 3: both hip4-tag and hip4-word settled successfully
+        # too, so "hip4"/"HIP-4" alone is also ruled out. The only remaining
+        # difference between the two known-failing routes and everything that
+        # has succeeded so far is that both failing routes carry the
+        # "prediction-market" tag AND the "hyperliquid" tag together -
+        # exit-capacity-audit has "prediction-market" without "hyperliquid"
+        # (succeeded), whale-position-audit has "hyperliquid" without
+        # "prediction-market" (succeeded), but no successful test yet has had
+        # both. These two routes isolate the tag-combination vs a
+        # description-level "Hyperliquid" + "prediction market" word
+        # combination. Delete both once resolved.
+        "GET /v1/_diag/payment-test-combo-tags": _make_route_config(
+            accepts=[_payment_option(0.02)],
+            mime_type="application/json",
+            description="Temporary diagnostic route for a CDP Facilitator investigation - safe to ignore, will be removed.",
+            resource=_resource_url("/v1/_diag/payment-test-combo-tags"),
+            service_name="AlphaPipeline Diag",
+            tags=["diagnostic", "prediction-market", "hyperliquid"],
+        ),
+        "GET /v1/_diag/payment-test-combo-words": _make_route_config(
+            accepts=[_payment_option(0.02)],
+            mime_type="application/json",
+            description=(
+                "Temporary diagnostic route for a CDP Facilitator investigation - "
+                "safe to ignore, will be removed. Mentions a Hyperliquid prediction "
+                "market here only as a text probe."
+            ),
+            resource=_resource_url("/v1/_diag/payment-test-combo-words"),
+            service_name="AlphaPipeline Diag",
+            tags=["diagnostic"],
+        ),
         "GET /v1/calendar/macro-dday": _make_route_config(
             accepts=[macro_dday_option],
             mime_type="application/json",

@@ -355,6 +355,24 @@ async def diag_payment_test_hip4_word_endpoint():
     return {"ok": True, "note": "Temporary diagnostic route - safe to ignore."}
 
 
+# 2026-09-30 TEMPORARY diagnostic routes, round 3. "hip4"/"HIP-4" alone
+# (tag and description-text variants) also settled successfully, ruling that
+# out too. The only remaining difference between the two known-failing routes
+# and every route that has succeeded so far is that both failing routes carry
+# "prediction-market" and "hyperliquid" together (either as tags or as
+# description wording), while no successful test has had both at once. These
+# two routes isolate that combination. Delete once resolved, alongside the
+# routes above and in app/payment.py.
+@app.get("/v1/_diag/payment-test-combo-tags", include_in_schema=False)
+async def diag_payment_test_combo_tags_endpoint():
+    return {"ok": True, "note": "Temporary diagnostic route - safe to ignore."}
+
+
+@app.get("/v1/_diag/payment-test-combo-words", include_in_schema=False)
+async def diag_payment_test_combo_words_endpoint():
+    return {"ok": True, "note": "Temporary diagnostic route - safe to ignore."}
+
+
 @app.get(
     "/llms.txt",
     include_in_schema=False,  # x402 결제 대상 데이터 엔드포인트가 아니라 크롤러용 정적 문서라 OpenAPI 스펙에서는 뺌
