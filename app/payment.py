@@ -1039,45 +1039,56 @@ def build_routes(
                 "for the event catalog before subscribing. Paid in USDC on Base."
             ),
             resource=_resource_url("/v1/prediction/hip4-alerts/subscribe"),
-            extensions=_bazaar_extension(
-                method="POST",
-                input_example={
-                    "webhook_url": "https://example.com/webhooks/alphapipeline",
-                    "secret": "replace-with-your-own-32-byte-random-secret",
-                    "event_types": ["hip4.prob_jump"],
-                    "underlying": "BTC",
-                },
-                input_schema={
-                    "type": "object",
-                    "properties": {
-                        "webhook_url": {
-                            "type": "string",
-                            "format": "uri",
-                            "description": "https:// endpoint to receive signed POST deliveries. Private/loopback IPs are rejected.",
-                        },
-                        "secret": {
-                            "type": "string",
-                            "description": "Caller-generated shared secret (>=16 chars) used to HMAC-SHA256 sign each delivery. Not stored anywhere you can retrieve it later - keep your own copy.",
-                        },
-                        "event_types": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Subset of event types to receive (default: all). See GET hip4-alerts/event-types.",
-                        },
-                        "underlying": {
-                            "type": "string",
-                            "description": "Optional filter: only this crypto underlying's markets (e.g. 'BTC').",
-                        },
-                        "threshold_pct": {
-                            "type": "number",
-                            "description": "Optional per-subscription override of the prob_jump threshold (0.0-1.0 scale).",
-                        },
-                    },
-                    "required": ["webhook_url", "secret"],
-                },
-                output_example=HIP4_ALERTS_SUBSCRIBE_EXAMPLE,
-                output_schema=_inline_schema_defs(Hip4AlertsSubscribeResponse.model_json_schema()),
-            ),
+            # 2026-09-30 TEMP DIAGNOSTIC: extensions dropped entirely to isolate
+            # whether the bazaar extensions blob is what's making CDP Facilitator
+            # reject this route's payment verify() - the body-type schema fix
+            # above (method enum POST/PUT/PATCH, self-consistent with the actual
+            # "POST" value) did NOT change the error at all, so the earlier
+            # "method enum mismatch" theory is likely wrong, or at least not the
+            # whole story. This isolates the variable: if verify() succeeds with
+            # no extensions, the extensions payload itself is implicated (even if
+            # not for the reason first suspected); if it still fails identically,
+            # extensions can be ruled out entirely. Restore the extensions=...
+            # call once this route is confirmed to take real payments.
+            # extensions=_bazaar_extension(
+            #     method="POST",
+            #     input_example={
+            #         "webhook_url": "https://example.com/webhooks/alphapipeline",
+            #         "secret": "replace-with-your-own-32-byte-random-secret",
+            #         "event_types": ["hip4.prob_jump"],
+            #         "underlying": "BTC",
+            #     },
+            #     input_schema={
+            #         "type": "object",
+            #         "properties": {
+            #             "webhook_url": {
+            #                 "type": "string",
+            #                 "format": "uri",
+            #                 "description": "https:// endpoint to receive signed POST deliveries. Private/loopback IPs are rejected.",
+            #             },
+            #             "secret": {
+            #                 "type": "string",
+            #                 "description": "Caller-generated shared secret (>=16 chars) used to HMAC-SHA256 sign each delivery. Not stored anywhere you can retrieve it later - keep your own copy.",
+            #             },
+            #             "event_types": {
+            #                 "type": "array",
+            #                 "items": {"type": "string"},
+            #                 "description": "Subset of event types to receive (default: all). See GET hip4-alerts/event-types.",
+            #             },
+            #             "underlying": {
+            #                 "type": "string",
+            #                 "description": "Optional filter: only this crypto underlying's markets (e.g. 'BTC').",
+            #             },
+            #             "threshold_pct": {
+            #                 "type": "number",
+            #                 "description": "Optional per-subscription override of the prob_jump threshold (0.0-1.0 scale).",
+            #             },
+            #         },
+            #         "required": ["webhook_url", "secret"],
+            #     },
+            #     output_example=HIP4_ALERTS_SUBSCRIBE_EXAMPLE,
+            #     output_schema=_inline_schema_defs(Hip4AlertsSubscribeResponse.model_json_schema()),
+            # ),
             service_name="AlphaPipeline HIP-4 Alerts",
             tags=["prediction-market", "hyperliquid", "hip4", "event-subscription", "webhook", "pre-trade-signal", "experimental"],
         )
