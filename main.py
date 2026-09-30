@@ -329,6 +329,14 @@ async def healthz():
     return {"status": "healthy"}
 
 
+# 2026-09-30 TEMPORARY diagnostic route, paired with app/payment.py's
+# "GET /v1/_diag/payment-test" registration - see the long comment there for
+# why. Delete both once the CDP Facilitator investigation is resolved.
+@app.get("/v1/_diag/payment-test", include_in_schema=False)
+async def diag_payment_test_endpoint():
+    return {"ok": True, "note": "Temporary diagnostic route - safe to ignore."}
+
+
 @app.get(
     "/llms.txt",
     include_in_schema=False,  # x402 결제 대상 데이터 엔드포인트가 아니라 크롤러용 정적 문서라 OpenAPI 스펙에서는 뺌

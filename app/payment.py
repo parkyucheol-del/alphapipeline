@@ -469,6 +469,29 @@ def build_routes(
 
     macro_dday_option = _payment_option(settings.PRICE_MACRO_DDAY_USDC)
     routes: dict[str, RouteConfig] = {
+        # 2026-09-30 TEMPORARY diagnostic route - see main.py for the paired
+        # handler. Tracking down a CDP Facilitator verify() rejection that is
+        # unique to hip4-alerts/subscribe(-v2): every real-money test so far
+        # (extensions on/off, tags trimmed, GET vs POST, resource URL fresh
+        # vs reused, $0.02 vs $0.05 - $0.02 being the exact atomic amount
+        # that succeeds on token-risk) has produced the byte-identical CDP
+        # error, and the failing payload is structurally identical to a
+        # captured successful one. This route isolates whatever remains: no
+        # bazaar extensions at all, generic content, field names unrelated to
+        # "secret"/"webhook"/"subscribe". If THIS succeeds, the cause is in
+        # hip4-alerts-subscribe's specific text/field-name content. If it
+        # ALSO fails, the cause is outside our payload/route content
+        # entirely (a CDP-side account or resource-onboarding quirk) and
+        # this needs a CDP support ticket. Delete this route once the root
+        # cause is found - it exists purely for diagnosis.
+        "GET /v1/_diag/payment-test": _make_route_config(
+            accepts=[_payment_option(0.02)],
+            mime_type="application/json",
+            description="Temporary diagnostic route for a CDP Facilitator investigation - safe to ignore, will be removed.",
+            resource=_resource_url("/v1/_diag/payment-test"),
+            service_name="AlphaPipeline Diag",
+            tags=["diagnostic"],
+        ),
         "GET /v1/calendar/macro-dday": _make_route_config(
             accepts=[macro_dday_option],
             mime_type="application/json",
