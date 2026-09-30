@@ -1002,3 +1002,54 @@ HIP4_SNAPSHOT_EXAMPLE = {
         "from live data - treat any single price as a signal to cross-check, not a certainty."
     ),
 }
+
+
+# ===== HIP-4 확률 급변 웹훅 이벤트 (2026-09-30 추가, EXPERIMENTAL) =====
+# app/events.py 모듈 docstring 참고 - 스펙이 아직 초안이라 필드가 나중에 바뀔 수 있다.
+class Hip4AlertsSubscribeRequest(BaseModel):
+    webhook_url: str = Field(description="https:// URL to receive Standard Webhooks-signed POST requests. Private/loopback IPs are rejected.")
+    secret: str = Field(min_length=16, description="Shared secret you generate yourself (e.g. `openssl rand -base64 32`), used to HMAC-SHA256 sign each delivery. Never sent back to you - keep your own copy.")
+    event_types: list[str] | None = Field(
+        default=None,
+        description="Subset of supported event types to receive (default: all). See GET /v1/prediction/hip4-alerts/event-types.",
+    )
+    underlying: str | None = Field(default=None, description="Optional filter: only receive events for this crypto underlying (e.g. 'BTC').")
+    threshold_pct: float | None = Field(default=None, description="Optional per-subscription override of the prob_jump threshold (0.0-1.0 scale). Defaults to the server's HIP4_EVENTS_JUMP_THRESHOLD_PCT.")
+
+
+class Hip4AlertsSubscribeResponse(BaseModel):
+    subscription_id: str
+    webhook_url: str
+    event_types: list[str]
+    underlying: str | None = None
+    threshold_pct: float | None = None
+    status: str
+    created_at: float
+    expires_at: float
+    notice: str
+
+
+HIP4_ALERTS_SUBSCRIBE_EXAMPLE = {
+    "subscription_id": "sub_3f9a7c2e1b4d5f6a7b8c",
+    "webhook_url": "https://example.com/webhooks/alphapipeline",
+    "event_types": ["hip4.prob_jump", "hip4.market_created"],
+    "underlying": "BTC",
+    "threshold_pct": None,
+    "status": "active",
+    "created_at": 1790700000.0,
+    "expires_at": 1790786400.0,
+    "notice": (
+        "EXPERIMENTAL - based on a draft MCP Events spec that has not stabilized. This is "
+        "5-minute-interval polling, not a true push feed. Subscriptions are not guaranteed "
+        "to survive a server restart. Renew by subscribing again before expires_at."
+    ),
+}
+
+
+class Hip4AlertsUnsubscribeRequest(BaseModel):
+    subscription_id: str
+    secret: str = Field(description="Must match the secret supplied at subscribe time.")
+
+
+class Hip4AlertsUnsubscribeResponse(BaseModel):
+    cancelled: bool

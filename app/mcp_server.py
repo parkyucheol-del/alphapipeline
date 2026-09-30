@@ -1296,6 +1296,81 @@ async def _call_tool(body: dict, request: Request, client: httpx.AsyncClient) ->
     return JSONResponse(content=_jsonrpc_result(req_id, result), headers=_relay_headers(upstream))
 
 
+# ===== MCP Events (2026-09-30 추가, EXPERIMENTAL) =====
+# app/events.py 모듈 docstring 참고 - 아직 초안 단계인 MCP Events 확장 스펙
+# (github.com/modelcontextprotocol/experimental-ext-triggers-events)을 느슨하게
+# 본떠 events/list, events/subscribe, events/unsubscribe 세 메서드만 우선
+# 구현했다. tools/call과 똑같은 셀프 ASGI 호출 패턴을 그대로 재사용해서
+# (아래), events/subscribe의 실제 결제 게이팅도 REST 경로
+# (POST /v1/prediction/hip4-alerts/subscribe)가 이미 걸려 있는 결제를 그대로
+# 탄다 - 이 파일에 결제 로직을 새로 만들지 않는다.
+#
+# capabilities 선언 키("io.modelcontextprotocol/events")는 아직 확정된 스펙이
+# 아니라 PR #7에서 논의 중인 이름을 그대로 가져온 것 - 공식 SEP 번호가 나오면
+# 바뀔 수 있다.
+_EVENTS_CAPABILITY_KEY = "io.modelcontextprotocol/events"
+
+
+async def _events_list(body: dict, client: httpx.AsyncClient) -> Response:
+    req_id = body.get("id")
+    try:
+        upstream = await client.get("/v1/prediction/hip4-alerts/event-types")
+    except Exception as e:
+        logger.exception("MCP events/list internal self-call failed")
+        return JSONResponse(content=_jsonrpc_error(req_id, -32000, f"Internal call failed: {e}"))
+    if upstream.status_code >= 400:
+        return JSONResponse(
+            content=_jsonrpc_error(req_id, -32000, f"Upstream error ({upstream.status_code}): {upstream.text[:500]}")
+        )
+    return JSONResponse(content=_jsonrpc_result(req_id, upstream.json()))
+
+
+async def _events_subscribe(body: dict, request: Request, client: httpx.AsyncClient) -> Response:
+    req_id = body.get("id")
+    params = body.get("params") or {}
+    forward_headers = {}
+    payment_signature = request.headers.get("payment-signature")
+    if payment_signature:
+        forward_headers["PAYMENT-SIGNATURE"] = payment_signature
+    legacy_x_payment = request.headers.get("x-payment")
+    if legacy_x_payment:
+        forward_headers["X-PAYMENT"] = legacy_x_payment
+
+    try:
+        upstream = await client.post("/v1/prediction/hip4-alerts/subscribe", json=params, headers=forward_headers)
+    except Exception as e:
+        logger.exception("MCP events/subscribe internal self-call failed")
+        return JSONResponse(content=_jsonrpc_error(req_id, -32000, f"Internal call failed: {e}"))
+
+    if upstream.status_code == 402:
+        # tools/call과 동일 - 실제 결제 조건은 payment-required 헤더에 있다.
+        return Response(content=upstream.content, status_code=402, headers=_relay_headers(upstream))
+    if upstream.status_code == 400:
+        return JSONResponse(
+            content=_jsonrpc_error(req_id, -32602, f"Invalid params: {upstream.text[:500]}")
+        )
+    if upstream.status_code >= 400:
+        return JSONResponse(
+            content=_jsonrpc_error(req_id, -32000, f"Upstream error ({upstream.status_code}): {upstream.text[:500]}")
+        )
+    return JSONResponse(content=_jsonrpc_result(req_id, upstream.json()), headers=_relay_headers(upstream))
+
+
+async def _events_unsubscribe(body: dict, client: httpx.AsyncClient) -> Response:
+    req_id = body.get("id")
+    params = body.get("params") or {}
+    try:
+        upstream = await client.post("/v1/prediction/hip4-alerts/unsubscribe", json=params)
+    except Exception as e:
+        logger.exception("MCP events/unsubscribe internal self-call failed")
+        return JSONResponse(content=_jsonrpc_error(req_id, -32000, f"Internal call failed: {e}"))
+    if upstream.status_code >= 400:
+        return JSONResponse(
+            content=_jsonrpc_error(req_id, -32000, f"Upstream error ({upstream.status_code}): {upstream.text[:500]}")
+        )
+    return JSONResponse(content=_jsonrpc_result(req_id, upstream.json()))
+
+
 async def _dispatch(body, request: Request, client: httpx.AsyncClient) -> Response:
     if isinstance(body, list):
         return JSONResponse(
@@ -1319,7 +1394,18 @@ async def _dispatch(body, request: Request, client: httpx.AsyncClient) -> Respon
         protocol_version = client_params.get("protocolVersion") or _PROTOCOL_VERSION_FALLBACK
         result = {
             "protocolVersion": protocol_version,
-            "capabilities": {"tools": {}},
+            "capabilities": {
+                "tools": {},
+                # EXPERIMENTAL - app/events.py 모듈 docstring 참고. 아직 초안인
+                # MCP Events 확장을 느슨하게 본떠 만든 자체 구현이라, 키
+                # 이름/형태가 공식 스펙이 확정되면 바뀔 수 있다.
+                "extensions": {
+                    _EVENTS_CAPABILITY_KEY: {
+                        "status": "experimental",
+                        "methods": ["events/list", "events/subscribe", "events/unsubscribe"],
+                    }
+                },
+            },
             "serverInfo": {"name": "alphapipeline-mcp", "version": "1.0.0"},
             "instructions": _SERVER_INSTRUCTIONS,
         }
@@ -1337,6 +1423,13 @@ async def _dispatch(body, request: Request, client: httpx.AsyncClient) -> Respon
 
     if method == "tools/call":
         return await _call_tool(body, request, client)
+
+    if method == "events/list":
+        return await _events_list(body, client)
+    if method == "events/subscribe":
+        return await _events_subscribe(body, request, client)
+    if method == "events/unsubscribe":
+        return await _events_unsubscribe(body, client)
 
     return JSONResponse(content=_jsonrpc_error(req_id, -32601, f"Method not found: {method}"))
 

@@ -30,6 +30,20 @@ async def _job():
         logger.exception("unlock cache refresh failed")
 
 
+async def _hip4_events_job():
+    # app/events.py 모듈 docstring 참고 - 진짜 이벤트 푸시가 아니라 짧은 주기
+    # 폴링 + diff다. HIP4_EVENTS_ENABLED=false(기본값)면 이 job 자체가
+    # 등록되지 않으므로 기존 기능에는 아무 영향이 없다.
+    from app.events import poll_once  # 순환 임포트 방지를 위해 job 실행 시점에 지연 임포트
+
+    try:
+        delivered = await poll_once()
+        if delivered:
+            logger.info("HIP-4 이벤트 폴링: %d건 웹훅 전달 시도", delivered)
+    except Exception:
+        logger.exception("HIP-4 이벤트 폴링 실패")
+
+
 def start_scheduler():
     scheduler.add_job(
         _job,
@@ -37,4 +51,16 @@ def start_scheduler():
         id="unlock_refresh",
         replace_existing=True,
     )
+    if settings.HIP4_EVENTS_ENABLED:
+        scheduler.add_job(
+            _hip4_events_job,
+            IntervalTrigger(seconds=settings.HIP4_EVENTS_POLL_INTERVAL_SECONDS),
+            id="hip4_events_poll",
+            replace_existing=True,
+        )
+        logger.info(
+            "HIP-4 이벤트 폴링 활성화됨 (%d초 주기, 임계값 %.3f)",
+            settings.HIP4_EVENTS_POLL_INTERVAL_SECONDS,
+            settings.HIP4_EVENTS_JUMP_THRESHOLD_PCT,
+        )
     scheduler.start()

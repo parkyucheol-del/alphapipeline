@@ -58,6 +58,34 @@ class Settings:
     # funding_rate/macro_dday와 같은 기본 티어로 매겼다.
     PRICE_HIP4_SNAPSHOT_USDC: float = float(os.getenv("PRICE_HIP4_SNAPSHOT_USDC", "0.01"))
 
+    # ===== HIP-4 확률 급변 웹훅 이벤트 (2026-09-30 추가, EXPERIMENTAL) =====
+    # app/events.py 모듈 docstring 참고. 기본값 False - dump-risk/kimchi-alert와
+    # 같은 패턴으로, 실제 webhook.site 등으로 직접 동작을 검증하기 전까지는
+    # 스케줄러 폴링 job 자체를 등록하지 않는다(서버 기동/기존 기능에는 전혀
+    # 영향 없음). 검증되면 true로 바꾼다.
+    HIP4_EVENTS_ENABLED: bool = _get_bool("HIP4_EVENTS_ENABLED", False)
+    # Hyperliquid HIP-4 무료 info API를 다시 조회하는 주기(초). 실시간 푸시가
+    # 아니라 폴링이라, 이 값보다 짧게 일어난 확률 급변은 다음 주기에나 감지된다.
+    # 오늘 데일리 알파 액션 카드의 30분 스파이크 스크립트와 동일하게 기본 300초(5분).
+    HIP4_EVENTS_POLL_INTERVAL_SECONDS: int = int(os.getenv("HIP4_EVENTS_POLL_INTERVAL_SECONDS", "300"))
+    # 확률(0.0-1.0 스케일)이 이 값 이상 움직이면 hip4.prob_jump 이벤트로 친다.
+    # 기본 0.05 = 5%p, 액션 카드 스크립트와 동일한 기본 임계값. 구독 생성 시
+    # threshold_pct로 구독별로 덮어쓸 수 있다.
+    HIP4_EVENTS_JUMP_THRESHOLD_PCT: float = float(os.getenv("HIP4_EVENTS_JUMP_THRESHOLD_PCT", "0.05"))
+    # 구독 유효기간(시간). 만료되면 자동으로 무효화 - 갱신은 v1에서는 재구독(새
+    # subscription_id 발급)으로만 가능하다 (app/events.py 모듈 docstring 참고).
+    HIP4_EVENTS_SUBSCRIPTION_TTL_HOURS: int = int(os.getenv("HIP4_EVENTS_SUBSCRIPTION_TTL_HOURS", "24"))
+    # 동시 활성 구독 수 상한(메모리/디스크 보호용 안전장치).
+    HIP4_EVENTS_MAX_SUBSCRIPTIONS: int = int(os.getenv("HIP4_EVENTS_MAX_SUBSCRIPTIONS", "200"))
+    # 웹훅 전달이 이 횟수만큼 연속 실패하면(엔드포인트가 죽었다고 보고) 그
+    # 구독을 자동으로 비활성화한다 - 죽은 엔드포인트에 계속 재시도하는 걸 방지.
+    HIP4_EVENTS_MAX_CONSECUTIVE_FAILURES: int = int(os.getenv("HIP4_EVENTS_MAX_CONSECUTIVE_FAILURES", "5"))
+    # 구독 생성(POST /v1/prediction/hip4-alerts/subscribe) 1건당 가격.
+    # 단건 스냅샷 조회(PRICE_HIP4_SNAPSHOT_USDC=0.01)보다 비싸게 잡았다 - 구독은
+    # 서버가 HIP4_EVENTS_SUBSCRIPTION_TTL_HOURS 동안 폴링 리소스를 계속
+    # 써주는 대가라서다.
+    PRICE_HIP4_EVENTS_SUBSCRIBE_USDC: float = float(os.getenv("PRICE_HIP4_EVENTS_SUBSCRIBE_USDC", "0.05"))
+
     # ===== x402 공식 결제 레이어 (Coinbase CDP Facilitator) =====
     # Coinbase Developer Platform(https://portal.cdp.coinbase.com)에서 발급받는 API 키.
     # 둘 다 채워지면 CDP Facilitator(메인넷 실결제 검증/정산)를 쓰고,

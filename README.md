@@ -147,8 +147,54 @@ Tune the thresholds (buy/sell tax %, which `liquidity_health` values you accept,
 | `tools.ai_markdown` | `GET /v1/tools/ai-markdown` | $0.005 | Converts any webpage URL into clean, ad-free Markdown optimized for LLM context windows. |
 | `market.kimchi_alert` | `GET /v1/market/kimchi-alert` | **Free** | Real-time Korea (Upbit) vs global reference price (Coinbase spot, CoinGecko fallback — not a live Binance orderbook) premium — the "kimchi premium" — with reverse-premium and 1h-surge alerts. Kept free by default as an onboarding tool: informational market context, not part of the paid pre-trade security cluster. |
 | `unlocks.dump_risk` | `GET /v1/unlocks/dump-risk` | **Free** | On-chain (Sablier) proxy for token unlock/vesting dump risk, including `vesting_progress_pct` (withdrawn/deposit) showing how far along vesting already is. Kept free by default as an onboarding tool so agents can verify the service before paying for the rest. |
+| *[EXPERIMENTAL]* `events.hip4_alerts` | `GET /v1/prediction/hip4-alerts/event-types` (free) · `POST /v1/prediction/hip4-alerts/subscribe` ($0.05) · `POST /v1/prediction/hip4-alerts/unsubscribe` (free) | See below | Webhook push alerts on HIP-4 probability jumps / new markets, instead of polling `hip4_snapshot` yourself. Disabled by default (`HIP4_EVENTS_ENABLED=false`) - see "Event subscriptions" below. |
 
 Every response is timestamped in both UTC and KST, and every priced endpoint's payment prompt reads "Paid in USDC on Base." so a human looking at the 402 screen in a browser isn't left guessing which chain's USDC to send.
+
+### Event subscriptions (webhook push) — EXPERIMENTAL
+
+2026-09-30 addition, modeled loosely on a still-draft MCP Events extension
+(`github.com/modelcontextprotocol/experimental-ext-triggers-events` — not an
+official spec yet, request/response shape may change). Instead of polling
+`GET /v1/prediction/hip4-snapshot` yourself, you can register a webhook and
+get pushed a Standard Webhooks-signed (`webhook-id` / `webhook-timestamp` /
+`webhook-signature`, HMAC-SHA256 over `"{id}.{timestamp}.{body}"`) POST when a
+HIP-4 outcome's probability moves by at least a threshold, or a new HIP-4
+market shows up.
+
+Honest caveats before you rely on this:
+
+- **It's polling, not a real push feed.** Hyperliquid's HIP-4 has no
+  webhook/streaming API, so under the hood this server re-fetches
+  `get_hip4_snapshot()` every `HIP4_EVENTS_POLL_INTERVAL_SECONDS` (default
+  300s = 5 min) and diffs it. A jump can be reported up to that long after
+  it actually happened.
+- **Disabled by default** (`HIP4_EVENTS_ENABLED=false`). The subscribe route
+  isn't even registered with the payment middleware while disabled, and the
+  handler itself double-checks and returns `503` — so you can never be
+  charged for a subscription that will never deliver anything.
+- **Subscriptions may not survive a restart.** They're persisted to a local
+  JSON file (`HIP4_EVENTS_DATA_FILE`, default `data/hip4_event_subscriptions.json`),
+  which is fine for a single long-running Render instance but is lost on a
+  disk reset. Not backed by a real database (yet).
+- `hip4.resolving` (resolution/settlement-imminent) is **not implemented** -
+  Hyperliquid's `outcomeMeta` doesn't expose a verified resolution timestamp,
+  and this project's policy is never to fake a field it can't back with real
+  data. Only `hip4.prob_jump` and `hip4.market_created` are live.
+- MCP clients get the same three operations as `events/list` /
+  `events/subscribe` / `events/unsubscribe` JSON-RPC methods on `/mcp`
+  (declared under the experimental `capabilities.extensions["io.modelcontextprotocol/events"]`
+  key) - `events/subscribe` self-calls the same paid REST route internally,
+  so pricing/payment is identical either way.
+
+Quick test once `HIP4_EVENTS_ENABLED=true` is set and deployed:
+
+```bash
+curl -X POST https://alphapipeline-eu.onrender.com/v1/prediction/hip4-alerts/subscribe \
+  -H "Content-Type: application/json" \
+  -d '{"webhook_url":"https://webhook.site/your-id","secret":"replace-with-a-random-32-byte-secret"}'
+# -> 402 with payment terms, same as any other endpoint here; pay, retry, get a subscription_id back
+```
 
 ### Data sources
 
@@ -166,6 +212,7 @@ Every number returned is either passed through unchanged from one of these upstr
 | `prediction.neg_risk_arbitrage`, `prediction.exit_capacity_audit` | Polymarket Gamma API (event/market metadata) + Polymarket CLOB API (order book) | `book_snapshot_time`/`tick_size`/`min_order_size` are Polymarket's own reported values, passed through as-is. |
 | `prediction.hip4_snapshot` | Hyperliquid public API (`outcomeMeta` + `allMids`) | No leaderboard/curated list — every market Hyperliquid currently lists shows up. The `outcome_id` → `allMids` price-key mapping is not documented by Hyperliquid and was reverse-engineered from live data (2026-09-28); disclosed via the response's own `notice` field. |
 | `tools.ai_markdown` | The URL you pass in | No third-party data provider — we fetch and convert the page you give us. |
+| *[EXPERIMENTAL]* `events.hip4_alerts` | Same Hyperliquid public API as `prediction.hip4_snapshot`, re-polled every `HIP4_EVENTS_POLL_INTERVAL_SECONDS` | Polling + diff, not a push feed from Hyperliquid — see "Event subscriptions" above. |
 
 ---
 

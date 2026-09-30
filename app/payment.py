@@ -104,6 +104,7 @@ from app.schemas import (
     EXIT_CAPACITY_AUDIT_EXAMPLE,
     FUNDING_APR_EXAMPLE,
     FUNDING_RATE_EXAMPLE,
+    HIP4_ALERTS_SUBSCRIBE_EXAMPLE,
     HIP4_SNAPSHOT_EXAMPLE,
     KIMCHI_ALERT_EXAMPLE,
     MACRO_DDAY_EXAMPLE,
@@ -118,6 +119,7 @@ from app.schemas import (
     DumpRiskResponse,
     FundingAprMatrixResponse,
     FundingRateResponse,
+    Hip4AlertsSubscribeResponse,
     KimchiAlertResponse,
     MacroDdayResponse,
     MarkdownResponse,
@@ -345,7 +347,9 @@ def _make_route_config(*, service_name: str, tags: list[str], icon_url: str | No
     return RouteConfig(**kwargs, **supported_metadata)
 
 
-def build_routes(dump_risk_enabled: bool, kimchi_alert_enabled: bool = False) -> dict[str, RouteConfig]:
+def build_routes(
+    dump_risk_enabled: bool, kimchi_alert_enabled: bool = False, hip4_events_enabled: bool = False
+) -> dict[str, RouteConfig]:
     """
     PaymentMiddlewareASGI에 넘길 라우트별 결제 스펙 + Bazaar 노출 메타데이터.
     여기 등록된 "METHOD /path" 조합만 결제가 필요해지고, 등록되지 않은 라우트는
@@ -385,6 +389,7 @@ def build_routes(dump_risk_enabled: bool, kimchi_alert_enabled: bool = False) ->
     neg_risk_arbitrage_option = _payment_option(settings.PRICE_NEG_RISK_ARBITRAGE_USDC)
     exit_capacity_audit_option = _payment_option(settings.PRICE_EXIT_CAPACITY_AUDIT_USDC)
     hip4_snapshot_option = _payment_option(settings.PRICE_HIP4_SNAPSHOT_USDC)
+    hip4_events_subscribe_option = _payment_option(settings.PRICE_HIP4_EVENTS_SUBSCRIBE_USDC)
 
     macro_dday_option = _payment_option(settings.PRICE_MACRO_DDAY_USDC)
     routes: dict[str, RouteConfig] = {
@@ -850,7 +855,10 @@ def build_routes(dump_risk_enabled: bool, kimchi_alert_enabled: bool = False) ->
                 "types appear automatically. Optional `template` (substring filter on the "
                 "market type, e.g. 'sportsContestWinner') and `underlying` (asset symbol "
                 "filter for crypto markets, e.g. 'BTC') narrow the result; `limit` caps "
-                "how many rows come back (default 100, max 500). Paid in USDC on Base."
+                "how many rows come back (default 100, max 500). Instead of polling this "
+                "endpoint yourself, you can subscribe to push webhook alerts on probability "
+                "jumps via POST /v1/prediction/hip4-alerts/subscribe (event subscription, "
+                "EXPERIMENTAL). Paid in USDC on Base."
             ),
             resource=_resource_url("/v1/prediction/hip4-snapshot"),
             extensions=_bazaar_extension(
@@ -933,5 +941,68 @@ def build_routes(dump_risk_enabled: bool, kimchi_alert_enabled: bool = False) ->
             ),
             service_name="AlphaPipeline Kimchi Alert",
             tags=["crypto", "arbitrage", "korea", "realtime"],
+        )
+    if hip4_events_enabled:
+        # HIP4_EVENTS_ENABLED=false(기본값)면 이 라우트를 아예 결제 게이트에
+        # 등록하지 않는다 - main.py의 핸들러 쪽에서도 방어적으로
+        # settings.HIP4_EVENTS_ENABLED를 한 번 더 확인해 503을 반환하지만,
+        # 애초에 결제를 걸지 않아야 "배달 안 되는 기능에 돈만 받는" 상황을
+        # 원천 차단한다 (app/events.py 모듈 docstring 참고).
+        routes["POST /v1/prediction/hip4-alerts/subscribe"] = _make_route_config(
+            accepts=[hip4_events_subscribe_option],
+            mime_type="application/json",
+            description=(
+                "[EXPERIMENTAL] Subscribe a webhook to receive Standard Webhooks-signed "
+                "push notifications when a HIP-4 outcome's probability jumps by a configurable "
+                "threshold, or a new HIP-4 market appears - so an agent no longer has to poll "
+                "prediction.hip4_snapshot itself. Under the hood this server polls Hyperliquid "
+                "every ~5 minutes and diffs the result; it is not a true real-time feed from "
+                "Hyperliquid. Modeled loosely on a draft, not-yet-stable MCP Events spec - the "
+                "request/response shape may change, and subscriptions are not guaranteed to "
+                "survive a server restart. See free GET /v1/prediction/hip4-alerts/event-types "
+                "for the event catalog before subscribing. Paid in USDC on Base."
+            ),
+            resource=_resource_url("/v1/prediction/hip4-alerts/subscribe"),
+            extensions=_bazaar_extension(
+                method="POST",
+                input_example={
+                    "webhook_url": "https://example.com/webhooks/alphapipeline",
+                    "secret": "replace-with-your-own-32-byte-random-secret",
+                    "event_types": ["hip4.prob_jump"],
+                    "underlying": "BTC",
+                },
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "webhook_url": {
+                            "type": "string",
+                            "format": "uri",
+                            "description": "https:// endpoint to receive signed POST deliveries. Private/loopback IPs are rejected.",
+                        },
+                        "secret": {
+                            "type": "string",
+                            "description": "Caller-generated shared secret (>=16 chars) used to HMAC-SHA256 sign each delivery. Not stored anywhere you can retrieve it later - keep your own copy.",
+                        },
+                        "event_types": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Subset of event types to receive (default: all). See GET hip4-alerts/event-types.",
+                        },
+                        "underlying": {
+                            "type": "string",
+                            "description": "Optional filter: only this crypto underlying's markets (e.g. 'BTC').",
+                        },
+                        "threshold_pct": {
+                            "type": "number",
+                            "description": "Optional per-subscription override of the prob_jump threshold (0.0-1.0 scale).",
+                        },
+                    },
+                    "required": ["webhook_url", "secret"],
+                },
+                output_example=HIP4_ALERTS_SUBSCRIBE_EXAMPLE,
+                output_schema=_inline_schema_defs(Hip4AlertsSubscribeResponse.model_json_schema()),
+            ),
+            service_name="AlphaPipeline HIP-4 Alerts",
+            tags=["prediction-market", "hyperliquid", "hip4", "event-subscription", "webhook", "pre-trade-signal", "experimental"],
         )
     return routes

@@ -34,6 +34,7 @@ from app.logic import (
 from app.llms_txt import build_llms_txt
 from app.markdown_tool import url_to_markdown
 from app.payment import ACTIVE_NETWORK, USE_CDP_FACILITATOR, build_resource_server, build_routes
+from app.events import cancel_subscription, create_subscription, list_event_types
 from app.schemas import (
     ArbSpreadResponse,
     ContractHealthAuditResponse,
@@ -42,6 +43,10 @@ from app.schemas import (
     ErrorResponse,
     FundingAprMatrixResponse,
     FundingRateResponse,
+    Hip4AlertsSubscribeRequest,
+    Hip4AlertsSubscribeResponse,
+    Hip4AlertsUnsubscribeRequest,
+    Hip4AlertsUnsubscribeResponse,
     KimchiAlertResponse,
     MacroDdayResponse,
     MarkdownResponse,
@@ -104,6 +109,7 @@ if not settings.PAYMENT_BYPASS_FOR_TESTING:
     _x402_routes = build_routes(
         dump_risk_enabled=settings.DUMP_RISK_ENABLED,
         kimchi_alert_enabled=settings.KIMCHI_ALERT_ENABLED,
+        hip4_events_enabled=settings.HIP4_EVENTS_ENABLED,
     )
     app.add_middleware(PaymentMiddlewareASGI, routes=_x402_routes, server=_x402_server)
 
@@ -920,6 +926,110 @@ async def hip4_snapshot_endpoint(
     except Exception as e:
         logger.exception("hip4-snapshot 처리 실패")
         return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
+
+
+# ===== HIP-4 확률 급변 웹훅 이벤트 (2026-09-30 추가, EXPERIMENTAL) =====
+# app/events.py 모듈 docstring 참고. event-types는 무료(카탈로그 조회일 뿐),
+# subscribe는 유료(app/payment.py의 build_routes()에 등록), unsubscribe는
+# 무료(자기 구독을 끊는 건 과금 대상이 아님 - secret으로만 인증).
+@app.get(
+    "/v1/prediction/hip4-alerts/event-types",
+    tags=["market"],
+    summary="[EXPERIMENTAL] List supported HIP-4 webhook event types (free)",
+    description=(
+        "Free catalog endpoint - lists the event types POST hip4-alerts/subscribe "
+        "accepts, the poll interval, default jump threshold, and subscription TTL. "
+        "No payment required. Read this before calling subscribe."
+    ),
+)
+async def hip4_alerts_event_types_endpoint():
+    return JSONResponse(content=await list_event_types())
+
+
+@app.post(
+    "/v1/prediction/hip4-alerts/subscribe",
+    tags=["market"],
+    summary="[EXPERIMENTAL] Subscribe to HIP-4 probability-jump webhook alerts",
+    description=(
+        "Register a webhook to receive Standard Webhooks-signed POST notifications "
+        "(webhook-id / webhook-timestamp / webhook-signature headers, HMAC-SHA256 over "
+        "'id.timestamp.body') when a HIP-4 outcome's probability jumps by at least the "
+        "configured threshold, or a new HIP-4 market appears. This is polling under the "
+        "hood (every HIP4_EVENTS_POLL_INTERVAL_SECONDS, default 300s) against Hyperliquid's "
+        "free info API, not a true real-time push from upstream - see the notice field in "
+        "the response. EXPERIMENTAL: modeled loosely on a draft MCP Events spec "
+        "(github.com/modelcontextprotocol/experimental-ext-triggers-events) that has not "
+        "stabilized - the request/response shape may change. Subscriptions are not "
+        "guaranteed to survive a server restart. Requires HIP4_EVENTS_ENABLED=true on the "
+        "server or deliveries never fire even after a successful subscribe. Paid in USDC "
+        "on Base."
+    ),
+    responses={
+        200: {"model": Hip4AlertsSubscribeResponse},
+        400: {"model": ErrorResponse, "description": "Invalid webhook_url, secret, or event_types"},
+        402: {"description": "x402 payment required"},
+    },
+)
+async def hip4_alerts_subscribe_endpoint(payload: Hip4AlertsSubscribeRequest):
+    if not settings.HIP4_EVENTS_ENABLED:
+        # 이중 방어: HIP4_EVENTS_ENABLED=false면 애초에 build_routes()가 이
+        # 경로를 결제 게이트에 등록하지 않아 요금이 안 붙지만(위 add_middleware
+        # 호출부 참고), PAYMENT_BYPASS_FOR_TESTING=true인 로컬 실행 등 결제
+        # 미들웨어 자체가 없는 경로로도 여기 도달할 수 있어 한 번 더 막는다.
+        # 배달 안 되는 구독을 만들어주는 상황(무료든 유료든)을 원천 차단한다.
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "feature_disabled",
+                "message": "HIP-4 event subscriptions are not enabled on this server yet (HIP4_EVENTS_ENABLED=false).",
+            },
+        )
+    try:
+        record = await create_subscription(
+            webhook_url=payload.webhook_url,
+            secret=payload.secret,
+            event_types=payload.event_types,
+            underlying=payload.underlying,
+            threshold_pct=payload.threshold_pct,
+        )
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"error": "invalid_request", "message": str(e)})
+    except Exception as e:
+        logger.exception("hip4-alerts subscribe 처리 실패")
+        return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
+    return JSONResponse(
+        content={
+            "subscription_id": record["subscription_id"],
+            "webhook_url": record["webhook_url"],
+            "event_types": record["event_types"],
+            "underlying": record["underlying"],
+            "threshold_pct": record["threshold_pct"],
+            "status": record["status"],
+            "created_at": record["created_at"],
+            "expires_at": record["expires_at"],
+            "notice": (
+                "EXPERIMENTAL - based on a draft MCP Events spec that has not stabilized. "
+                "This is polling, not a true push feed. Subscriptions are not guaranteed to "
+                "survive a server restart. Renew by subscribing again before expires_at."
+            ),
+        }
+    )
+
+
+@app.post(
+    "/v1/prediction/hip4-alerts/unsubscribe",
+    tags=["market"],
+    summary="[EXPERIMENTAL] Cancel a HIP-4 webhook alert subscription (free)",
+    description=(
+        "Free - cancelling your own subscription is not a paid action. Requires the "
+        "exact secret supplied at subscribe time; a wrong or missing secret returns "
+        "cancelled: false without revealing whether the subscription_id exists."
+    ),
+    responses={200: {"model": Hip4AlertsUnsubscribeResponse}},
+)
+async def hip4_alerts_unsubscribe_endpoint(payload: Hip4AlertsUnsubscribeRequest):
+    cancelled = await cancel_subscription(subscription_id=payload.subscription_id, secret=payload.secret)
+    return JSONResponse(content={"cancelled": cancelled})
 
 
 # --- 무료 CLI 프리뷰 (check-my-slippage): 결제 게이트 없음, IP당 분당 N회 제한 ---
