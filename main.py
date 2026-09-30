@@ -337,6 +337,24 @@ async def diag_payment_test_endpoint():
     return {"ok": True, "note": "Temporary diagnostic route - safe to ignore."}
 
 
+# 2026-09-30 TEMPORARY diagnostic routes, round 2. whale-position-audit (tags
+# include "hyperliquid", description says "Hyperliquid" 3x) settled
+# successfully, ruling out "hyperliquid" alone as the trigger. hip4-snapshot
+# and hip4-alerts-subscribe-v2 are the only two routes that fail, and the one
+# token both share that nothing else in the whole API has is "hip4"/"HIP-4".
+# These two routes isolate whether it's the tag value or the description
+# substring that CDP's filter (if that's what this is) keys on. Delete once
+# resolved, alongside the routes above and in app/payment.py.
+@app.get("/v1/_diag/payment-test-hip4-tag", include_in_schema=False)
+async def diag_payment_test_hip4_tag_endpoint():
+    return {"ok": True, "note": "Temporary diagnostic route - safe to ignore."}
+
+
+@app.get("/v1/_diag/payment-test-hip4-word", include_in_schema=False)
+async def diag_payment_test_hip4_word_endpoint():
+    return {"ok": True, "note": "Temporary diagnostic route - safe to ignore."}
+
+
 @app.get(
     "/llms.txt",
     include_in_schema=False,  # x402 결제 대상 데이터 엔드포인트가 아니라 크롤러용 정적 문서라 OpenAPI 스펙에서는 뺌

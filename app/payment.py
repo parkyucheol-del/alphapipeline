@@ -492,6 +492,30 @@ def build_routes(
             service_name="AlphaPipeline Diag",
             tags=["diagnostic"],
         ),
+        # 2026-09-30 round 2: GET /v1/derivatives/whale-position-audit settled
+        # successfully despite tags=[..., "hyperliquid", ...] and "Hyperliquid"
+        # appearing 3x in its description - so "hyperliquid" alone is not the
+        # trigger. The only token shared by the two known-failing routes
+        # (hip4-snapshot, hip4-alerts-subscribe-v2) and absent from every
+        # succeeding route tested so far is "hip4"/"HIP-4". These two routes
+        # isolate tag-value vs description-substring. Delete both once
+        # resolved.
+        "GET /v1/_diag/payment-test-hip4-tag": _make_route_config(
+            accepts=[_payment_option(0.02)],
+            mime_type="application/json",
+            description="Temporary diagnostic route for a CDP Facilitator investigation - safe to ignore, will be removed.",
+            resource=_resource_url("/v1/_diag/payment-test-hip4-tag"),
+            service_name="AlphaPipeline Diag",
+            tags=["diagnostic", "hip4"],
+        ),
+        "GET /v1/_diag/payment-test-hip4-word": _make_route_config(
+            accepts=[_payment_option(0.02)],
+            mime_type="application/json",
+            description="Temporary diagnostic route for a CDP Facilitator investigation - safe to ignore, will be removed. Mentions HIP-4 here only as a text probe.",
+            resource=_resource_url("/v1/_diag/payment-test-hip4-word"),
+            service_name="AlphaPipeline Diag",
+            tags=["diagnostic"],
+        ),
         "GET /v1/calendar/macro-dday": _make_route_config(
             accepts=[macro_dday_option],
             mime_type="application/json",
