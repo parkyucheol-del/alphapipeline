@@ -4,6 +4,8 @@ AlphaPipeline - 초미세 결제 기반 온체인 데이터 파이프라인 API
 
 로컬 실행: uvicorn main:app --reload --port 8000
 """
+import base64
+import json
 import logging
 import time
 from collections import defaultdict, deque
@@ -127,6 +129,32 @@ async def add_disclaimer_header(request: Request, call_next):
         "Informational and research data only. No trade execution, brokerage, or gambling services provided."
     )
     return response
+
+
+# 2026-09-30 임시 디버그 미들웨어 - Render Logs 검색이 app/payment.py의
+# [x402-debug] logger.warning() 줄을 전혀 찾지 못하는 원인 불명 문제 때문에,
+# CDP Facilitator에 실제로 보낸 payload/requirements를 (성공/실패 관계없이)
+# 응답 헤더 X-Debug-Payload-Sent(base64 JSON, payment-required 헤더와 동일한
+# 인코딩)에 실어서 클라이언트가 직접 받게 한다. X402_DEBUG_LOG_PAYLOADS=true일
+# 때만 동작 - 서명이 포함되므로 원인 파악 후 반드시 되돌릴 것.
+if settings.X402_DEBUG_LOG_PAYLOADS:
+    from app.payment import pop_last_debug_capture, reset_last_debug_capture
+
+    @app.middleware("http")
+    async def add_debug_payload_header(request: Request, call_next):
+        reset_last_debug_capture()
+        response = await call_next(request)
+        captured = pop_last_debug_capture()
+        if captured is not None:
+            try:
+                response.headers["X-Debug-Payload-Sent"] = base64.b64encode(
+                    json.dumps(captured, default=str).encode("utf-8")
+                ).decode("ascii")
+            except Exception:
+                logging.getLogger("alphapipeline").exception(
+                    "[x402-debug] 응답 헤더에 payload 첨부 중 오류"
+                )
+        return response
 
 
 # 2026-09-19: 이 서비스는 원래 "기계 우선(machine-first)" API라 루트(/)가 JSON

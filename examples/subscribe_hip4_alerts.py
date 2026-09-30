@@ -1,33 +1,28 @@
 """
-API에게 결제 신호를 보내는 예제 클라이언트 (x402 공식 SDK 사용).
+HIP-4 확률 급변 웹훅 구독을 실제로 결제해서 걸어보는 예제 클라이언트.
 
-이 스크립트는 x402 프로토콜을 통해 AlphaPipeline의 유료 엔드포인트를 실제로
-호출하고 결제까지 진행하는 예시다. 결제는 EIP-3009 서명(transferWithAuthorization)
-방식이라 온체인 트랜잭션을 직접 브로드캐스트하지 않고, x402 SDK가 서명 생성 →
-서버 재요청 → 정산까지 자동으로 처리한다.
+examples/client_example.py와 거의 동일한 패턴(x402 공식 SDK로 실제 결제까지
+진행)이고, 차이는 GET이 아니라 POST + JSON body를 보낸다는 점뿐이다.
 
-사용 전 준비물:
+사용 전 준비물 (client_example.py와 동일):
   pip install "x402[https]" eth_account httpx
   아래 둘 중 하나를 환경변수로 설정:
     - EVM_PRIVATE_KEY: 결제를 보낼 지갑의 raw 개인키 (0x로 시작하는 64자리 hex)
-    - EVM_MNEMONIC: 니모닉(복구구문, 보통 12/24 단어) - 모바일 지갑 앱(Uniswap
-      Wallet 등)은 대부분 raw 개인키 대신 니모닉만 보여주므로 이 경로가 필요함.
-      니모닉에서 파생되는 계정은 표준 EVM HD path m/44'/60'/0'/0/0을 사용한다
-      (대부분의 지갑 앱이 첫 번째 계정에 쓰는 경로와 동일).
+    - EVM_MNEMONIC: 니모닉(복구구문) - 표준 HD path m/44'/60'/0'/0/0 사용
   둘 다 없으면 결제 없이 402 응답만 확인하는 드라이런으로 동작한다.
 
   - 실제 결제가 나가는 곳은 CDP Facilitator(메인넷, eip155:8453)이므로 진짜
-    USDC가 소액(엔드포인트별 단가) 차감된다. 테스트넷(Base Sepolia)으로 시험해보고
-    싶다면 서버 쪽 CDP 설정을 그쪽으로 바꿔야 한다 - 이 스크립트 자체는 서버가
-    반환하는 결제 조건을 그대로 따른다.
+    USDC가 차감된다(기본 $0.05). 이 스크립트는 개인키/니모닉을 절대 화면에
+    출력하지 않고, 환경변수에서 읽기만 한다 - 터미널에 직접 입력하고, 다른
+    곳(채팅 등)에는 절대 붙여넣지 말 것.
 
-호출 대상 엔드포인트는 아래 ENDPOINT 상수로 바꿀 수 있다 (기본값: macro-dday,
-$0.01로 가장 저렴한 축이면서 입력 파라미터도 없고 외부 API 호출 없이 정적
-캘린더만 참조해서 업스트림 장애로 실패할 일이 없는 엔드포인트 - 결제 흐름
-자체를 보여주는 데모 목적에 가장 안정적이다. 2026-09-19: kimchi-alert는
-온보딩용 무료 엔드포인트로 전환되어 더 이상 결제 데모로 적합하지 않아
-교체함 - README.md의 'Note on unlocks.dump_risk and market.kimchi_alert'
-참고).
+그리고 이 구독 전용으로 추가 환경변수 2개가 필요하다:
+    - HIP4_WEBHOOK_URL: 알림을 받을 https:// 웹훅 주소
+    - HIP4_WEBHOOK_SECRET: 서명 검증용 비밀키 (16자 이상, 직접 생성 -
+      PowerShell 예시: `-join ((48..57)+(65..90)+(97..122)|Get-Random -Count 32|%{[char]$_})`)
+
+호출 대상 서버는 ALPHAPIPELINE_API_BASE로 바꿀 수 있다 (기본값: localhost:8000 -
+실서비스에 걸려면 https://alphapipeline-eu.onrender.com 로 지정할 것).
 """
 import asyncio
 import base64
@@ -43,7 +38,7 @@ from x402.mechanisms.evm import EthAccountSigner
 from x402.mechanisms.evm.exact.register import register_exact_evm_client
 
 API_BASE = os.getenv("ALPHAPIPELINE_API_BASE", "http://localhost:8000")
-ENDPOINT = "/v1/calendar/macro-dday"
+ENDPOINT = "/v1/prediction/hip4-alerts/subscribe"
 
 MNEMONIC_HD_PATH = "m/44'/60'/0'/0/0"
 
@@ -56,8 +51,6 @@ def _load_account() -> Account | None:
 
     mnemonic = os.getenv("EVM_MNEMONIC")
     if mnemonic:
-        # 모바일 키보드 자동대문자화 등으로 니모닉 단어가 대문자로 들어오는 경우가
-        # 있어서(실제로 겪었던 이슈), 파싱 전에 소문자로 정규화한다.
         normalized_mnemonic = mnemonic.strip().lower()
         Account.enable_unaudited_hdwallet_features()
         return Account.from_mnemonic(normalized_mnemonic, account_path=MNEMONIC_HD_PATH)
@@ -65,7 +58,21 @@ def _load_account() -> Account | None:
     return None
 
 
-async def call_paid_endpoint() -> None:
+def _load_subscribe_body() -> dict:
+    webhook_url = os.getenv("HIP4_WEBHOOK_URL")
+    secret = os.getenv("HIP4_WEBHOOK_SECRET")
+    if not webhook_url or not secret:
+        raise SystemExit(
+            "HIP4_WEBHOOK_URL / HIP4_WEBHOOK_SECRET 환경변수를 먼저 설정하세요 "
+            "(secret은 16자 이상, 직접 생성한 임의 문자열)."
+        )
+    if len(secret) < 16:
+        raise SystemExit("HIP4_WEBHOOK_SECRET은 16자 이상이어야 합니다.")
+    return {"webhook_url": webhook_url, "secret": secret}
+
+
+async def subscribe() -> None:
+    body = _load_subscribe_body()
     account = _load_account()
 
     if account is None:
@@ -76,7 +83,7 @@ async def call_paid_endpoint() -> None:
         import httpx
 
         async with httpx.AsyncClient() as http:
-            resp = await http.get(f"{API_BASE}{ENDPOINT}")
+            resp = await http.post(f"{API_BASE}{ENDPOINT}", json=body)
             print(f"상태 코드: {resp.status_code}")
             print(resp.text[:1000])
             return
@@ -88,11 +95,14 @@ async def call_paid_endpoint() -> None:
     http_client = x402HTTPClient(client)
 
     async with x402HttpxClient(client) as http:
-        response = await http.get(f"{API_BASE}{ENDPOINT}")
+        response = await http.post(f"{API_BASE}{ENDPOINT}", json=body)
         await response.aread()
 
         print(f"상태 코드: {response.status_code}")
         print(f"본문: {response.text}")
+        print("응답 헤더:")
+        for key, value in response.headers.items():
+            print(f"  {key}: {value}")
 
         debug_header = response.headers.get("x-debug-payload-sent")
         if debug_header:
@@ -108,7 +118,12 @@ async def call_paid_endpoint() -> None:
                 lambda name: response.headers.get(name)
             )
             print(f"결제 정산 결과: {settle_response}")
+        else:
+            print(
+                "\n결제가 완료되지 못했습니다. 위 헤더에 원인(예: 잔액 부족, "
+                "네트워크 불일치)이 담겨 있을 수 있습니다."
+            )
 
 
 if __name__ == "__main__":
-    asyncio.run(call_paid_endpoint())
+    asyncio.run(subscribe())
