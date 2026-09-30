@@ -14,8 +14,13 @@ mcp==1.2.1
 # ===== x402 공식 결제 레이어 (app/payment.py) =====
 # web3==6.20.3는 자체 온체인 검증 코드(app/payment.py)를 걷어내면서 더 이상
 # 필요 없어져 제거했다 - 결제 검증/정산은 이제 아래 두 패키지가 담당한다.
-# 버전은 2026-09 기준 PyPI 최신(x402 2.21.0)으로 맞췄다 - 이 샌드박스는 외부
-# 네트워크가 막혀 있어 실제 설치/실행 테스트는 못 했으니, 설치 시 버전 충돌이
-# 나면 `pip install -U x402 cdp-sdk`로 최신 버전을 다시 받아보길 권장한다.
-x402[fastapi,extensions]==2.21.0
+# 2026-09-30: 2.21.0으로 첫 실제(메인넷) 결제를 시도했더니 CDP Facilitator가
+# "'paymentPayload' is invalid: must match one of [x402V2PaymentPayload,
+# x402V1PaymentPayload]. x402V1PaymentPayload requires 'scheme'"로 verify를
+# 거부함 - x402 SDK가 2.21.0(8/27) 이후 2.22~2.25.0(9/29)까지 4번 더 릴리즈된
+# 걸로 봐서 CDP 쪽 스키마 변경에 맞춘 호환성 수정이 있었을 가능성이 높음.
+# 2.25.0으로 올려서 재검증 필요 - 이 샌드박스는 외부 네트워크가 막혀 있어 실제
+# 설치/실행 테스트는 못 했으니, 버전 충돌이 나면 `pip install -U x402 cdp-sdk`로
+# 최신 버전을 다시 받아보길 권장한다.
+x402[fastapi,extensions]==2.25.0
 cdp-sdk>=0.10.2
