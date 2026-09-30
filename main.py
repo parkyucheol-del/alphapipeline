@@ -393,6 +393,20 @@ async def diag_hip4_snapshot_clone_no_ext_endpoint():
     return {"ok": True, "note": "Temporary diagnostic route - safe to ignore."}
 
 
+# 2026-09-30 TEMPORARY diagnostic routes, round 6: isolate service_name
+# (never varied before) vs the exact 4-tag combo - see the long comment in
+# app/payment.py's build_routes() above these routes' registration. Delete
+# once resolved, alongside the routes above.
+@app.get("/v1/_diag/hip4-snapshot-clone-generic-servicename", include_in_schema=False)
+async def diag_hip4_snapshot_clone_generic_servicename_endpoint():
+    return {"ok": True, "note": "Temporary diagnostic route - safe to ignore."}
+
+
+@app.get("/v1/_diag/hip4-snapshot-clone-generic-tags", include_in_schema=False)
+async def diag_hip4_snapshot_clone_generic_tags_endpoint():
+    return {"ok": True, "note": "Temporary diagnostic route - safe to ignore."}
+
+
 @app.get(
     "/llms.txt",
     include_in_schema=False,  # x402 결제 대상 데이터 엔드포인트가 아니라 크롤러용 정적 문서라 OpenAPI 스펙에서는 뺌
