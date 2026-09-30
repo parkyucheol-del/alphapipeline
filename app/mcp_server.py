@@ -1303,10 +1303,11 @@ async def _call_tool(body: dict, request: Request, client: httpx.AsyncClient) ->
 # events/list, events/subscribe, events/unsubscribe implemented so far.
 # Reuses the same self-ASGI-call pattern as tools/call (below), so
 # events/subscribe's actual payment gating rides on the REST route's own gate
-# (GET /v1/prediction/hip4-alerts/subscribe-v2 - originally POST, changed to
-# GET/query params on 2026-09-30, then given a "-v2" resource-path suffix the
-# same day after CDP payment verification kept failing even on GET - see
-# app/payment.py) - no separate payment logic is duplicated in this file.
+# (GET /v1/prediction/hip4-alerts/subscribe - originally POST, changed to
+# GET/query params on 2026-09-30; a CDP Facilitator rejection that briefly
+# looked method/URL-related turned out to be a resource.description length
+# limit, fixed in app/payment.py by shortening the description - no separate
+# payment logic is duplicated in this file).
 #
 # capabilities 선언 키("io.modelcontextprotocol/events")는 아직 확정된 스펙이
 # 아니라 PR #7에서 논의 중인 이름을 그대로 가져온 것 - 공식 SEP 번호가 나오면
@@ -1341,11 +1342,9 @@ async def _events_subscribe(body: dict, request: Request, client: httpx.AsyncCli
 
     try:
         # 2026-09-30: the REST side moved from POST/JSON body to GET/query
-        # params, and CDP payment verification still kept failing afterward,
-        # so the path now carries a "-v2" suffix as a diagnostic retry (see
-        # the comment on build_routes() in app/payment.py). httpx's params=
-        # auto-serializes list values (event_types) as repeated query params.
-        upstream = await client.get("/v1/prediction/hip4-alerts/subscribe-v2", params=params, headers=forward_headers)
+        # params. httpx's params= auto-serializes list values (event_types)
+        # as repeated query params.
+        upstream = await client.get("/v1/prediction/hip4-alerts/subscribe", params=params, headers=forward_headers)
     except Exception as e:
         logger.exception("MCP events/subscribe internal self-call failed")
         return JSONResponse(content=_jsonrpc_error(req_id, -32000, f"Internal call failed: {e}"))

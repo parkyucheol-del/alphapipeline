@@ -88,7 +88,6 @@ SDK를 쓰는 누군가가 이 bazaar extension을 echo하면서 실제 결제�
   반드시 재확인해야 한다 - 이 세션은 그 재검증까지는 못 했다.
 """
 import dataclasses
-import json
 import logging
 
 from x402.http import FacilitatorConfig, HTTPFacilitatorClient, PaymentOption
@@ -134,28 +133,6 @@ from app.schemas import (
 
 logger = logging.getLogger("alphapipeline")
 
-# 2026-09-30 temporary debug scaffolding - Render's log search UI never surfaces
-# our [x402-debug] log lines (cause unknown; we've confirmed the code path runs
-# but search still returns 0 hits). As a workaround, stash the payload/requirements
-# from the most recent verify() call in this module-level var, and let main.py's
-# response-header middleware echo it straight back to the client instead of
-# relying on logs. This assumes a single in-flight request (no concurrency
-# safety) since it's purely a short-lived diagnostic - revert this var and its
-# helper functions once the root cause is found.
-_last_debug_capture: dict | None = None
-
-
-def reset_last_debug_capture() -> None:
-    global _last_debug_capture
-    _last_debug_capture = None
-
-
-def pop_last_debug_capture() -> dict | None:
-    global _last_debug_capture
-    value = _last_debug_capture
-    _last_debug_capture = None
-    return value
-
 # 공식 헬퍼가 있으면 우선 사용한다 (문서가 hand-rolling 대신 이걸 쓰라고 명시적으로
 # 권장함). 설치된 x402 버전이 이 모듈/함수를 아직 갖고 있지 않을 수도 있어서
 # ImportError를 잡아 폴백한다 - 이 세션에서 실제 설치 검증을 못 했기 때문에
@@ -188,52 +165,7 @@ USE_CDP_FACILITATOR = bool(settings.CDP_API_KEY_ID and settings.CDP_API_KEY_SECR
 ACTIVE_NETWORK = settings.X402_NETWORK if USE_CDP_FACILITATOR else TESTNET_FALLBACK_NETWORK
 
 
-class _DebugLoggingFacilitatorClient(HTTPFacilitatorClient):
-    """Temporary debug wrapper - logs the exact payload/requirements about to be
-    sent to CDP right before verify() (2026-09-30, added while tracking down the
-    hip4-alerts/subscribe payment-verification 400).
-
-    The signature ends up in logs, so revert this as soon as the root cause is
-    found - only active when env var X402_DEBUG_LOG_PAYLOADS=true (no effect at
-    the default of false).
-    """
-
-    async def verify(self, payload, requirements):  # type: ignore[override]
-        global _last_debug_capture
-        dumped_payload = payload.model_dump(by_alias=True, exclude_none=True)
-        dumped_requirements = requirements.model_dump(by_alias=True, exclude_none=True)
-        # Log search isn't working, so stash this here unconditionally (success
-        # or failure) - main.py's add_debug_payload_header middleware echoes it
-        # back as a response header.
-        _last_debug_capture = {
-            "payload": dumped_payload,
-            "requirements": dumped_requirements,
-        }
-        try:
-            logger.warning(
-                "[x402-debug] verify() payload=%s requirements=%s",
-                dumped_payload,
-                dumped_requirements,
-            )
-        except Exception:
-            logger.exception("[x402-debug] error while logging inside verify() (verification itself continues)")
-        try:
-            return await super().verify(payload, requirements)
-        except Exception as e:
-            # In case Render logs are unreachable, embed the actual payload we
-            # sent directly in the exception message, which flows into the 402
-            # response's "error" field - lets us see it without server log access.
-            raise type(e)(
-                f"{e} || DEBUG_PAYLOAD_SENT={json.dumps(dumped_payload, default=str)}"
-            ) from e
-
-
 def _build_facilitator_client() -> HTTPFacilitatorClient:
-    client_cls = (
-        _DebugLoggingFacilitatorClient
-        if settings.X402_DEBUG_LOG_PAYLOADS
-        else HTTPFacilitatorClient
-    )
     if USE_CDP_FACILITATOR:
         # cdp-sdk가 CDP_API_KEY_ID / CDP_API_KEY_SECRET 환경변수를 직접 읽어서
         # 인증된 파실리테이터 설정을 만들어준다. main.py의 load_dotenv()가 먼저
@@ -243,7 +175,7 @@ def _build_facilitator_client() -> HTTPFacilitatorClient:
         logger.info(
             "CDP Facilitator(메인넷, %s)로 x402 결제를 검증/정산합니다.", settings.X402_NETWORK
         )
-        return client_cls(create_facilitator_config())
+        return HTTPFacilitatorClient(create_facilitator_config())
 
     logger.warning(
         "CDP_API_KEY_ID/CDP_API_KEY_SECRET이 설정되지 않아 공개 테스트넷 파실리테이터"
@@ -251,7 +183,7 @@ def _build_facilitator_client() -> HTTPFacilitatorClient:
         "정산되지 않습니다 - 실서비스 전에는 반드시 CDP Facilitator를 쓰도록 CDP 키를 넣으세요.",
         TESTNET_FALLBACK_NETWORK,
     )
-    return client_cls(FacilitatorConfig(url="https://x402.org/facilitator"))
+    return HTTPFacilitatorClient(FacilitatorConfig(url="https://x402.org/facilitator"))
 
 
 def build_resource_server() -> x402ResourceServer:
@@ -469,84 +401,6 @@ def build_routes(
 
     macro_dday_option = _payment_option(settings.PRICE_MACRO_DDAY_USDC)
     routes: dict[str, RouteConfig] = {
-        # 2026-09-30 TEMPORARY diagnostic route - see main.py for the paired
-        # handler. Tracking down a CDP Facilitator verify() rejection that is
-        # unique to hip4-alerts/subscribe(-v2): every real-money test so far
-        # (extensions on/off, tags trimmed, GET vs POST, resource URL fresh
-        # vs reused, $0.02 vs $0.05 - $0.02 being the exact atomic amount
-        # that succeeds on token-risk) has produced the byte-identical CDP
-        # error, and the failing payload is structurally identical to a
-        # captured successful one. This route isolates whatever remains: no
-        # bazaar extensions at all, generic content, field names unrelated to
-        # "secret"/"webhook"/"subscribe". If THIS succeeds, the cause is in
-        # hip4-alerts-subscribe's specific text/field-name content. If it
-        # ALSO fails, the cause is outside our payload/route content
-        # entirely (a CDP-side account or resource-onboarding quirk) and
-        # this needs a CDP support ticket. Delete this route once the root
-        # cause is found - it exists purely for diagnosis.
-        "GET /v1/_diag/payment-test": _make_route_config(
-            accepts=[_payment_option(0.02)],
-            mime_type="application/json",
-            description="Temporary diagnostic route for a CDP Facilitator investigation - safe to ignore, will be removed.",
-            resource=_resource_url("/v1/_diag/payment-test"),
-            service_name="AlphaPipeline Diag",
-            tags=["diagnostic"],
-        ),
-        # 2026-09-30 round 2: GET /v1/derivatives/whale-position-audit settled
-        # successfully despite tags=[..., "hyperliquid", ...] and "Hyperliquid"
-        # appearing 3x in its description - so "hyperliquid" alone is not the
-        # trigger. The only token shared by the two known-failing routes
-        # (hip4-snapshot, hip4-alerts-subscribe-v2) and absent from every
-        # succeeding route tested so far is "hip4"/"HIP-4". These two routes
-        # isolate tag-value vs description-substring. Delete both once
-        # resolved.
-        "GET /v1/_diag/payment-test-hip4-tag": _make_route_config(
-            accepts=[_payment_option(0.02)],
-            mime_type="application/json",
-            description="Temporary diagnostic route for a CDP Facilitator investigation - safe to ignore, will be removed.",
-            resource=_resource_url("/v1/_diag/payment-test-hip4-tag"),
-            service_name="AlphaPipeline Diag",
-            tags=["diagnostic", "hip4"],
-        ),
-        "GET /v1/_diag/payment-test-hip4-word": _make_route_config(
-            accepts=[_payment_option(0.02)],
-            mime_type="application/json",
-            description="Temporary diagnostic route for a CDP Facilitator investigation - safe to ignore, will be removed. Mentions HIP-4 here only as a text probe.",
-            resource=_resource_url("/v1/_diag/payment-test-hip4-word"),
-            service_name="AlphaPipeline Diag",
-            tags=["diagnostic"],
-        ),
-        # 2026-09-30 round 3: both hip4-tag and hip4-word settled successfully
-        # too, so "hip4"/"HIP-4" alone is also ruled out. The only remaining
-        # difference between the two known-failing routes and everything that
-        # has succeeded so far is that both failing routes carry the
-        # "prediction-market" tag AND the "hyperliquid" tag together -
-        # exit-capacity-audit has "prediction-market" without "hyperliquid"
-        # (succeeded), whale-position-audit has "hyperliquid" without
-        # "prediction-market" (succeeded), but no successful test yet has had
-        # both. These two routes isolate the tag-combination vs a
-        # description-level "Hyperliquid" + "prediction market" word
-        # combination. Delete both once resolved.
-        "GET /v1/_diag/payment-test-combo-tags": _make_route_config(
-            accepts=[_payment_option(0.02)],
-            mime_type="application/json",
-            description="Temporary diagnostic route for a CDP Facilitator investigation - safe to ignore, will be removed.",
-            resource=_resource_url("/v1/_diag/payment-test-combo-tags"),
-            service_name="AlphaPipeline Diag",
-            tags=["diagnostic", "prediction-market", "hyperliquid"],
-        ),
-        "GET /v1/_diag/payment-test-combo-words": _make_route_config(
-            accepts=[_payment_option(0.02)],
-            mime_type="application/json",
-            description=(
-                "Temporary diagnostic route for a CDP Facilitator investigation - "
-                "safe to ignore, will be removed. Mentions a Hyperliquid prediction "
-                "market here only as a text probe."
-            ),
-            resource=_resource_url("/v1/_diag/payment-test-combo-words"),
-            service_name="AlphaPipeline Diag",
-            tags=["diagnostic"],
-        ),
         "GET /v1/calendar/macro-dday": _make_route_config(
             accepts=[macro_dday_option],
             mime_type="application/json",
@@ -1000,19 +854,25 @@ def build_routes(
         "GET /v1/prediction/hip4-snapshot": _make_route_config(
             accepts=[hip4_snapshot_option],
             mime_type="application/json",
+            # 2026-09-30 ROOT CAUSE FOUND: CDP Facilitator's verify() rejection
+            # ("'paymentPayload' is invalid: must match one of
+            # [x402V2PaymentPayload, x402V1PaymentPayload]...") that looked
+            # like a payload-shape bug was actually a resource.description
+            # length limit (measured empirically: every route that ever
+            # settled successfully had a description <= 458 chars; every
+            # route/clone that failed, across 10 rounds of isolation testing
+            # covering extensions, tags, service_name, price, path prefix,
+            # and specific wording, had a description >= 635 chars - CDP
+            # likely enforces a max around 500). This description was
+            # rewritten short (<= 500 chars) to fix it - keep it that way.
             description=(
-                "Real-time pre-trade signal: a probability snapshot of Hyperliquid's "
-                "HIP-4 outcome (prediction) markets - crypto price binaries, sports game "
-                "winners, tournament winners, Fed rate decisions, and more, all in one "
-                "call. No curated market list - every field under `fields` is parsed "
-                "verbatim from Hyperliquid's own description string, so new HIP-4 market "
-                "types appear automatically. Optional `template` (substring filter on the "
-                "market type, e.g. 'sportsContestWinner') and `underlying` (asset symbol "
-                "filter for crypto markets, e.g. 'BTC') narrow the result; `limit` caps "
-                "how many rows come back (default 100, max 500). Instead of polling this "
-                "endpoint yourself, you can subscribe to push webhook alerts on probability "
-                "jumps via GET /v1/prediction/hip4-alerts/subscribe-v2 (event subscription, "
-                "EXPERIMENTAL). Paid in USDC on Base."
+                "Real-time pre-trade signal: a probability snapshot of Hyperliquid's HIP-4 "
+                "prediction markets - crypto price binaries, sports outcomes, tournament "
+                "winners, Fed rate decisions, and more. Fields are parsed verbatim from "
+                "Hyperliquid, so new market types appear automatically. Optional template/"
+                "underlying filters narrow the result; limit caps rows (max 500). Subscribe "
+                "to webhook alerts via GET /v1/prediction/hip4-alerts/subscribe. Paid in "
+                "USDC on Base."
             ),
             resource=_resource_url("/v1/prediction/hip4-snapshot"),
             extensions=_bazaar_extension(
@@ -1045,382 +905,6 @@ def build_routes(
                 output_example=HIP4_SNAPSHOT_EXAMPLE,
                 output_schema=_inline_schema_defs(PredictionHip4SnapshotResponse.model_json_schema()),
             ),
-            service_name="AlphaPipeline HIP-4 Snapshot",
-            tags=["prediction-market", "hyperliquid", "hip4", "pre-trade-signal"],
-        ),
-        # 2026-09-30 round 4: every isolated content probe (hyperliquid alone,
-        # hip4/HIP-4 alone as tag or text, prediction-market+hyperliquid tag
-        # combo, prediction-market+hyperliquid word combo) has SETTLED
-        # SUCCESSFULLY, so no single keyword or pairwise combination
-        # reproduces the rejection. This route is a byte-for-byte clone of
-        # "GET /v1/prediction/hip4-snapshot" above - identical accepts price,
-        # description, tags, service_name, and the real (not simplified)
-        # bazaar extensions/schema - registered at a brand-new resource path
-        # that has never been submitted to CDP before. If THIS succeeds, the
-        # cause is not content at all (not even in full combination) and must
-        # be specific to the literal "/v1/prediction/hip4-snapshot" resource
-        # itself (some CDP-side state keyed in a way we haven't captured, or
-        # a bug in our own route-matching). If THIS also fails, it confirms
-        # the real (full, non-simplified) content of hip4-snapshot is the
-        # trigger even though no individual piece of it reproduced alone -
-        # meaning some other single field we haven't yet isolated (the actual
-        # complex output_schema, the real input_schema, or the exact
-        # description wording combined) is responsible. Delete once resolved.
-        "GET /v1/_diag/hip4-snapshot-clone": _make_route_config(
-            accepts=[hip4_snapshot_option],
-            mime_type="application/json",
-            description=(
-                "Real-time pre-trade signal: a probability snapshot of Hyperliquid's "
-                "HIP-4 outcome (prediction) markets - crypto price binaries, sports game "
-                "winners, tournament winners, Fed rate decisions, and more, all in one "
-                "call. No curated market list - every field under `fields` is parsed "
-                "verbatim from Hyperliquid's own description string, so new HIP-4 market "
-                "types appear automatically. Optional `template` (substring filter on the "
-                "market type, e.g. 'sportsContestWinner') and `underlying` (asset symbol "
-                "filter for crypto markets, e.g. 'BTC') narrow the result; `limit` caps "
-                "how many rows come back (default 100, max 500). Instead of polling this "
-                "endpoint yourself, you can subscribe to push webhook alerts on probability "
-                "jumps via GET /v1/prediction/hip4-alerts/subscribe-v2 (event subscription, "
-                "EXPERIMENTAL). Paid in USDC on Base."
-            ),
-            resource=_resource_url("/v1/_diag/hip4-snapshot-clone"),
-            extensions=_bazaar_extension(
-                input_example={"underlying": "BTC"},
-                input_schema={
-                    "type": "object",
-                    "properties": {
-                        "template": {
-                            "type": "string",
-                            "description": (
-                                "Optional substring filter on the market's template name "
-                                "(e.g. 'sportsContestWinner', 'priceBinary', "
-                                "'policyRateDecision')."
-                            ),
-                        },
-                        "underlying": {
-                            "type": "string",
-                            "description": (
-                                "Optional asset symbol filter for crypto markets (e.g. "
-                                "'BTC', 'ETH', 'SOL', 'HYPE')."
-                            ),
-                        },
-                        "limit": {
-                            "type": "integer",
-                            "description": "Max rows per list (standalone_markets / grouped_questions each). Defaults to 100, max 500.",
-                        },
-                    },
-                    "required": [],
-                },
-                output_example=HIP4_SNAPSHOT_EXAMPLE,
-                output_schema=_inline_schema_defs(PredictionHip4SnapshotResponse.model_json_schema()),
-            ),
-            service_name="AlphaPipeline HIP-4 Snapshot",
-            tags=["prediction-market", "hyperliquid", "hip4", "pre-trade-signal"],
-        ),
-        # 2026-09-30 round 5: the full byte-for-byte clone above (identical
-        # price/description/tags/service_name/extensions, brand-new resource
-        # path) failed identically, ruling out any remaining CDP-side
-        # URL-keyed state theory - the real, full content is the trigger, even
-        # though no single tag/word/pairwise combination tested in rounds 2-3
-        # reproduced it alone. This route removes the ENTIRE bazaar
-        # extensions block (extensions=None) from the clone while keeping the
-        # exact same (full-length, real) description/tags/price/service_name.
-        # If this succeeds, the extensions/schema block as a whole is the
-        # trigger. If it still fails, the description/tags/price combination
-        # at full length is responsible even without any extensions - which
-        # would be surprising given payment-test-combo-words (a much shorter
-        # description mentioning the same words) already succeeded. Delete
-        # once resolved.
-        "GET /v1/_diag/hip4-snapshot-clone-no-ext": _make_route_config(
-            accepts=[hip4_snapshot_option],
-            mime_type="application/json",
-            description=(
-                "Real-time pre-trade signal: a probability snapshot of Hyperliquid's "
-                "HIP-4 outcome (prediction) markets - crypto price binaries, sports game "
-                "winners, tournament winners, Fed rate decisions, and more, all in one "
-                "call. No curated market list - every field under `fields` is parsed "
-                "verbatim from Hyperliquid's own description string, so new HIP-4 market "
-                "types appear automatically. Optional `template` (substring filter on the "
-                "market type, e.g. 'sportsContestWinner') and `underlying` (asset symbol "
-                "filter for crypto markets, e.g. 'BTC') narrow the result; `limit` caps "
-                "how many rows come back (default 100, max 500). Instead of polling this "
-                "endpoint yourself, you can subscribe to push webhook alerts on probability "
-                "jumps via GET /v1/prediction/hip4-alerts/subscribe-v2 (event subscription, "
-                "EXPERIMENTAL). Paid in USDC on Base."
-            ),
-            resource=_resource_url("/v1/_diag/hip4-snapshot-clone-no-ext"),
-            service_name="AlphaPipeline HIP-4 Snapshot",
-            tags=["prediction-market", "hyperliquid", "hip4", "pre-trade-signal"],
-        ),
-        # 2026-09-30 round 6: clone-no-ext (full real description/tags/price,
-        # NO extensions at all) STILL failed - extensions/schema are
-        # completely ruled out. Remaining candidates: the exact 4-tag combo
-        # (prediction-market + hyperliquid + hip4 + pre-trade-signal, never
-        # tested together before - round 3's combo-tags only had 3 tags and
-        # omitted "hip4"/"pre-trade-signal"), or service_name - which no
-        # diagnostic route has ever varied; every one so far used the fixed,
-        # generic "AlphaPipeline Diag". Both known-failing real routes have
-        # "HIP-4" (with a hyphen before a digit) inside service_name
-        # ("AlphaPipeline HIP-4 Snapshot" / "AlphaPipeline HIP-4 Alerts"), and
-        # no succeeding route's service_name has ever contained a hyphen.
-        # This route isolates service_name: identical full description/tags/
-        # price to clone-no-ext, but service_name swapped to the generic,
-        # already-proven-safe "AlphaPipeline Diag". Delete once resolved.
-        "GET /v1/_diag/hip4-snapshot-clone-generic-servicename": _make_route_config(
-            accepts=[hip4_snapshot_option],
-            mime_type="application/json",
-            description=(
-                "Real-time pre-trade signal: a probability snapshot of Hyperliquid's "
-                "HIP-4 outcome (prediction) markets - crypto price binaries, sports game "
-                "winners, tournament winners, Fed rate decisions, and more, all in one "
-                "call. No curated market list - every field under `fields` is parsed "
-                "verbatim from Hyperliquid's own description string, so new HIP-4 market "
-                "types appear automatically. Optional `template` (substring filter on the "
-                "market type, e.g. 'sportsContestWinner') and `underlying` (asset symbol "
-                "filter for crypto markets, e.g. 'BTC') narrow the result; `limit` caps "
-                "how many rows come back (default 100, max 500). Instead of polling this "
-                "endpoint yourself, you can subscribe to push webhook alerts on probability "
-                "jumps via GET /v1/prediction/hip4-alerts/subscribe-v2 (event subscription, "
-                "EXPERIMENTAL). Paid in USDC on Base."
-            ),
-            resource=_resource_url("/v1/_diag/hip4-snapshot-clone-generic-servicename"),
-            service_name="AlphaPipeline Diag",
-            tags=["prediction-market", "hyperliquid", "hip4", "pre-trade-signal"],
-        ),
-        # Companion to the route above: isolates the OTHER axis - keeps the
-        # real "AlphaPipeline HIP-4 Snapshot" service_name and full
-        # description, but swaps the 4-tag combo down to the generic
-        # ["diagnostic"] tag used everywhere else. If this succeeds while the
-        # route above fails, the 4-tag combo (not service_name) is the
-        # trigger. If both succeed, no single axis alone explains it and the
-        # description text itself needs isolating next. If both fail, some
-        # other unexamined field (description text itself, or price) is
-        # responsible. Delete once resolved.
-        "GET /v1/_diag/hip4-snapshot-clone-generic-tags": _make_route_config(
-            accepts=[hip4_snapshot_option],
-            mime_type="application/json",
-            description=(
-                "Real-time pre-trade signal: a probability snapshot of Hyperliquid's "
-                "HIP-4 outcome (prediction) markets - crypto price binaries, sports game "
-                "winners, tournament winners, Fed rate decisions, and more, all in one "
-                "call. No curated market list - every field under `fields` is parsed "
-                "verbatim from Hyperliquid's own description string, so new HIP-4 market "
-                "types appear automatically. Optional `template` (substring filter on the "
-                "market type, e.g. 'sportsContestWinner') and `underlying` (asset symbol "
-                "filter for crypto markets, e.g. 'BTC') narrow the result; `limit` caps "
-                "how many rows come back (default 100, max 500). Instead of polling this "
-                "endpoint yourself, you can subscribe to push webhook alerts on probability "
-                "jumps via GET /v1/prediction/hip4-alerts/subscribe-v2 (event subscription, "
-                "EXPERIMENTAL). Paid in USDC on Base."
-            ),
-            resource=_resource_url("/v1/_diag/hip4-snapshot-clone-generic-tags"),
-            service_name="AlphaPipeline HIP-4 Snapshot",
-            tags=["diagnostic"],
-        ),
-        # 2026-09-30 round 7: generic-servicename (real desc/tags, generic
-        # service_name) and generic-tags (real desc/service_name, generic
-        # tags) BOTH failed - the one field common to both failures is the
-        # full, real description text, never varied until now. Three
-        # candidate landmines inside it, each isolated below by removing
-        # ONLY that one thing from the otherwise-identical, known-failing
-        # clone-no-ext baseline (real desc/tags/service_name, no extensions):
-        # (a) "sports game winners, tournament winners, Fed rate decisions" -
-        # sports-betting-adjacent phrasing that could trip a gambling content
-        # filter (this project already ships an x-data-disclaimer header
-        # anticipating exactly this concern); (b) backtick-quoted words
-        # (`fields`, `template`, `underlying`, `limit`) - no succeeding
-        # route's description has ever contained a backtick; (c) the embedded
-        # route reference "GET /v1/prediction/hip4-alerts/subscribe-v2" -
-        # text that looks like an HTTP method + path inside prose. Delete all
-        # three once resolved.
-        "GET /v1/_diag/hip4-snapshot-clone-no-sports-words": _make_route_config(
-            accepts=[hip4_snapshot_option],
-            mime_type="application/json",
-            description=(
-                "Real-time pre-trade signal: a probability snapshot of Hyperliquid's "
-                "HIP-4 outcome (prediction) markets - crypto price binaries and more, all "
-                "in one call. No curated market list - every field under `fields` is parsed "
-                "verbatim from Hyperliquid's own description string, so new HIP-4 market "
-                "types appear automatically. Optional `template` (substring filter on the "
-                "market type, e.g. 'sportsContestWinner') and `underlying` (asset symbol "
-                "filter for crypto markets, e.g. 'BTC') narrow the result; `limit` caps "
-                "how many rows come back (default 100, max 500). Instead of polling this "
-                "endpoint yourself, you can subscribe to push webhook alerts on probability "
-                "jumps via GET /v1/prediction/hip4-alerts/subscribe-v2 (event subscription, "
-                "EXPERIMENTAL). Paid in USDC on Base."
-            ),
-            resource=_resource_url("/v1/_diag/hip4-snapshot-clone-no-sports-words"),
-            service_name="AlphaPipeline HIP-4 Snapshot",
-            tags=["prediction-market", "hyperliquid", "hip4", "pre-trade-signal"],
-        ),
-        "GET /v1/_diag/hip4-snapshot-clone-no-backticks": _make_route_config(
-            accepts=[hip4_snapshot_option],
-            mime_type="application/json",
-            description=(
-                "Real-time pre-trade signal: a probability snapshot of Hyperliquid's "
-                "HIP-4 outcome (prediction) markets - crypto price binaries, sports game "
-                "winners, tournament winners, Fed rate decisions, and more, all in one "
-                "call. No curated market list - every field under 'fields' is parsed "
-                "verbatim from Hyperliquid's own description string, so new HIP-4 market "
-                "types appear automatically. Optional 'template' (substring filter on the "
-                "market type, e.g. 'sportsContestWinner') and 'underlying' (asset symbol "
-                "filter for crypto markets, e.g. 'BTC') narrow the result; 'limit' caps "
-                "how many rows come back (default 100, max 500). Instead of polling this "
-                "endpoint yourself, you can subscribe to push webhook alerts on probability "
-                "jumps via GET /v1/prediction/hip4-alerts/subscribe-v2 (event subscription, "
-                "EXPERIMENTAL). Paid in USDC on Base."
-            ),
-            resource=_resource_url("/v1/_diag/hip4-snapshot-clone-no-backticks"),
-            service_name="AlphaPipeline HIP-4 Snapshot",
-            tags=["prediction-market", "hyperliquid", "hip4", "pre-trade-signal"],
-        ),
-        "GET /v1/_diag/hip4-snapshot-clone-no-url-ref": _make_route_config(
-            accepts=[hip4_snapshot_option],
-            mime_type="application/json",
-            description=(
-                "Real-time pre-trade signal: a probability snapshot of Hyperliquid's "
-                "HIP-4 outcome (prediction) markets - crypto price binaries, sports game "
-                "winners, tournament winners, Fed rate decisions, and more, all in one "
-                "call. No curated market list - every field under `fields` is parsed "
-                "verbatim from Hyperliquid's own description string, so new HIP-4 market "
-                "types appear automatically. Optional `template` (substring filter on the "
-                "market type, e.g. 'sportsContestWinner') and `underlying` (asset symbol "
-                "filter for crypto markets, e.g. 'BTC') narrow the result; `limit` caps "
-                "how many rows come back (default 100, max 500). Paid in USDC on Base."
-            ),
-            resource=_resource_url("/v1/_diag/hip4-snapshot-clone-no-url-ref"),
-            service_name="AlphaPipeline HIP-4 Snapshot",
-            tags=["prediction-market", "hyperliquid", "hip4", "pre-trade-signal"],
-        ),
-        # 2026-09-30 round 8: all three description-text landmines (sports
-        # wording, backticks, embedded route reference) were removed
-        # individually from the known-failing clone-no-ext baseline and ALL
-        # THREE STILL FAILED. Two remaining untested axes, both constant
-        # across every clone variant so far: (a) price - every succeeding
-        # test in this whole investigation (diag routes, whale-position-audit,
-        # exit-capacity-audit) used $0.02 (amount "20000"); every clone
-        # variant here reused hip4_snapshot_option, i.e. hip4-snapshot's real
-        # $0.01 (amount "10000"), which has never been tested at any other
-        # price. (Note: hip4-alerts-subscribe-v2 itself was already retested
-        # at $0.02 in an earlier round and still failed, but that was a
-        # different route/content combination, not this one.) (b) resource
-        # path prefix - every clone variant so far lives under "/v1/_diag/",
-        # never under "/v1/prediction/" like the real route, even though
-        # "/v1/prediction/" alone (via exit-capacity-audit) and hyperliquid/
-        # hip4 content alone (via every clone above) have each separately
-        # succeeded/failed independently - the PATH-PREFIX + CONTENT
-        # combination has never been tested together. These two routes
-        # isolate each. Delete both once resolved.
-        "GET /v1/_diag/hip4-snapshot-clone-price-002": _make_route_config(
-            accepts=[_payment_option(0.02)],
-            mime_type="application/json",
-            description=(
-                "Real-time pre-trade signal: a probability snapshot of Hyperliquid's "
-                "HIP-4 outcome (prediction) markets - crypto price binaries, sports game "
-                "winners, tournament winners, Fed rate decisions, and more, all in one "
-                "call. No curated market list - every field under `fields` is parsed "
-                "verbatim from Hyperliquid's own description string, so new HIP-4 market "
-                "types appear automatically. Optional `template` (substring filter on the "
-                "market type, e.g. 'sportsContestWinner') and `underlying` (asset symbol "
-                "filter for crypto markets, e.g. 'BTC') narrow the result; `limit` caps "
-                "how many rows come back (default 100, max 500). Instead of polling this "
-                "endpoint yourself, you can subscribe to push webhook alerts on probability "
-                "jumps via GET /v1/prediction/hip4-alerts/subscribe-v2 (event subscription, "
-                "EXPERIMENTAL). Paid in USDC on Base."
-            ),
-            resource=_resource_url("/v1/_diag/hip4-snapshot-clone-price-002"),
-            service_name="AlphaPipeline HIP-4 Snapshot",
-            tags=["prediction-market", "hyperliquid", "hip4", "pre-trade-signal"],
-        ),
-        "GET /v1/prediction/_diag-hip4-clone": _make_route_config(
-            accepts=[hip4_snapshot_option],
-            mime_type="application/json",
-            description=(
-                "Real-time pre-trade signal: a probability snapshot of Hyperliquid's "
-                "HIP-4 outcome (prediction) markets - crypto price binaries, sports game "
-                "winners, tournament winners, Fed rate decisions, and more, all in one "
-                "call. No curated market list - every field under `fields` is parsed "
-                "verbatim from Hyperliquid's own description string, so new HIP-4 market "
-                "types appear automatically. Optional `template` (substring filter on the "
-                "market type, e.g. 'sportsContestWinner') and `underlying` (asset symbol "
-                "filter for crypto markets, e.g. 'BTC') narrow the result; `limit` caps "
-                "how many rows come back (default 100, max 500). Instead of polling this "
-                "endpoint yourself, you can subscribe to push webhook alerts on probability "
-                "jumps via GET /v1/prediction/hip4-alerts/subscribe-v2 (event subscription, "
-                "EXPERIMENTAL). Paid in USDC on Base."
-            ),
-            resource=_resource_url("/v1/prediction/_diag-hip4-clone"),
-            service_name="AlphaPipeline HIP-4 Snapshot",
-            tags=["prediction-market", "hyperliquid", "hip4", "pre-trade-signal"],
-        ),
-        # 2026-09-30 round 9: price ($0.02) and path prefix ("/v1/prediction/")
-        # have now ALSO been ruled out on top of the full real content - every
-        # single field/value we have varied across rounds 2-8 (hyperliquid,
-        # hip4/HIP-4, prediction-market tag, tag-combos, word-combos,
-        # service_name, sports wording, backticks, embedded route reference,
-        # price, path prefix) has been swapped out at least once WITHOUT
-        # fixing the rejection. The one substring that has been present,
-        # unchanged, character-for-character, in the description of every
-        # single failing test in this entire investigation (both real routes
-        # and all 9 clone variants) and is ABSENT from every succeeding test
-        # (including payment-test-combo-words, which used the differently-
-        # worded "a Hyperliquid prediction market" instead) is the opening
-        # clause "Hyperliquid's HIP-4 outcome (prediction) markets" - notably
-        # the "outcome (prediction)" parenthetical. This route removes only
-        # that clause (keeping every other previously-tested-safe piece:
-        # sports wording, backticks, URL reference, real tags/service_name,
-        # $0.02 price) - see payment-test-combo-tags/words in the section
-        # above for confirmation that "prediction-market"/"hyperliquid" alone
-        # are each independently safe. Delete once resolved.
-        "GET /v1/_diag/hip4-snapshot-clone-no-outcome-clause": _make_route_config(
-            accepts=[_payment_option(0.02)],
-            mime_type="application/json",
-            description=(
-                "Real-time pre-trade signal: a probability snapshot of Hyperliquid's "
-                "HIP-4 markets - crypto price binaries, sports game "
-                "winners, tournament winners, Fed rate decisions, and more, all in one "
-                "call. No curated market list - every field under `fields` is parsed "
-                "verbatim from Hyperliquid's own description string, so new HIP-4 market "
-                "types appear automatically. Optional `template` (substring filter on the "
-                "market type, e.g. 'sportsContestWinner') and `underlying` (asset symbol "
-                "filter for crypto markets, e.g. 'BTC') narrow the result; `limit` caps "
-                "how many rows come back (default 100, max 500). Instead of polling this "
-                "endpoint yourself, you can subscribe to push webhook alerts on probability "
-                "jumps via GET /v1/prediction/hip4-alerts/subscribe-v2 (event subscription, "
-                "EXPERIMENTAL). Paid in USDC on Base."
-            ),
-            resource=_resource_url("/v1/_diag/hip4-snapshot-clone-no-outcome-clause"),
-            service_name="AlphaPipeline HIP-4 Snapshot",
-            tags=["prediction-market", "hyperliquid", "hip4", "pre-trade-signal"],
-        ),
-        # 2026-09-30 round 10: measuring every route's description length
-        # against pass/fail shows a clean gap - every succeeding route (real
-        # or diagnostic) has a description <= 458 chars; every failing route
-        # (both real hip4-snapshot/hip4-alerts-subscribe-v2, and every clone
-        # variant in rounds 4-9, none of which ever dropped below 635 chars
-        # since each round only trimmed one small clause) is >= 635 chars.
-        # This route tests that gap directly: real tags/service_name/price/
-        # resource-path-adjacent content, but a description rewritten from
-        # scratch to ~370 chars (well under the apparent ~500-char boundary)
-        # while keeping the same substantive meaning. If this succeeds,
-        # description length is the confirmed root cause (a CDP-side max
-        # length on the resource.description field, most likely 500, that
-        # produces this exact misleading "paymentPayload invalid" schema
-        # error when exceeded) and the real fix is simply shortening
-        # hip4-snapshot's and hip4-alerts-subscribe-v2's descriptions in
-        # production. Delete once resolved.
-        "GET /v1/_diag/hip4-snapshot-clone-short-desc": _make_route_config(
-            accepts=[hip4_snapshot_option],
-            mime_type="application/json",
-            description=(
-                "Real-time pre-trade signal: a probability snapshot of Hyperliquid's "
-                "HIP-4 prediction markets - crypto price binaries, sports outcomes, "
-                "tournament winners, and more, all in one call. Optional `template`/"
-                "`underlying` filters narrow the result; `limit` caps rows (max 500). "
-                "Subscribe to webhook alerts via GET /v1/prediction/hip4-alerts/subscribe-v2. "
-                "Paid in USDC on Base."
-            ),
-            resource=_resource_url("/v1/_diag/hip4-snapshot-clone-short-desc"),
             service_name="AlphaPipeline HIP-4 Snapshot",
             tags=["prediction-market", "hyperliquid", "hip4", "pre-trade-signal"],
         ),
@@ -1479,59 +963,28 @@ def build_routes(
         # 애초에 결제를 걸지 않아야 "배달 안 되는 기능에 돈만 받는" 상황을
         # 원천 차단한다 (app/events.py 모듈 docstring 참고).
         #
-        # 2026-09-30 investigation, part 1: this route was originally POST
-        # with a JSON body. After extensive isolation testing (removing the
-        # bazaar extensions blob entirely, fixing a real method-enum
-        # mismatch, trimming tags to the documented <=5 cap, adding a free
-        # GET/HEAD probe handler on the same path) the CDP Facilitator
-        # verify() rejection ("'paymentPayload' is invalid: must match one of
-        # [x402V2PaymentPayload, x402V1PaymentPayload]...") persisted
-        # byte-for-byte identical every time, while every GET route in this
-        # file succeeded. That pointed at the HTTP method itself, so the
-        # route was redesigned as GET with query params (see main.py) - a
-        # real trade-off, since `secret` now travels in the URL query string.
-        #
-        # 2026-09-30 investigation, part 2: the GET redesign deployed above
-        # did NOT fix it - the identical CDP rejection persisted even for a
-        # plain GET request with a correctly-formed, self-consistent
-        # Bazaar query-type extension. That falsifies "CDP doesn't support
-        # POST" as the root cause. Re-reading the installed x402 SDK source
-        # directly (x402/http/facilitator_client_base.py:
-        # HTTPFacilitatorClientBase._build_request_body(),
-        # x402/client_base.py: x402ClientBase._create_payment_payload_v2_core())
-        # confirmed our own PaymentOption/route construction is byte-identical
-        # in shape to every succeeding route (_payment_option() is the same
-        # helper, same fields) - there is no remaining structural difference
-        # in our code between this route and, say, token-risk. The one thing
-        # that IS unique to this route: dozens of malformed payloads were
-        # submitted against this exact resource URL
-        # (https://.../v1/prediction/hip4-alerts/subscribe) during the
-        # POST-era testing above, before CDP Facilitator's Bazaar indexer
-        # auto-registers a resource off its first submission. Renaming the
-        # resource (this route, "-v2" suffix) is a cheap, free test (verify()
-        # fails before settlement, so no USDC is at risk) for whether CDP is
-        # holding some kind of resource-keyed state against the old URL. If
-        # "-v2" also fails identically, that theory is wrong too and this
-        # needs a CDP support ticket with the captured payload/requirements
-        # (X-Debug-Payload-Sent header, see _DebugLoggingFacilitatorClient
-        # above) attached as evidence.
-        routes["GET /v1/prediction/hip4-alerts/subscribe-v2"] = _make_route_config(
+        # 2026-09-30 ROOT CAUSE FOUND (superseding the POST->GET redesign and
+        # the "-v2" resource rename tried earlier, both dead ends): CDP
+        # Facilitator's verify() rejection was a resource.description length
+        # limit, not a method or resource-URL issue - see the comment on
+        # "GET /v1/prediction/hip4-snapshot" above for the full writeup. This
+        # route's original description was 785 chars; every route that has
+        # ever settled successfully had one <= 458 chars. Shortened below and
+        # reverted back to the plain "subscribe" path (the "-v2" suffix was
+        # only ever a diagnostic rename and never a real API version).
+        routes["GET /v1/prediction/hip4-alerts/subscribe"] = _make_route_config(
             accepts=[hip4_events_subscribe_option],
             mime_type="application/json",
             description=(
-                "[EXPERIMENTAL] Subscribe a webhook to receive Standard Webhooks-signed "
-                "push notifications when a HIP-4 outcome's probability jumps by a configurable "
-                "threshold, or a new HIP-4 market appears - so an agent no longer has to poll "
-                "prediction.hip4_snapshot itself. Under the hood this server polls Hyperliquid "
-                "every ~5 minutes and diffs the result; it is not a true real-time feed from "
-                "Hyperliquid. Modeled loosely on a draft, not-yet-stable MCP Events spec - the "
-                "request/response shape may change, and subscriptions are not guaranteed to "
-                "survive a server restart. GET with query params (not POST/JSON body) - "
-                "see the 'secret' param's description for the resulting trade-off. See free GET "
-                "/v1/prediction/hip4-alerts/event-types for the event catalog before "
-                "subscribing. Paid in USDC on Base."
+                "[EXPERIMENTAL] Subscribe a webhook to receive push notifications when a "
+                "HIP-4 outcome's probability jumps past a configurable threshold, or a new "
+                "market appears - so an agent no longer has to poll hip4-snapshot itself. "
+                "Polls Hyperliquid every ~5 minutes; not a true real-time feed. GET with "
+                "query params, not JSON body - secret travels in the URL. See free GET "
+                "/v1/prediction/hip4-alerts/event-types for the event catalog. Paid in "
+                "USDC on Base."
             ),
-            resource=_resource_url("/v1/prediction/hip4-alerts/subscribe-v2"),
+            resource=_resource_url("/v1/prediction/hip4-alerts/subscribe"),
             extensions=_bazaar_extension(
                 method="GET",
                 input_example={

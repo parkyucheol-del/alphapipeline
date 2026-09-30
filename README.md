@@ -147,7 +147,7 @@ Tune the thresholds (buy/sell tax %, which `liquidity_health` values you accept,
 | `tools.ai_markdown` | `GET /v1/tools/ai-markdown` | $0.005 | Converts any webpage URL into clean, ad-free Markdown optimized for LLM context windows. |
 | `market.kimchi_alert` | `GET /v1/market/kimchi-alert` | **Free** | Real-time Korea (Upbit) vs global reference price (Coinbase spot, CoinGecko fallback — not a live Binance orderbook) premium — the "kimchi premium" — with reverse-premium and 1h-surge alerts. Kept free by default as an onboarding tool: informational market context, not part of the paid pre-trade security cluster. |
 | `unlocks.dump_risk` | `GET /v1/unlocks/dump-risk` | **Free** | On-chain (Sablier) proxy for token unlock/vesting dump risk, including `vesting_progress_pct` (withdrawn/deposit) showing how far along vesting already is. Kept free by default as an onboarding tool so agents can verify the service before paying for the rest. |
-| *[EXPERIMENTAL]* `events.hip4_alerts` | `GET /v1/prediction/hip4-alerts/event-types` (free) · `GET /v1/prediction/hip4-alerts/subscribe-v2` ($0.05) · `POST /v1/prediction/hip4-alerts/unsubscribe` (free) | See below | Webhook push alerts on HIP-4 probability jumps / new markets, instead of polling `hip4_snapshot` yourself. Disabled by default (`HIP4_EVENTS_ENABLED=false`) - see "Event subscriptions" below. |
+| *[EXPERIMENTAL]* `events.hip4_alerts` | `GET /v1/prediction/hip4-alerts/event-types` (free) · `GET /v1/prediction/hip4-alerts/subscribe` ($0.02) · `POST /v1/prediction/hip4-alerts/unsubscribe` (free) | See below | Webhook push alerts on HIP-4 probability jumps / new markets, instead of polling `hip4_snapshot` yourself. Disabled by default (`HIP4_EVENTS_ENABLED=false`) - see "Event subscriptions" below. |
 
 Every response is timestamped in both UTC and KST, and every priced endpoint's payment prompt reads "Paid in USDC on Base." so a human looking at the 402 screen in a browser isn't left guessing which chain's USDC to send.
 
@@ -190,7 +190,7 @@ Honest caveats before you rely on this:
 Quick test once `HIP4_EVENTS_ENABLED=true` is set and deployed:
 
 ```bash
-curl -G https://alphapipeline-eu.onrender.com/v1/prediction/hip4-alerts/subscribe-v2 \
+curl -G https://alphapipeline-eu.onrender.com/v1/prediction/hip4-alerts/subscribe \
   --data-urlencode "webhook_url=https://webhook.site/your-id" \
   --data-urlencode "secret=replace-with-a-random-32-byte-secret"
 # -> 402 with payment terms, same as any other endpoint here; pay, retry, get a subscription_id back
@@ -198,9 +198,7 @@ curl -G https://alphapipeline-eu.onrender.com/v1/prediction/hip4-alerts/subscrib
 
 Note: this is `GET` with query parameters, not `POST` with a JSON body -
 see the note on `secret` in the endpoint description for the resulting
-trade-off (it travels in the URL query string). The path also currently
-carries a diagnostic `-v2` suffix while a CDP Facilitator payment-verification
-issue on this specific route is being tracked down (see `app/payment.py`).
+trade-off (it travels in the URL query string).
 
 ### Data sources
 

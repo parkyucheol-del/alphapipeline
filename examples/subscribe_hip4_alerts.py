@@ -4,20 +4,16 @@ HIP-4 확률 급변 웹훅 구독을 실제로 결제해서 걸어보는 예제 
 examples/client_example.py와 거의 동일한 패턴(x402 공식 SDK로 실제 결제까지
 진행)이고, 차이는 쿼리 파라미터(webhook_url/secret 등)를 같이 보낸다는 점뿐이다.
 
-2026-09-30: 원래는 POST + JSON body였는데, CDP Facilitator가 POST 기반 x402
-리소스의 결제 검증을 지원하지 않는 것으로 보여서(여러 페이로드 변형을
-다 테스트해봤지만 동일하게 거부됨, GET 라우트는 가격에 상관없이 항상 성공)
-GET + 쿼리 파라미터 방식으로 바꿨다 (app/payment.py의 build_routes() 주석
-참고). secret이 URL 쿼리스트링에 실리게 되는 트레이드오프가 있다 - HTTPS라
-전송 중엔 암호화되지만, 서버/CDN 접근 로그에는 남을 수 있다.
+2026-09-30: 원래는 POST + JSON body였는데 GET + 쿼리 파라미터 방식으로
+바꿨다 (app/payment.py의 build_routes() 주석 참고). secret이 URL
+쿼리스트링에 실리게 되는 트레이드오프가 있다 - HTTPS라 전송 중엔 암호화되지만,
+서버/CDN 접근 로그에는 남을 수 있다.
 
-**같은 날 추가 업데이트**: GET으로 바꾼 뒤에도 CDP 결제 검증이 똑같은 에러로
-계속 거부되는 게 확인되어("POST를 안 받는다"는 결론이 틀렸거나 불완전했다는
-뜻), 남은 유력 가설(이 정확한 리소스 URL에 POST 시절의 수많은 실패 제출
-이력이 CDP 쪽에 뭔가 상태로 남아있을 가능성)을 저비용으로 테스트하기 위해
-엔드포인트 경로에 "-v2"를 붙였다 - verify()가 정산 전에 실패하는 구간이라
-이 테스트에도 돈이 나가지 않는다. app/payment.py의 build_routes() 주석에
-전체 조사 히스토리가 있다.
+**같은 날 추가 업데이트**: GET으로 바꾼 뒤에도 CDP 결제 검증이 계속
+거부되는 문제가 있었는데, 근본 원인은 HTTP 메서드나 리소스 URL이 아니라
+**resource.description 길이 제한**(약 500자, CDP 쪽에서 강제하는 것으로
+보임)이었다. 원래 설명문이 785자였던 것을 짧게 줄여서 해결했다 -
+app/payment.py의 build_routes() 주석에 전체 조사 히스토리가 있다.
 
 사용 전 준비물 (client_example.py와 동일):
   pip install "x402[https]" eth_account httpx
@@ -53,7 +49,7 @@ from x402.mechanisms.evm import EthAccountSigner
 from x402.mechanisms.evm.exact.register import register_exact_evm_client
 
 API_BASE = os.getenv("ALPHAPIPELINE_API_BASE", "http://localhost:8000")
-ENDPOINT = "/v1/prediction/hip4-alerts/subscribe-v2"
+ENDPOINT = "/v1/prediction/hip4-alerts/subscribe"
 
 MNEMONIC_HD_PATH = "m/44'/60'/0'/0/0"
 

@@ -4,8 +4,6 @@ AlphaPipeline - 초미세 결제 기반 온체인 데이터 파이프라인 API
 
 로컬 실행: uvicorn main:app --reload --port 8000
 """
-import base64
-import json
 import logging
 import time
 from collections import defaultdict, deque
@@ -128,33 +126,6 @@ async def add_disclaimer_header(request: Request, call_next):
         "Informational and research data only. No trade execution, brokerage, or gambling services provided."
     )
     return response
-
-
-# 2026-09-30 temporary debug middleware - Render Logs search never surfaces
-# app/payment.py's [x402-debug] logger.warning() lines (cause unknown), so this
-# echoes the payload/requirements actually sent to CDP Facilitator (success or
-# failure) back as a response header X-Debug-Payload-Sent (base64 JSON, same
-# encoding as the payment-required header) so the client can read it directly.
-# Only active when X402_DEBUG_LOG_PAYLOADS=true - contains a signature, so
-# revert once the root cause is found.
-if settings.X402_DEBUG_LOG_PAYLOADS:
-    from app.payment import pop_last_debug_capture, reset_last_debug_capture
-
-    @app.middleware("http")
-    async def add_debug_payload_header(request: Request, call_next):
-        reset_last_debug_capture()
-        response = await call_next(request)
-        captured = pop_last_debug_capture()
-        if captured is not None:
-            try:
-                response.headers["X-Debug-Payload-Sent"] = base64.b64encode(
-                    json.dumps(captured, default=str).encode("utf-8")
-                ).decode("ascii")
-            except Exception:
-                logging.getLogger("alphapipeline").exception(
-                    "[x402-debug] error attaching payload to response header"
-                )
-        return response
 
 
 # 2026-09-19: 이 서비스는 원래 "기계 우선(machine-first)" API라 루트(/)가 JSON
@@ -327,140 +298,6 @@ async def root(request: Request):
 @app.get("/healthz")
 async def healthz():
     return {"status": "healthy"}
-
-
-# 2026-09-30 TEMPORARY diagnostic route, paired with app/payment.py's
-# "GET /v1/_diag/payment-test" registration - see the long comment there for
-# why. Delete both once the CDP Facilitator investigation is resolved.
-@app.get("/v1/_diag/payment-test", include_in_schema=False)
-async def diag_payment_test_endpoint():
-    return {"ok": True, "note": "Temporary diagnostic route - safe to ignore."}
-
-
-# 2026-09-30 TEMPORARY diagnostic routes, round 2. whale-position-audit (tags
-# include "hyperliquid", description says "Hyperliquid" 3x) settled
-# successfully, ruling out "hyperliquid" alone as the trigger. hip4-snapshot
-# and hip4-alerts-subscribe-v2 are the only two routes that fail, and the one
-# token both share that nothing else in the whole API has is "hip4"/"HIP-4".
-# These two routes isolate whether it's the tag value or the description
-# substring that CDP's filter (if that's what this is) keys on. Delete once
-# resolved, alongside the routes above and in app/payment.py.
-@app.get("/v1/_diag/payment-test-hip4-tag", include_in_schema=False)
-async def diag_payment_test_hip4_tag_endpoint():
-    return {"ok": True, "note": "Temporary diagnostic route - safe to ignore."}
-
-
-@app.get("/v1/_diag/payment-test-hip4-word", include_in_schema=False)
-async def diag_payment_test_hip4_word_endpoint():
-    return {"ok": True, "note": "Temporary diagnostic route - safe to ignore."}
-
-
-# 2026-09-30 TEMPORARY diagnostic routes, round 3. "hip4"/"HIP-4" alone
-# (tag and description-text variants) also settled successfully, ruling that
-# out too. The only remaining difference between the two known-failing routes
-# and every route that has succeeded so far is that both failing routes carry
-# "prediction-market" and "hyperliquid" together (either as tags or as
-# description wording), while no successful test has had both at once. These
-# two routes isolate that combination. Delete once resolved, alongside the
-# routes above and in app/payment.py.
-@app.get("/v1/_diag/payment-test-combo-tags", include_in_schema=False)
-async def diag_payment_test_combo_tags_endpoint():
-    return {"ok": True, "note": "Temporary diagnostic route - safe to ignore."}
-
-
-@app.get("/v1/_diag/payment-test-combo-words", include_in_schema=False)
-async def diag_payment_test_combo_words_endpoint():
-    return {"ok": True, "note": "Temporary diagnostic route - safe to ignore."}
-
-
-# 2026-09-30 TEMPORARY diagnostic route, round 4. A byte-for-byte clone of
-# hip4-snapshot's full real RouteConfig (same price, description, tags, and
-# actual bazaar extension/schema - not simplified) registered at a brand-new
-# path, since no simplified content probe reproduced the rejection. See the
-# long comment in app/payment.py's build_routes() above this route's
-# registration. Delete once resolved, alongside the routes above.
-@app.get("/v1/_diag/hip4-snapshot-clone", include_in_schema=False)
-async def diag_hip4_snapshot_clone_endpoint():
-    return {"ok": True, "note": "Temporary diagnostic route - safe to ignore."}
-
-
-# 2026-09-30 TEMPORARY diagnostic route, round 5: same clone as above but
-# with the bazaar extensions block removed entirely - see the long comment in
-# app/payment.py's build_routes() above this route's registration. Delete
-# once resolved, alongside the routes above.
-@app.get("/v1/_diag/hip4-snapshot-clone-no-ext", include_in_schema=False)
-async def diag_hip4_snapshot_clone_no_ext_endpoint():
-    return {"ok": True, "note": "Temporary diagnostic route - safe to ignore."}
-
-
-# 2026-09-30 TEMPORARY diagnostic routes, round 6: isolate service_name
-# (never varied before) vs the exact 4-tag combo - see the long comment in
-# app/payment.py's build_routes() above these routes' registration. Delete
-# once resolved, alongside the routes above.
-@app.get("/v1/_diag/hip4-snapshot-clone-generic-servicename", include_in_schema=False)
-async def diag_hip4_snapshot_clone_generic_servicename_endpoint():
-    return {"ok": True, "note": "Temporary diagnostic route - safe to ignore."}
-
-
-@app.get("/v1/_diag/hip4-snapshot-clone-generic-tags", include_in_schema=False)
-async def diag_hip4_snapshot_clone_generic_tags_endpoint():
-    return {"ok": True, "note": "Temporary diagnostic route - safe to ignore."}
-
-
-# 2026-09-30 TEMPORARY diagnostic routes, round 7: three candidate landmines
-# inside hip4-snapshot's description text, each removed one at a time from
-# the known-failing clone-no-ext baseline - see the long comment in
-# app/payment.py's build_routes() above these routes' registration. Delete
-# all three once resolved, alongside the routes above.
-@app.get("/v1/_diag/hip4-snapshot-clone-no-sports-words", include_in_schema=False)
-async def diag_hip4_snapshot_clone_no_sports_words_endpoint():
-    return {"ok": True, "note": "Temporary diagnostic route - safe to ignore."}
-
-
-@app.get("/v1/_diag/hip4-snapshot-clone-no-backticks", include_in_schema=False)
-async def diag_hip4_snapshot_clone_no_backticks_endpoint():
-    return {"ok": True, "note": "Temporary diagnostic route - safe to ignore."}
-
-
-@app.get("/v1/_diag/hip4-snapshot-clone-no-url-ref", include_in_schema=False)
-async def diag_hip4_snapshot_clone_no_url_ref_endpoint():
-    return {"ok": True, "note": "Temporary diagnostic route - safe to ignore."}
-
-
-# 2026-09-30 TEMPORARY diagnostic routes, round 8: price ($0.02 vs the real
-# $0.01) and resource path prefix ("/v1/prediction/" vs "/v1/_diag/"), each
-# isolated on top of the full, real (still-failing) description/tags/
-# service_name combination - see the long comment in app/payment.py's
-# build_routes() above these routes' registration. Delete both once resolved,
-# alongside the routes above.
-@app.get("/v1/_diag/hip4-snapshot-clone-price-002", include_in_schema=False)
-async def diag_hip4_snapshot_clone_price_002_endpoint():
-    return {"ok": True, "note": "Temporary diagnostic route - safe to ignore."}
-
-
-@app.get("/v1/prediction/_diag-hip4-clone", include_in_schema=False)
-async def diag_hip4_clone_under_prediction_path_endpoint():
-    return {"ok": True, "note": "Temporary diagnostic route - safe to ignore."}
-
-
-# 2026-09-30 TEMPORARY diagnostic route, round 9: removes only the "outcome
-# (prediction)" parenthetical clause, the one substring present unchanged in
-# every failing test so far - see the long comment in app/payment.py's
-# build_routes() above this route's registration. Delete once resolved,
-# alongside the routes above.
-@app.get("/v1/_diag/hip4-snapshot-clone-no-outcome-clause", include_in_schema=False)
-async def diag_hip4_snapshot_clone_no_outcome_clause_endpoint():
-    return {"ok": True, "note": "Temporary diagnostic route - safe to ignore."}
-
-
-# 2026-09-30 TEMPORARY diagnostic route, round 10: description rewritten to
-# ~370 chars, well under the apparent ~500-char boundary found by measuring
-# every route's description length against pass/fail - see the long comment
-# in app/payment.py's build_routes() above this route's registration. Delete
-# once resolved, alongside the routes above.
-@app.get("/v1/_diag/hip4-snapshot-clone-short-desc", include_in_schema=False)
-async def diag_hip4_snapshot_clone_short_desc_endpoint():
-    return {"ok": True, "note": "Temporary diagnostic route - safe to ignore."}
 
 
 @app.get(
@@ -1099,7 +936,7 @@ async def hip4_snapshot_endpoint(
     tags=["market"],
     summary="[EXPERIMENTAL] List supported HIP-4 webhook event types (free)",
     description=(
-        "Free catalog endpoint - lists the event types GET hip4-alerts/subscribe-v2 "
+        "Free catalog endpoint - lists the event types GET hip4-alerts/subscribe "
         "accepts, the poll interval, default jump threshold, and subscription TTL. "
         "No payment required. Read this before calling subscribe."
     ),
@@ -1108,16 +945,8 @@ async def hip4_alerts_event_types_endpoint():
     return JSONResponse(content=await list_event_types())
 
 
-# 2026-09-30: path carries a "-v2" suffix (not a real API version bump) as a
-# diagnostic test - see the long comment in app/payment.py's build_routes()
-# above the "GET /v1/prediction/hip4-alerts/subscribe-v2" route registration
-# for why (CDP Facilitator kept rejecting payment verification on the
-# original "/subscribe" path even after every other hypothesis was ruled
-# out; renaming the resource is a free test for CDP-side state tied to the
-# old, many-times-malformed URL). Revert the suffix if this turns out to be
-# unrelated and the real cause is found elsewhere.
 @app.get(
-    "/v1/prediction/hip4-alerts/subscribe-v2",
+    "/v1/prediction/hip4-alerts/subscribe",
     tags=["market"],
     summary="[EXPERIMENTAL] Subscribe to HIP-4 probability-jump webhook alerts",
     description=(
@@ -1150,12 +979,11 @@ async def hip4_alerts_subscribe_endpoint(
         description=(
             "Shared secret you generate yourself (e.g. `openssl rand -base64 32`), used to "
             "HMAC-SHA256 sign each delivery. Never sent back to you - keep your own copy. "
-            "SECURITY NOTE: because this endpoint is GET (a CDP Facilitator payment-protocol "
-            "requirement, not a design choice), this value travels in the URL query string "
-            "and so is HTTPS-encrypted in transit but may be recorded in server/CDN access "
-            "logs (ours and any intermediary's) the way any URL is. Treat it as a "
-            "moderate-sensitivity value: rotate it if you suspect exposure, and do not reuse "
-            "a secret you rely on elsewhere."
+            "SECURITY NOTE: because this endpoint is GET, this value travels in the URL "
+            "query string and so is HTTPS-encrypted in transit but may be recorded in "
+            "server/CDN access logs (ours and any intermediary's) the way any URL is. "
+            "Treat it as a moderate-sensitivity value: rotate it if you suspect exposure, "
+            "and do not reuse a secret you rely on elsewhere."
         ),
     ),
     event_types: list[str] | None = Query(
