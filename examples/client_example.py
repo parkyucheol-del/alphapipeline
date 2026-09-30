@@ -43,7 +43,12 @@ from x402.mechanisms.evm import EthAccountSigner
 from x402.mechanisms.evm.exact.register import register_exact_evm_client
 
 API_BASE = os.getenv("ALPHAPIPELINE_API_BASE", "http://localhost:8000")
-ENDPOINT = "/v1/calendar/macro-dday"
+# 2026-09-30: overridable via env var so we can quickly test a different GET
+# route (different price point) against CDP Facilitator without editing this
+# file, while debugging why POST /v1/prediction/hip4-alerts/subscribe keeps
+# failing verify() - isolating whether the CDP rejection is POST-specific or
+# amount-specific.
+ENDPOINT = os.getenv("ALPHAPIPELINE_ENDPOINT", "/v1/calendar/macro-dday")
 
 MNEMONIC_HD_PATH = "m/44'/60'/0'/0/0"
 
