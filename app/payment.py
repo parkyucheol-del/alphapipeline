@@ -1292,6 +1292,67 @@ def build_routes(
             service_name="AlphaPipeline HIP-4 Snapshot",
             tags=["prediction-market", "hyperliquid", "hip4", "pre-trade-signal"],
         ),
+        # 2026-09-30 round 8: all three description-text landmines (sports
+        # wording, backticks, embedded route reference) were removed
+        # individually from the known-failing clone-no-ext baseline and ALL
+        # THREE STILL FAILED. Two remaining untested axes, both constant
+        # across every clone variant so far: (a) price - every succeeding
+        # test in this whole investigation (diag routes, whale-position-audit,
+        # exit-capacity-audit) used $0.02 (amount "20000"); every clone
+        # variant here reused hip4_snapshot_option, i.e. hip4-snapshot's real
+        # $0.01 (amount "10000"), which has never been tested at any other
+        # price. (Note: hip4-alerts-subscribe-v2 itself was already retested
+        # at $0.02 in an earlier round and still failed, but that was a
+        # different route/content combination, not this one.) (b) resource
+        # path prefix - every clone variant so far lives under "/v1/_diag/",
+        # never under "/v1/prediction/" like the real route, even though
+        # "/v1/prediction/" alone (via exit-capacity-audit) and hyperliquid/
+        # hip4 content alone (via every clone above) have each separately
+        # succeeded/failed independently - the PATH-PREFIX + CONTENT
+        # combination has never been tested together. These two routes
+        # isolate each. Delete both once resolved.
+        "GET /v1/_diag/hip4-snapshot-clone-price-002": _make_route_config(
+            accepts=[_payment_option(0.02)],
+            mime_type="application/json",
+            description=(
+                "Real-time pre-trade signal: a probability snapshot of Hyperliquid's "
+                "HIP-4 outcome (prediction) markets - crypto price binaries, sports game "
+                "winners, tournament winners, Fed rate decisions, and more, all in one "
+                "call. No curated market list - every field under `fields` is parsed "
+                "verbatim from Hyperliquid's own description string, so new HIP-4 market "
+                "types appear automatically. Optional `template` (substring filter on the "
+                "market type, e.g. 'sportsContestWinner') and `underlying` (asset symbol "
+                "filter for crypto markets, e.g. 'BTC') narrow the result; `limit` caps "
+                "how many rows come back (default 100, max 500). Instead of polling this "
+                "endpoint yourself, you can subscribe to push webhook alerts on probability "
+                "jumps via GET /v1/prediction/hip4-alerts/subscribe-v2 (event subscription, "
+                "EXPERIMENTAL). Paid in USDC on Base."
+            ),
+            resource=_resource_url("/v1/_diag/hip4-snapshot-clone-price-002"),
+            service_name="AlphaPipeline HIP-4 Snapshot",
+            tags=["prediction-market", "hyperliquid", "hip4", "pre-trade-signal"],
+        ),
+        "GET /v1/prediction/_diag-hip4-clone": _make_route_config(
+            accepts=[hip4_snapshot_option],
+            mime_type="application/json",
+            description=(
+                "Real-time pre-trade signal: a probability snapshot of Hyperliquid's "
+                "HIP-4 outcome (prediction) markets - crypto price binaries, sports game "
+                "winners, tournament winners, Fed rate decisions, and more, all in one "
+                "call. No curated market list - every field under `fields` is parsed "
+                "verbatim from Hyperliquid's own description string, so new HIP-4 market "
+                "types appear automatically. Optional `template` (substring filter on the "
+                "market type, e.g. 'sportsContestWinner') and `underlying` (asset symbol "
+                "filter for crypto markets, e.g. 'BTC') narrow the result; `limit` caps "
+                "how many rows come back (default 100, max 500). Instead of polling this "
+                "endpoint yourself, you can subscribe to push webhook alerts on probability "
+                "jumps via GET /v1/prediction/hip4-alerts/subscribe-v2 (event subscription, "
+                "EXPERIMENTAL). Paid in USDC on Base."
+            ),
+            resource=_resource_url("/v1/prediction/_diag-hip4-clone"),
+            service_name="AlphaPipeline HIP-4 Snapshot",
+            tags=["prediction-market", "hyperliquid", "hip4", "pre-trade-signal"],
+        ),
     }
     if dump_risk_enabled:
         routes["GET /v1/unlocks/dump-risk"] = _make_route_config(

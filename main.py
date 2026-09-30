@@ -427,6 +427,22 @@ async def diag_hip4_snapshot_clone_no_url_ref_endpoint():
     return {"ok": True, "note": "Temporary diagnostic route - safe to ignore."}
 
 
+# 2026-09-30 TEMPORARY diagnostic routes, round 8: price ($0.02 vs the real
+# $0.01) and resource path prefix ("/v1/prediction/" vs "/v1/_diag/"), each
+# isolated on top of the full, real (still-failing) description/tags/
+# service_name combination - see the long comment in app/payment.py's
+# build_routes() above these routes' registration. Delete both once resolved,
+# alongside the routes above.
+@app.get("/v1/_diag/hip4-snapshot-clone-price-002", include_in_schema=False)
+async def diag_hip4_snapshot_clone_price_002_endpoint():
+    return {"ok": True, "note": "Temporary diagnostic route - safe to ignore."}
+
+
+@app.get("/v1/prediction/_diag-hip4-clone", include_in_schema=False)
+async def diag_hip4_clone_under_prediction_path_endpoint():
+    return {"ok": True, "note": "Temporary diagnostic route - safe to ignore."}
+
+
 @app.get(
     "/llms.txt",
     include_in_schema=False,  # x402 결제 대상 데이터 엔드포인트가 아니라 크롤러용 정적 문서라 OpenAPI 스펙에서는 뺌
