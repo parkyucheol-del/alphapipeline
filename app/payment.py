@@ -322,62 +322,68 @@ def _bazaar_extension(
     output_example=None,
     output_schema=None,
 ) -> dict:
-    """x402 Bazaar 인덱서가 읽는 discovery extension을 만든다.
+    """Build the x402 Bazaar discovery extension read by facilitators/indexers.
 
-    2026-09-07 수정: Render 배포 로그에서 실제로 이 경고가 찍히는 걸 확인했다
-    (기존 funding-rate 라우트 포함, 즉 새 라우트만의 문제가 아니라 잠재
-    버그였다): `UserWarning: x402: Route "GET /v1/..." has an invalid bazaar
-    extension: input: 'method' is a required property`.
+    2026-09-30 ROOT CAUSE FOUND (superseding the 2026-09-03/09-07 notes below,
+    which were based on an incorrect read of the SDK): this function used to
+    call the installed `declare_discovery_extension()` with a pre-wrapped
+    `input={"type": "http", "method": method, "queryParams": input_example}`.
+    Reading the actual installed SDK source
+    (x402/extensions/bazaar/resource_service.py) shows that's wrong on two
+    counts:
 
-    원인: docs.x402.org/extensions/bazaar를 다시 정확히 확인한 결과, HTTP
-    리소스의 `info.input` 객체는 그냥 쿼리 파라미터 예시 dict가 아니라
-    `{"type": "http", "method": "GET", "queryParams": {...}}` 형태로 감싸져야
-    한다. 2026-09-03 수정 때 "method는 라우트 키에서 런타임에 자동으로
-    채워진다"고 inspect.getsource()로 확인했다고 적어뒀는데, 이건 틀렸다 -
-    x402 2.12.0부터 추가된 시작 시점(startup-time) JSON-schema 검증은 우리가
-    넘긴 `input` dict를 있는 그대로 검사하고, 자동으로 method를 채워주지
-    않는다. `input=input_example`로 벗겨진 쿼리 파라미터 dict를 그냥 넘기고
-    있었던 게 검증 실패의 진짜 원인이었다.
+    1. `declare_discovery_extension()` takes the RAW example data as `input`
+       (just the query params or body, e.g. `{"query": "example"}`) and wraps
+       it itself into a QueryInput/BodyInput model - passing our own
+       pre-wrapped dict meant the whole thing got stuffed into the inner
+       `queryParams` field, producing the double-nested
+       `input.queryParams.{type,method,queryParams}` shape visible in every
+       captured payload.
+    2. More importantly, which extension TYPE gets built - Query
+       (`QueryDiscoveryExtension`, schema restricts `method` to
+       `["GET","HEAD","DELETE"]`) vs Body (`BodyDiscoveryExtension`, schema
+       restricts `method` to `["POST","PUT","PATCH"]`) - is controlled
+       entirely by whether `body_type` is passed, NOT by any `method`
+       argument (there isn't one). Since we never passed `body_type`, EVERY
+       route - including POST ones - got a Query-type extension whose schema
+       hardcodes the GET/HEAD/DELETE enum.
 
-    수정: `input`을 문서의 HTTP 리소스 예시와 정확히 같은 모양
-    (`type`/`method`/`queryParams`)으로 감싸서 넘긴다. 이 서버의 모든 라우트가
-    GET이라 `method` 기본값을 "GET"으로 둔다 - POST 라우트가 생기면 호출부에서
-    명시적으로 넘겨야 한다.
+    At request time, `BazaarResourceServerExtension.enrich_declaration()`
+    (x402/extensions/bazaar/server.py) injects the REAL HTTP method from the
+    live request into `info.input.method` and marks it required in the
+    schema, but never touches the enum. So for
+    `POST /v1/prediction/hip4-alerts/subscribe` the server was shipping
+    `info.input.method = "POST"` alongside a schema that only allows
+    GET/HEAD/DELETE for that same field - a self-contradictory
+    extensions.bazaar blob. CDP Facilitator's payload-shape validation choked
+    on this (surfaced as the confusing top-level "must match one of
+    [x402V2PaymentPayload, x402V1PaymentPayload]... requires 'scheme'" error,
+    since a malformed `extensions` value made the whole payload fail to match
+    either known shape) - confirmed by capturing the real payload sent to CDP
+    via the X-Debug-Payload-Sent response header and comparing method="POST"
+    hip4-alerts (rejected) against method="GET" macro-dday (accepted, same
+    double-nesting quirk, but its method value satisfies the Query schema's
+    enum).
 
-    **정직하게 밝혀둘 점**: 이 경고는 UserWarning이라 앱 기동 자체를 막지는
-    않는다(Python 경고는 기본적으로 실행을 중단시키지 않음) - 그래서
-    Render의 포트 바인딩 타임아웃과 직접적인 인과관계가 있다고 단정할 수는
-    없다. 하지만 기존 라우트에도 늘 있던 잠재 버그였고, Bazaar 인덱서 쪽의
-    실제 등록/카탈로그 반영 로직이 이 필드를 요구할 가능성이 높아서 고쳐야
-    맞다.
+    Fix: pass the raw example straight through as `input`, and pass
+    `body_type="json"` whenever the route's method is POST/PUT/PATCH so the
+    SDK builds the correct Body-type extension (method enum
+    ["POST","PUT","PATCH"]) instead of a Query-type one. This also
+    incidentally fixes the double-nesting for every route, GET ones included.
 
-    **추가 정직 고백 (2026-09-07, 배포 후 재확인)**: 위 수정을 실제 배포했는데도
-    Render 로그에서 완전히 똑같은 경고가 그대로 찍혔다 - `input`을 아무리 우리
-    쪽에서 `{"type": "http", "method": ..., "queryParams": ...}`로 감싸 넘겨도
-    바뀌지 않았다. 즉 설치된 `declare_discovery_extension()`(x402==2.21.0)은
-    우리가 넘긴 `input` 값을 최종 `info.input`에 그대로 쓰는 게 아니라, 자기
-    내부에서 다시 `{"type": "http", "queryParams": <우리가 넘긴 값 그대로>}`
-    식으로 한 번 더 감싸는 것으로 보인다 - 그러면 우리가 채워 넣은 `method`가
-    `queryParams` 자리 안에 파묻혀버려서 최종 `info.input`에는 여전히
-    `method`가 없다. 이건 우리 쪽 호출 코드로는 고칠 수 없는 **설치된 SDK
-    자체의 구현 한계**로 결론 내렸다 - 이 함수의 파라미터를 더 바꾸는 실험은
-    하지 말 것(2026-09-03 시도, 2026-09-07 재시도 둘 다 효과 없었음이 확인됨).
-
-    사용자와 상의 후 **의도적으로 그대로 둔다**: UserWarning일 뿐 결제/데이터
-    응답에는 영향이 없고, 이 배포(c539143) 자체는 Live 상태로 정상 동작
-    확인됨. 나중에 손대고 싶다면 두 가지 옵션뿐이다 - (a) `pip install -U
-    x402`로 이 헬퍼의 최신 버전이 문제를 고쳤는지 확인 후 업그레이드(결제
-    코드 전체를 건드리는 작업이라 별도 세션에서 신중하게 검증 필요), 또는
-    (b) 공식 헬퍼를 버리고 손으로 `extensions.bazaar` dict를 직접 구성 - 단,
-    2026-09-03 문서 상단에 기록된 대로 이 방식은 예전에 결제 처리 시점에
-    "invalid discovery configuration"으로 더 심각하게 거부당한 전례가 있어서
-    되돌아가면 안 된다.
+    --- superseded notes, kept for history ---
+    2026-09-03/09-07: earlier attempts to fix a startup UserWarning
+    ("input: 'method' is a required property") by hand-wrapping `input` as
+    `{"type","method","queryParams"}`. That warning was real but the fix was
+    incomplete - it didn't address the method-enum mismatch above, which only
+    started mattering once the first POST route (hip4-alerts/subscribe) was
+    added. Do not revert to that hand-wrapped shape.
     """
     if not _HAS_DISCOVERY_HELPER:
         logger.warning(
-            "x402.extensions.bazaar.declare_discovery_extension을 쓸 수 없어 "
-            "이 라우트는 Bazaar 디스커버리 메타데이터 없이 서빙됩니다. "
-            "'pip install -U x402'로 SDK를 업그레이드하면 자동으로 복구됩니다."
+            "x402.extensions.bazaar.declare_discovery_extension is unavailable - "
+            "this route will be served without Bazaar discovery metadata. "
+            "'pip install -U x402' should restore it automatically."
         )
         return {}
 
@@ -385,9 +391,11 @@ def _bazaar_extension(
     if output_example is not None or output_schema is not None:
         output = OutputConfig(example=output_example, schema=output_schema)
 
+    is_body_method = method.upper() in ("POST", "PUT", "PATCH")
     return declare_discovery_extension(
-        input={"type": "http", "method": method, "queryParams": input_example},
+        input=input_example,
         input_schema=input_schema,
+        body_type="json" if is_body_method else None,
         output=output,
     )
 
