@@ -933,7 +933,7 @@ def build_routes(
                 "filter for crypto markets, e.g. 'BTC') narrow the result; `limit` caps "
                 "how many rows come back (default 100, max 500). Instead of polling this "
                 "endpoint yourself, you can subscribe to push webhook alerts on probability "
-                "jumps via POST /v1/prediction/hip4-alerts/subscribe (event subscription, "
+                "jumps via GET /v1/prediction/hip4-alerts/subscribe-v2 (event subscription, "
                 "EXPERIMENTAL). Paid in USDC on Base."
             ),
             resource=_resource_url("/v1/prediction/hip4-snapshot"),
@@ -1024,26 +1024,44 @@ def build_routes(
         # settings.HIP4_EVENTS_ENABLED를 한 번 더 확인해 503을 반환하지만,
         # 애초에 결제를 걸지 않아야 "배달 안 되는 기능에 돈만 받는" 상황을
         # 원천 차단한다 (app/events.py 모듈 docstring 참고).
-        # 2026-09-30: this route was originally POST with a JSON body. After
-        # extensive isolation testing (removing the bazaar extensions blob
-        # entirely, fixing the method-enum mismatch, trimming tags to the
-        # documented <=5 cap, adding a free GET/HEAD probe handler on the same
-        # path) the CDP Facilitator verify() rejection ("'paymentPayload' is
-        # invalid: must match one of [x402V2PaymentPayload,
-        # x402V1PaymentPayload]...") persisted byte-for-byte identical every
-        # time, while every GET route in this file - at multiple price points
-        # ($0.01, $0.02, $0.03) - succeeded without any special handling. That
-        # isolates the cause to the HTTP method itself: CDP Facilitator's
-        # payment verification does not currently accept POST/body-type x402
-        # resources, even though the x402 SDK's Bazaar discovery extension has
-        # schema support for declaring them. Given that, this was redesigned
-        # as GET with query parameters instead of POST with a JSON body (see
-        # main.py's handler) - a real trade-off, since `secret` now travels in
-        # the URL query string rather than a request body (see its own
-        # description in main.py for the security note), but it's what
-        # actually works against CDP today. Revisit if/when CDP adds POST
-        # support.
-        routes["GET /v1/prediction/hip4-alerts/subscribe"] = _make_route_config(
+        #
+        # 2026-09-30 investigation, part 1: this route was originally POST
+        # with a JSON body. After extensive isolation testing (removing the
+        # bazaar extensions blob entirely, fixing a real method-enum
+        # mismatch, trimming tags to the documented <=5 cap, adding a free
+        # GET/HEAD probe handler on the same path) the CDP Facilitator
+        # verify() rejection ("'paymentPayload' is invalid: must match one of
+        # [x402V2PaymentPayload, x402V1PaymentPayload]...") persisted
+        # byte-for-byte identical every time, while every GET route in this
+        # file succeeded. That pointed at the HTTP method itself, so the
+        # route was redesigned as GET with query params (see main.py) - a
+        # real trade-off, since `secret` now travels in the URL query string.
+        #
+        # 2026-09-30 investigation, part 2: the GET redesign deployed above
+        # did NOT fix it - the identical CDP rejection persisted even for a
+        # plain GET request with a correctly-formed, self-consistent
+        # Bazaar query-type extension. That falsifies "CDP doesn't support
+        # POST" as the root cause. Re-reading the installed x402 SDK source
+        # directly (x402/http/facilitator_client_base.py:
+        # HTTPFacilitatorClientBase._build_request_body(),
+        # x402/client_base.py: x402ClientBase._create_payment_payload_v2_core())
+        # confirmed our own PaymentOption/route construction is byte-identical
+        # in shape to every succeeding route (_payment_option() is the same
+        # helper, same fields) - there is no remaining structural difference
+        # in our code between this route and, say, token-risk. The one thing
+        # that IS unique to this route: dozens of malformed payloads were
+        # submitted against this exact resource URL
+        # (https://.../v1/prediction/hip4-alerts/subscribe) during the
+        # POST-era testing above, before CDP Facilitator's Bazaar indexer
+        # auto-registers a resource off its first submission. Renaming the
+        # resource (this route, "-v2" suffix) is a cheap, free test (verify()
+        # fails before settlement, so no USDC is at risk) for whether CDP is
+        # holding some kind of resource-keyed state against the old URL. If
+        # "-v2" also fails identically, that theory is wrong too and this
+        # needs a CDP support ticket with the captured payload/requirements
+        # (X-Debug-Payload-Sent header, see _DebugLoggingFacilitatorClient
+        # above) attached as evidence.
+        routes["GET /v1/prediction/hip4-alerts/subscribe-v2"] = _make_route_config(
             accepts=[hip4_events_subscribe_option],
             mime_type="application/json",
             description=(
@@ -1054,13 +1072,12 @@ def build_routes(
                 "every ~5 minutes and diffs the result; it is not a true real-time feed from "
                 "Hyperliquid. Modeled loosely on a draft, not-yet-stable MCP Events spec - the "
                 "request/response shape may change, and subscriptions are not guaranteed to "
-                "survive a server restart. GET with query params (not POST/JSON body) because "
-                "CDP Facilitator currently only verifies GET/HEAD/DELETE-style x402 resources - "
+                "survive a server restart. GET with query params (not POST/JSON body) - "
                 "see the 'secret' param's description for the resulting trade-off. See free GET "
                 "/v1/prediction/hip4-alerts/event-types for the event catalog before "
                 "subscribing. Paid in USDC on Base."
             ),
-            resource=_resource_url("/v1/prediction/hip4-alerts/subscribe"),
+            resource=_resource_url("/v1/prediction/hip4-alerts/subscribe-v2"),
             extensions=_bazaar_extension(
                 method="GET",
                 input_example={

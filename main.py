@@ -965,7 +965,7 @@ async def hip4_snapshot_endpoint(
     tags=["market"],
     summary="[EXPERIMENTAL] List supported HIP-4 webhook event types (free)",
     description=(
-        "Free catalog endpoint - lists the event types GET hip4-alerts/subscribe "
+        "Free catalog endpoint - lists the event types GET hip4-alerts/subscribe-v2 "
         "accepts, the poll interval, default jump threshold, and subscription TTL. "
         "No payment required. Read this before calling subscribe."
     ),
@@ -974,8 +974,16 @@ async def hip4_alerts_event_types_endpoint():
     return JSONResponse(content=await list_event_types())
 
 
+# 2026-09-30: path carries a "-v2" suffix (not a real API version bump) as a
+# diagnostic test - see the long comment in app/payment.py's build_routes()
+# above the "GET /v1/prediction/hip4-alerts/subscribe-v2" route registration
+# for why (CDP Facilitator kept rejecting payment verification on the
+# original "/subscribe" path even after every other hypothesis was ruled
+# out; renaming the resource is a free test for CDP-side state tied to the
+# old, many-times-malformed URL). Revert the suffix if this turns out to be
+# unrelated and the real cause is found elsewhere.
 @app.get(
-    "/v1/prediction/hip4-alerts/subscribe",
+    "/v1/prediction/hip4-alerts/subscribe-v2",
     tags=["market"],
     summary="[EXPERIMENTAL] Subscribe to HIP-4 probability-jump webhook alerts",
     description=(
@@ -990,10 +998,8 @@ async def hip4_alerts_event_types_endpoint():
         "stabilized - the request/response shape may change. Subscriptions are not "
         "guaranteed to survive a server restart. Requires HIP4_EVENTS_ENABLED=true on the "
         "server or deliveries never fire even after a successful subscribe. Paid in USDC "
-        "on Base. NOTE: this is GET with query parameters (not POST with a JSON body) "
-        "because CDP Facilitator's x402 payment verification currently only accepts "
-        "GET/HEAD/DELETE-style resources - see the 'secret' parameter's own description "
-        "for the resulting security trade-off."
+        "on Base. NOTE: this is GET with query parameters (not POST with a JSON body) - "
+        "see the 'secret' parameter's own description for the resulting security trade-off."
     ),
     responses={
         200: {"model": Hip4AlertsSubscribeResponse},

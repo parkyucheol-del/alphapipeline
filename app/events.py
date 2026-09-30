@@ -21,7 +21,7 @@ EXPERIMENTAL - README/Bazaar 설명에도 명시할 것.
 app/mcp_server.py의 tools/call은 자체 결제 로직이 없다 - 내부 self-call이
 이미 결제가 걸려 있는 REST 경로(/v1/...)를 타면서 PaymentMiddlewareASGI가
 자동으로 결제를 강제한다. events/subscribe도 똑같은 트릭을 쓴다: 실제 구독
-생성 로직은 GET /v1/prediction/hip4-alerts/subscribe REST 엔드포인트에 있고
+생성 로직은 GET /v1/prediction/hip4-alerts/subscribe-v2 REST 엔드포인트에 있고
 (main.py, app/payment.py의 build_routes()에 유료로 등록), MCP의
 events/subscribe는 그 REST 경로를 internal self-call로 호출할 뿐이다. 그래서
 MCP로 구독하든 REST로 직접 구독하든 가격/결제 검증이 완전히 동일하게 적용된다.
@@ -159,7 +159,7 @@ async def create_subscription(
     underlying: str | None = None,
     threshold_pct: float | None = None,
 ) -> dict:
-    """GET /v1/prediction/hip4-alerts/subscribe 핸들러가 부른다 (main.py 참고).
+    """GET /v1/prediction/hip4-alerts/subscribe-v2 핸들러가 부른다 (main.py 참고).
 
     성공 시 subscription 레코드(dict)를 반환하고, 검증 실패 시 ValueError를
     던진다 (호출부가 400으로 매핑).

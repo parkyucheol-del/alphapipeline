@@ -80,7 +80,7 @@ class Settings:
     # 웹훅 전달이 이 횟수만큼 연속 실패하면(엔드포인트가 죽었다고 보고) 그
     # 구독을 자동으로 비활성화한다 - 죽은 엔드포인트에 계속 재시도하는 걸 방지.
     HIP4_EVENTS_MAX_CONSECUTIVE_FAILURES: int = int(os.getenv("HIP4_EVENTS_MAX_CONSECUTIVE_FAILURES", "5"))
-    # 구독 생성(GET /v1/prediction/hip4-alerts/subscribe) 1건당 가격.
+    # 구독 생성(GET /v1/prediction/hip4-alerts/subscribe-v2) 1건당 가격.
     # 단건 스냅샷 조회(PRICE_HIP4_SNAPSHOT_USDC=0.01)보다 비싸게 잡았다 - 구독은
     # 서버가 HIP4_EVENTS_SUBSCRIPTION_TTL_HOURS 동안 폴링 리소스를 계속
     # 써주는 대가라서다.
@@ -95,7 +95,7 @@ class Settings:
     CDP_API_KEY_SECRET: str = os.getenv("CDP_API_KEY_SECRET", "")
 
     # 2026-09-30 임시 디버그 플래그: true면 CDP Facilitator에 보내는 실제
-    # paymentPayload/paymentRequirements를 그대로 로그에 찍는다 (hip4-alerts/subscribe
+    # paymentPayload/paymentRequirements를 그대로 로그에 찍는다 (hip4-alerts/subscribe-v2
     # verify 400 원인 파악용, app/payment.py의 _DebugLoggingFacilitatorClient 참고).
     # 서명이 로그에 남으니 원인 찾으면 바로 false로 되돌릴 것.
     X402_DEBUG_LOG_PAYLOADS: bool = _get_bool("X402_DEBUG_LOG_PAYLOADS", False)
