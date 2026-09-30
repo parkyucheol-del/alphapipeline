@@ -1090,6 +1090,15 @@ def build_routes(
             #     output_schema=_inline_schema_defs(Hip4AlertsSubscribeResponse.model_json_schema()),
             # ),
             service_name="AlphaPipeline HIP-4 Alerts",
-            tags=["prediction-market", "hyperliquid", "hip4", "event-subscription", "webhook", "pre-trade-signal", "experimental"],
+            # 2026-09-30: trimmed from 7 tags down to the documented Bazaar cap of
+            # <=5 (see RouteConfig's own docstring above: "<= 5 tags of <= 32
+            # chars each"). This route was the ONLY one in this file with more
+            # than 5 tags - every other (working) route already stays at or
+            # under 5. Testing whether CDP Facilitator's verify() enforces this
+            # cap server-side and rejects the whole payload when it's exceeded,
+            # which would explain the otherwise-inexplicable "must match one of
+            # [x402V2PaymentPayload, x402V1PaymentPayload]" error persisting even
+            # after the extensions blob was removed entirely.
+            tags=["prediction-market", "hyperliquid", "hip4", "webhook", "pre-trade-signal"],
         )
     return routes
