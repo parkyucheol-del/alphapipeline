@@ -88,6 +88,7 @@ SDK를 쓰는 누군가가 이 bazaar extension을 echo하면서 실제 결제�
   반드시 재확인해야 한다 - 이 세션은 그 재검증까지는 못 했다.
 """
 import dataclasses
+import json
 import logging
 
 from x402.http import FacilitatorConfig, HTTPFacilitatorClient, PaymentOption
@@ -174,15 +175,25 @@ class _DebugLoggingFacilitatorClient(HTTPFacilitatorClient):
     """
 
     async def verify(self, payload, requirements):  # type: ignore[override]
+        dumped_payload = payload.model_dump(by_alias=True, exclude_none=True)
+        dumped_requirements = requirements.model_dump(by_alias=True, exclude_none=True)
         try:
             logger.warning(
                 "[x402-debug] verify() payload=%s requirements=%s",
-                payload.model_dump(by_alias=True, exclude_none=True),
-                requirements.model_dump(by_alias=True, exclude_none=True),
+                dumped_payload,
+                dumped_requirements,
             )
         except Exception:
             logger.exception("[x402-debug] verify() 로깅 중 오류 (검증 자체는 계속 진행)")
-        return await super().verify(payload, requirements)
+        try:
+            return await super().verify(payload, requirements)
+        except Exception as e:
+            # Render 로그가 안 보일 때를 대비해, 실패 시 실제로 보낸 payload를
+            # 예외 메시지 자체에 실어서 402 응답의 "error" 필드로 클라이언트에게
+            # 직접 돌려준다 - 서버 로그 접근 없이도 원인 파악 가능하게.
+            raise type(e)(
+                f"{e} || DEBUG_PAYLOAD_SENT={json.dumps(dumped_payload, default=str)}"
+            ) from e
 
 
 def _build_facilitator_client() -> HTTPFacilitatorClient:
