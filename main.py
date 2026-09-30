@@ -443,6 +443,16 @@ async def diag_hip4_clone_under_prediction_path_endpoint():
     return {"ok": True, "note": "Temporary diagnostic route - safe to ignore."}
 
 
+# 2026-09-30 TEMPORARY diagnostic route, round 9: removes only the "outcome
+# (prediction)" parenthetical clause, the one substring present unchanged in
+# every failing test so far - see the long comment in app/payment.py's
+# build_routes() above this route's registration. Delete once resolved,
+# alongside the routes above.
+@app.get("/v1/_diag/hip4-snapshot-clone-no-outcome-clause", include_in_schema=False)
+async def diag_hip4_snapshot_clone_no_outcome_clause_endpoint():
+    return {"ok": True, "note": "Temporary diagnostic route - safe to ignore."}
+
+
 @app.get(
     "/llms.txt",
     include_in_schema=False,  # x402 결제 대상 데이터 엔드포인트가 아니라 크롤러용 정적 문서라 OpenAPI 스펙에서는 뺌

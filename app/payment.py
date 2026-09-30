@@ -1353,6 +1353,46 @@ def build_routes(
             service_name="AlphaPipeline HIP-4 Snapshot",
             tags=["prediction-market", "hyperliquid", "hip4", "pre-trade-signal"],
         ),
+        # 2026-09-30 round 9: price ($0.02) and path prefix ("/v1/prediction/")
+        # have now ALSO been ruled out on top of the full real content - every
+        # single field/value we have varied across rounds 2-8 (hyperliquid,
+        # hip4/HIP-4, prediction-market tag, tag-combos, word-combos,
+        # service_name, sports wording, backticks, embedded route reference,
+        # price, path prefix) has been swapped out at least once WITHOUT
+        # fixing the rejection. The one substring that has been present,
+        # unchanged, character-for-character, in the description of every
+        # single failing test in this entire investigation (both real routes
+        # and all 9 clone variants) and is ABSENT from every succeeding test
+        # (including payment-test-combo-words, which used the differently-
+        # worded "a Hyperliquid prediction market" instead) is the opening
+        # clause "Hyperliquid's HIP-4 outcome (prediction) markets" - notably
+        # the "outcome (prediction)" parenthetical. This route removes only
+        # that clause (keeping every other previously-tested-safe piece:
+        # sports wording, backticks, URL reference, real tags/service_name,
+        # $0.02 price) - see payment-test-combo-tags/words in the section
+        # above for confirmation that "prediction-market"/"hyperliquid" alone
+        # are each independently safe. Delete once resolved.
+        "GET /v1/_diag/hip4-snapshot-clone-no-outcome-clause": _make_route_config(
+            accepts=[_payment_option(0.02)],
+            mime_type="application/json",
+            description=(
+                "Real-time pre-trade signal: a probability snapshot of Hyperliquid's "
+                "HIP-4 markets - crypto price binaries, sports game "
+                "winners, tournament winners, Fed rate decisions, and more, all in one "
+                "call. No curated market list - every field under `fields` is parsed "
+                "verbatim from Hyperliquid's own description string, so new HIP-4 market "
+                "types appear automatically. Optional `template` (substring filter on the "
+                "market type, e.g. 'sportsContestWinner') and `underlying` (asset symbol "
+                "filter for crypto markets, e.g. 'BTC') narrow the result; `limit` caps "
+                "how many rows come back (default 100, max 500). Instead of polling this "
+                "endpoint yourself, you can subscribe to push webhook alerts on probability "
+                "jumps via GET /v1/prediction/hip4-alerts/subscribe-v2 (event subscription, "
+                "EXPERIMENTAL). Paid in USDC on Base."
+            ),
+            resource=_resource_url("/v1/_diag/hip4-snapshot-clone-no-outcome-clause"),
+            service_name="AlphaPipeline HIP-4 Snapshot",
+            tags=["prediction-market", "hyperliquid", "hip4", "pre-trade-signal"],
+        ),
     }
     if dump_risk_enabled:
         routes["GET /v1/unlocks/dump-risk"] = _make_route_config(
