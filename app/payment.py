@@ -1393,6 +1393,37 @@ def build_routes(
             service_name="AlphaPipeline HIP-4 Snapshot",
             tags=["prediction-market", "hyperliquid", "hip4", "pre-trade-signal"],
         ),
+        # 2026-09-30 round 10: measuring every route's description length
+        # against pass/fail shows a clean gap - every succeeding route (real
+        # or diagnostic) has a description <= 458 chars; every failing route
+        # (both real hip4-snapshot/hip4-alerts-subscribe-v2, and every clone
+        # variant in rounds 4-9, none of which ever dropped below 635 chars
+        # since each round only trimmed one small clause) is >= 635 chars.
+        # This route tests that gap directly: real tags/service_name/price/
+        # resource-path-adjacent content, but a description rewritten from
+        # scratch to ~370 chars (well under the apparent ~500-char boundary)
+        # while keeping the same substantive meaning. If this succeeds,
+        # description length is the confirmed root cause (a CDP-side max
+        # length on the resource.description field, most likely 500, that
+        # produces this exact misleading "paymentPayload invalid" schema
+        # error when exceeded) and the real fix is simply shortening
+        # hip4-snapshot's and hip4-alerts-subscribe-v2's descriptions in
+        # production. Delete once resolved.
+        "GET /v1/_diag/hip4-snapshot-clone-short-desc": _make_route_config(
+            accepts=[hip4_snapshot_option],
+            mime_type="application/json",
+            description=(
+                "Real-time pre-trade signal: a probability snapshot of Hyperliquid's "
+                "HIP-4 prediction markets - crypto price binaries, sports outcomes, "
+                "tournament winners, and more, all in one call. Optional `template`/"
+                "`underlying` filters narrow the result; `limit` caps rows (max 500). "
+                "Subscribe to webhook alerts via GET /v1/prediction/hip4-alerts/subscribe-v2. "
+                "Paid in USDC on Base."
+            ),
+            resource=_resource_url("/v1/_diag/hip4-snapshot-clone-short-desc"),
+            service_name="AlphaPipeline HIP-4 Snapshot",
+            tags=["prediction-market", "hyperliquid", "hip4", "pre-trade-signal"],
+        ),
     }
     if dump_risk_enabled:
         routes["GET /v1/unlocks/dump-risk"] = _make_route_config(
