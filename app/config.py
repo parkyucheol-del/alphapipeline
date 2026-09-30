@@ -94,6 +94,12 @@ class Settings:
     CDP_API_KEY_ID: str = os.getenv("CDP_API_KEY_ID", "")
     CDP_API_KEY_SECRET: str = os.getenv("CDP_API_KEY_SECRET", "")
 
+    # 2026-09-30 임시 디버그 플래그: true면 CDP Facilitator에 보내는 실제
+    # paymentPayload/paymentRequirements를 그대로 로그에 찍는다 (hip4-alerts/subscribe
+    # verify 400 원인 파악용, app/payment.py의 _DebugLoggingFacilitatorClient 참고).
+    # 서명이 로그에 남으니 원인 찾으면 바로 false로 되돌릴 것.
+    X402_DEBUG_LOG_PAYLOADS: bool = _get_bool("X402_DEBUG_LOG_PAYLOADS", False)
+
     # CAIP-2 네트워크 식별자. 기본값은 Base 메인넷(eip155:8453).
     # CDP 키가 없어서 테스트넷 파실리테이터로 대체되는 경우, 이 값과 무관하게
     # Base Sepolia(eip155:84532)로 강제 전환된다 (app/payment.py 참고).

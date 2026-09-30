@@ -165,7 +165,32 @@ USE_CDP_FACILITATOR = bool(settings.CDP_API_KEY_ID and settings.CDP_API_KEY_SECR
 ACTIVE_NETWORK = settings.X402_NETWORK if USE_CDP_FACILITATOR else TESTNET_FALLBACK_NETWORK
 
 
+class _DebugLoggingFacilitatorClient(HTTPFacilitatorClient):
+    """임시 디버그용 래퍼 - verify() 직전에 실제로 CDP에 보낼 payload/requirements를
+    통째로 로그에 찍는다 (2026-09-30, hip4-alerts/subscribe 결제 검증 400 원인 파악용).
+
+    민감한 서명이 로그에 남으므로 원인 파악 후 곧바로 되돌릴 것 - env var
+    X402_DEBUG_LOG_PAYLOADS=true 로만 켜지므로 기본값(false)에서는 아무 영향 없다.
+    """
+
+    async def verify(self, payload, requirements):  # type: ignore[override]
+        try:
+            logger.warning(
+                "[x402-debug] verify() payload=%s requirements=%s",
+                payload.model_dump(by_alias=True, exclude_none=True),
+                requirements.model_dump(by_alias=True, exclude_none=True),
+            )
+        except Exception:
+            logger.exception("[x402-debug] verify() 로깅 중 오류 (검증 자체는 계속 진행)")
+        return await super().verify(payload, requirements)
+
+
 def _build_facilitator_client() -> HTTPFacilitatorClient:
+    client_cls = (
+        _DebugLoggingFacilitatorClient
+        if settings.X402_DEBUG_LOG_PAYLOADS
+        else HTTPFacilitatorClient
+    )
     if USE_CDP_FACILITATOR:
         # cdp-sdk가 CDP_API_KEY_ID / CDP_API_KEY_SECRET 환경변수를 직접 읽어서
         # 인증된 파실리테이터 설정을 만들어준다. main.py의 load_dotenv()가 먼저
@@ -175,7 +200,7 @@ def _build_facilitator_client() -> HTTPFacilitatorClient:
         logger.info(
             "CDP Facilitator(메인넷, %s)로 x402 결제를 검증/정산합니다.", settings.X402_NETWORK
         )
-        return HTTPFacilitatorClient(create_facilitator_config())
+        return client_cls(create_facilitator_config())
 
     logger.warning(
         "CDP_API_KEY_ID/CDP_API_KEY_SECRET이 설정되지 않아 공개 테스트넷 파실리테이터"
@@ -183,7 +208,7 @@ def _build_facilitator_client() -> HTTPFacilitatorClient:
         "정산되지 않습니다 - 실서비스 전에는 반드시 CDP Facilitator를 쓰도록 CDP 키를 넣으세요.",
         TESTNET_FALLBACK_NETWORK,
     )
-    return HTTPFacilitatorClient(FacilitatorConfig(url="https://x402.org/facilitator"))
+    return client_cls(FacilitatorConfig(url="https://x402.org/facilitator"))
 
 
 def build_resource_server() -> x402ResourceServer:
