@@ -1045,6 +1045,28 @@ async def hip4_alerts_subscribe_endpoint(payload: Hip4AlertsSubscribeRequest):
     )
 
 
+# 2026-09-30 TEMP DIAGNOSTIC: this route only ever had a POST handler, so a
+# GET/HEAD to this exact path returns FastAPI's default 405 Method Not Allowed.
+# After ruling out the bazaar extensions blob and the tag-count cap as causes
+# of CDP Facilitator's verify() rejection (byte-identical error persisted after
+# both were removed/fixed), the next hypothesis is that CDP does some kind of
+# liveness/reachability check against `resource.url` as part of verifying a
+# resource it hasn't seen before - and a 405 on that probe could be exactly
+# what's producing the generic "payload doesn't match any known shape" error.
+# This free GET/HEAD handler is not registered in build_routes()'s payment
+# gate dict, so it stays unpaid; it exists purely so a GET/HEAD to this URL
+# returns 200 instead of 405, to test that theory. Remove once confirmed
+# either way.
+@app.api_route("/v1/prediction/hip4-alerts/subscribe", methods=["GET", "HEAD"], include_in_schema=False)
+async def hip4_alerts_subscribe_probe_endpoint():
+    return JSONResponse(
+        content={
+            "error": "method_not_allowed",
+            "message": "Use POST to subscribe. See GET /v1/prediction/hip4-alerts/event-types for the event catalog.",
+        }
+    )
+
+
 @app.post(
     "/v1/prediction/hip4-alerts/unsubscribe",
     tags=["market"],
