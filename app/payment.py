@@ -1024,7 +1024,26 @@ def build_routes(
         # settings.HIP4_EVENTS_ENABLED를 한 번 더 확인해 503을 반환하지만,
         # 애초에 결제를 걸지 않아야 "배달 안 되는 기능에 돈만 받는" 상황을
         # 원천 차단한다 (app/events.py 모듈 docstring 참고).
-        routes["POST /v1/prediction/hip4-alerts/subscribe"] = _make_route_config(
+        # 2026-09-30: this route was originally POST with a JSON body. After
+        # extensive isolation testing (removing the bazaar extensions blob
+        # entirely, fixing the method-enum mismatch, trimming tags to the
+        # documented <=5 cap, adding a free GET/HEAD probe handler on the same
+        # path) the CDP Facilitator verify() rejection ("'paymentPayload' is
+        # invalid: must match one of [x402V2PaymentPayload,
+        # x402V1PaymentPayload]...") persisted byte-for-byte identical every
+        # time, while every GET route in this file - at multiple price points
+        # ($0.01, $0.02, $0.03) - succeeded without any special handling. That
+        # isolates the cause to the HTTP method itself: CDP Facilitator's
+        # payment verification does not currently accept POST/body-type x402
+        # resources, even though the x402 SDK's Bazaar discovery extension has
+        # schema support for declaring them. Given that, this was redesigned
+        # as GET with query parameters instead of POST with a JSON body (see
+        # main.py's handler) - a real trade-off, since `secret` now travels in
+        # the URL query string rather than a request body (see its own
+        # description in main.py for the security note), but it's what
+        # actually works against CDP today. Revisit if/when CDP adds POST
+        # support.
+        routes["GET /v1/prediction/hip4-alerts/subscribe"] = _make_route_config(
             accepts=[hip4_events_subscribe_option],
             mime_type="application/json",
             description=(
@@ -1035,70 +1054,53 @@ def build_routes(
                 "every ~5 minutes and diffs the result; it is not a true real-time feed from "
                 "Hyperliquid. Modeled loosely on a draft, not-yet-stable MCP Events spec - the "
                 "request/response shape may change, and subscriptions are not guaranteed to "
-                "survive a server restart. See free GET /v1/prediction/hip4-alerts/event-types "
-                "for the event catalog before subscribing. Paid in USDC on Base."
+                "survive a server restart. GET with query params (not POST/JSON body) because "
+                "CDP Facilitator currently only verifies GET/HEAD/DELETE-style x402 resources - "
+                "see the 'secret' param's description for the resulting trade-off. See free GET "
+                "/v1/prediction/hip4-alerts/event-types for the event catalog before "
+                "subscribing. Paid in USDC on Base."
             ),
             resource=_resource_url("/v1/prediction/hip4-alerts/subscribe"),
-            # 2026-09-30 TEMP DIAGNOSTIC: extensions dropped entirely to isolate
-            # whether the bazaar extensions blob is what's making CDP Facilitator
-            # reject this route's payment verify() - the body-type schema fix
-            # above (method enum POST/PUT/PATCH, self-consistent with the actual
-            # "POST" value) did NOT change the error at all, so the earlier
-            # "method enum mismatch" theory is likely wrong, or at least not the
-            # whole story. This isolates the variable: if verify() succeeds with
-            # no extensions, the extensions payload itself is implicated (even if
-            # not for the reason first suspected); if it still fails identically,
-            # extensions can be ruled out entirely. Restore the extensions=...
-            # call once this route is confirmed to take real payments.
-            # extensions=_bazaar_extension(
-            #     method="POST",
-            #     input_example={
-            #         "webhook_url": "https://example.com/webhooks/alphapipeline",
-            #         "secret": "replace-with-your-own-32-byte-random-secret",
-            #         "event_types": ["hip4.prob_jump"],
-            #         "underlying": "BTC",
-            #     },
-            #     input_schema={
-            #         "type": "object",
-            #         "properties": {
-            #             "webhook_url": {
-            #                 "type": "string",
-            #                 "format": "uri",
-            #                 "description": "https:// endpoint to receive signed POST deliveries. Private/loopback IPs are rejected.",
-            #             },
-            #             "secret": {
-            #                 "type": "string",
-            #                 "description": "Caller-generated shared secret (>=16 chars) used to HMAC-SHA256 sign each delivery. Not stored anywhere you can retrieve it later - keep your own copy.",
-            #             },
-            #             "event_types": {
-            #                 "type": "array",
-            #                 "items": {"type": "string"},
-            #                 "description": "Subset of event types to receive (default: all). See GET hip4-alerts/event-types.",
-            #             },
-            #             "underlying": {
-            #                 "type": "string",
-            #                 "description": "Optional filter: only this crypto underlying's markets (e.g. 'BTC').",
-            #             },
-            #             "threshold_pct": {
-            #                 "type": "number",
-            #                 "description": "Optional per-subscription override of the prob_jump threshold (0.0-1.0 scale).",
-            #             },
-            #         },
-            #         "required": ["webhook_url", "secret"],
-            #     },
-            #     output_example=HIP4_ALERTS_SUBSCRIBE_EXAMPLE,
-            #     output_schema=_inline_schema_defs(Hip4AlertsSubscribeResponse.model_json_schema()),
-            # ),
+            extensions=_bazaar_extension(
+                method="GET",
+                input_example={
+                    "webhook_url": "https://example.com/webhooks/alphapipeline",
+                    "secret": "replace-with-your-own-32-byte-random-secret",
+                    "event_types": ["hip4.prob_jump"],
+                    "underlying": "BTC",
+                },
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "webhook_url": {
+                            "type": "string",
+                            "format": "uri",
+                            "description": "https:// endpoint to receive signed POST deliveries. Private/loopback IPs are rejected.",
+                        },
+                        "secret": {
+                            "type": "string",
+                            "description": "Caller-generated shared secret (>=16 chars) used to HMAC-SHA256 sign each delivery. Not stored anywhere you can retrieve it later - keep your own copy. Travels in the URL query string (GET) - see the endpoint description.",
+                        },
+                        "event_types": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Subset of event types to receive (default: all). See GET hip4-alerts/event-types.",
+                        },
+                        "underlying": {
+                            "type": "string",
+                            "description": "Optional filter: only this crypto underlying's markets (e.g. 'BTC').",
+                        },
+                        "threshold_pct": {
+                            "type": "number",
+                            "description": "Optional per-subscription override of the prob_jump threshold (0.0-1.0 scale).",
+                        },
+                    },
+                    "required": ["webhook_url", "secret"],
+                },
+                output_example=HIP4_ALERTS_SUBSCRIBE_EXAMPLE,
+                output_schema=_inline_schema_defs(Hip4AlertsSubscribeResponse.model_json_schema()),
+            ),
             service_name="AlphaPipeline HIP-4 Alerts",
-            # 2026-09-30: trimmed from 7 tags down to the documented Bazaar cap of
-            # <=5 (see RouteConfig's own docstring above: "<= 5 tags of <= 32
-            # chars each"). This route was the ONLY one in this file with more
-            # than 5 tags - every other (working) route already stays at or
-            # under 5. Testing whether CDP Facilitator's verify() enforces this
-            # cap server-side and rejects the whole payload when it's exceeded,
-            # which would explain the otherwise-inexplicable "must match one of
-            # [x402V2PaymentPayload, x402V1PaymentPayload]" error persisting even
-            # after the extensions blob was removed entirely.
             tags=["prediction-market", "hyperliquid", "hip4", "webhook", "pre-trade-signal"],
         )
     return routes

@@ -1302,7 +1302,8 @@ async def _call_tool(body: dict, request: Request, client: httpx.AsyncClient) ->
 # 본떠 events/list, events/subscribe, events/unsubscribe 세 메서드만 우선
 # 구현했다. tools/call과 똑같은 셀프 ASGI 호출 패턴을 그대로 재사용해서
 # (아래), events/subscribe의 실제 결제 게이팅도 REST 경로
-# (POST /v1/prediction/hip4-alerts/subscribe)가 이미 걸려 있는 결제를 그대로
+# (GET /v1/prediction/hip4-alerts/subscribe - 원래 POST였다가 2026-09-30에
+# GET/query params로 바뀜, app/payment.py 참고)가 이미 걸려 있는 결제를 그대로
 # 탄다 - 이 파일에 결제 로직을 새로 만들지 않는다.
 #
 # capabilities 선언 키("io.modelcontextprotocol/events")는 아직 확정된 스펙이
@@ -1337,7 +1338,11 @@ async def _events_subscribe(body: dict, request: Request, client: httpx.AsyncCli
         forward_headers["X-PAYMENT"] = legacy_x_payment
 
     try:
-        upstream = await client.post("/v1/prediction/hip4-alerts/subscribe", json=params, headers=forward_headers)
+        # 2026-09-30: REST 쪽이 POST/JSON body에서 GET/query params로 바뀌었다
+        # (CDP Facilitator가 POST 기반 x402 리소스를 검증하지 못하는 문제 -
+        # app/payment.py의 build_routes() 주석 참고). httpx의 params=는 리스트
+        # 값(event_types)도 자동으로 반복 쿼리 파라미터로 직렬화해준다.
+        upstream = await client.get("/v1/prediction/hip4-alerts/subscribe", params=params, headers=forward_headers)
     except Exception as e:
         logger.exception("MCP events/subscribe internal self-call failed")
         return JSONResponse(content=_jsonrpc_error(req_id, -32000, f"Internal call failed: {e}"))

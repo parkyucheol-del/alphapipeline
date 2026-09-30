@@ -45,7 +45,6 @@ from app.schemas import (
     ErrorResponse,
     FundingAprMatrixResponse,
     FundingRateResponse,
-    Hip4AlertsSubscribeRequest,
     Hip4AlertsSubscribeResponse,
     Hip4AlertsUnsubscribeRequest,
     Hip4AlertsUnsubscribeResponse,
@@ -966,7 +965,7 @@ async def hip4_snapshot_endpoint(
     tags=["market"],
     summary="[EXPERIMENTAL] List supported HIP-4 webhook event types (free)",
     description=(
-        "Free catalog endpoint - lists the event types POST hip4-alerts/subscribe "
+        "Free catalog endpoint - lists the event types GET hip4-alerts/subscribe "
         "accepts, the poll interval, default jump threshold, and subscription TTL. "
         "No payment required. Read this before calling subscribe."
     ),
@@ -975,7 +974,7 @@ async def hip4_alerts_event_types_endpoint():
     return JSONResponse(content=await list_event_types())
 
 
-@app.post(
+@app.get(
     "/v1/prediction/hip4-alerts/subscribe",
     tags=["market"],
     summary="[EXPERIMENTAL] Subscribe to HIP-4 probability-jump webhook alerts",
@@ -991,7 +990,10 @@ async def hip4_alerts_event_types_endpoint():
         "stabilized - the request/response shape may change. Subscriptions are not "
         "guaranteed to survive a server restart. Requires HIP4_EVENTS_ENABLED=true on the "
         "server or deliveries never fire even after a successful subscribe. Paid in USDC "
-        "on Base."
+        "on Base. NOTE: this is GET with query parameters (not POST with a JSON body) "
+        "because CDP Facilitator's x402 payment verification currently only accepts "
+        "GET/HEAD/DELETE-style resources - see the 'secret' parameter's own description "
+        "for the resulting security trade-off."
     ),
     responses={
         200: {"model": Hip4AlertsSubscribeResponse},
@@ -999,7 +1001,35 @@ async def hip4_alerts_event_types_endpoint():
         402: {"description": "x402 payment required"},
     },
 )
-async def hip4_alerts_subscribe_endpoint(payload: Hip4AlertsSubscribeRequest):
+async def hip4_alerts_subscribe_endpoint(
+    webhook_url: str = Query(
+        description="https:// URL to receive Standard Webhooks-signed POST requests. Private/loopback IPs are rejected."
+    ),
+    secret: str = Query(
+        min_length=16,
+        description=(
+            "Shared secret you generate yourself (e.g. `openssl rand -base64 32`), used to "
+            "HMAC-SHA256 sign each delivery. Never sent back to you - keep your own copy. "
+            "SECURITY NOTE: because this endpoint is GET (a CDP Facilitator payment-protocol "
+            "requirement, not a design choice), this value travels in the URL query string "
+            "and so is HTTPS-encrypted in transit but may be recorded in server/CDN access "
+            "logs (ours and any intermediary's) the way any URL is. Treat it as a "
+            "moderate-sensitivity value: rotate it if you suspect exposure, and do not reuse "
+            "a secret you rely on elsewhere."
+        ),
+    ),
+    event_types: list[str] | None = Query(
+        default=None,
+        description="Subset of supported event types to receive (default: all). See GET /v1/prediction/hip4-alerts/event-types.",
+    ),
+    underlying: str | None = Query(
+        default=None, description="Optional filter: only receive events for this crypto underlying (e.g. 'BTC')."
+    ),
+    threshold_pct: float | None = Query(
+        default=None,
+        description="Optional per-subscription override of the prob_jump threshold (0.0-1.0 scale). Defaults to the server's HIP4_EVENTS_JUMP_THRESHOLD_PCT.",
+    ),
+):
     if not settings.HIP4_EVENTS_ENABLED:
         # 이중 방어: HIP4_EVENTS_ENABLED=false면 애초에 build_routes()가 이
         # 경로를 결제 게이트에 등록하지 않아 요금이 안 붙지만(위 add_middleware
@@ -1015,11 +1045,11 @@ async def hip4_alerts_subscribe_endpoint(payload: Hip4AlertsSubscribeRequest):
         )
     try:
         record = await create_subscription(
-            webhook_url=payload.webhook_url,
-            secret=payload.secret,
-            event_types=payload.event_types,
-            underlying=payload.underlying,
-            threshold_pct=payload.threshold_pct,
+            webhook_url=webhook_url,
+            secret=secret,
+            event_types=event_types,
+            underlying=underlying,
+            threshold_pct=threshold_pct,
         )
     except ValueError as e:
         return JSONResponse(status_code=400, content={"error": "invalid_request", "message": str(e)})
@@ -1041,28 +1071,6 @@ async def hip4_alerts_subscribe_endpoint(payload: Hip4AlertsSubscribeRequest):
                 "This is polling, not a true push feed. Subscriptions are not guaranteed to "
                 "survive a server restart. Renew by subscribing again before expires_at."
             ),
-        }
-    )
-
-
-# 2026-09-30 TEMP DIAGNOSTIC: this route only ever had a POST handler, so a
-# GET/HEAD to this exact path returns FastAPI's default 405 Method Not Allowed.
-# After ruling out the bazaar extensions blob and the tag-count cap as causes
-# of CDP Facilitator's verify() rejection (byte-identical error persisted after
-# both were removed/fixed), the next hypothesis is that CDP does some kind of
-# liveness/reachability check against `resource.url` as part of verifying a
-# resource it hasn't seen before - and a 405 on that probe could be exactly
-# what's producing the generic "payload doesn't match any known shape" error.
-# This free GET/HEAD handler is not registered in build_routes()'s payment
-# gate dict, so it stays unpaid; it exists purely so a GET/HEAD to this URL
-# returns 200 instead of 405, to test that theory. Remove once confirmed
-# either way.
-@app.api_route("/v1/prediction/hip4-alerts/subscribe", methods=["GET", "HEAD"], include_in_schema=False)
-async def hip4_alerts_subscribe_probe_endpoint():
-    return JSONResponse(
-        content={
-            "error": "method_not_allowed",
-            "message": "Use POST to subscribe. See GET /v1/prediction/hip4-alerts/event-types for the event catalog.",
         }
     )
 

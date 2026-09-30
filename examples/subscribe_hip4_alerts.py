@@ -2,7 +2,14 @@
 HIP-4 확률 급변 웹훅 구독을 실제로 결제해서 걸어보는 예제 클라이언트.
 
 examples/client_example.py와 거의 동일한 패턴(x402 공식 SDK로 실제 결제까지
-진행)이고, 차이는 GET이 아니라 POST + JSON body를 보낸다는 점뿐이다.
+진행)이고, 차이는 쿼리 파라미터(webhook_url/secret 등)를 같이 보낸다는 점뿐이다.
+
+2026-09-30: 원래는 POST + JSON body였는데, CDP Facilitator가 POST 기반 x402
+리소스의 결제 검증을 지원하지 않는 것으로 확인되어(여러 페이로드 변형을
+다 테스트해봤지만 동일하게 거부됨, GET 라우트는 가격에 상관없이 항상 성공)
+GET + 쿼리 파라미터 방식으로 바꿨다 (app/payment.py의 build_routes() 주석
+참고). secret이 URL 쿼리스트링에 실리게 되는 트레이드오프가 있다 - HTTPS라
+전송 중엔 암호화되지만, 서버/CDN 접근 로그에는 남을 수 있다.
 
 사용 전 준비물 (client_example.py와 동일):
   pip install "x402[https]" eth_account httpx
@@ -58,7 +65,7 @@ def _load_account() -> Account | None:
     return None
 
 
-def _load_subscribe_body() -> dict:
+def _load_subscribe_query() -> dict:
     webhook_url = os.getenv("HIP4_WEBHOOK_URL")
     secret = os.getenv("HIP4_WEBHOOK_SECRET")
     if not webhook_url or not secret:
@@ -72,7 +79,7 @@ def _load_subscribe_body() -> dict:
 
 
 async def subscribe() -> None:
-    body = _load_subscribe_body()
+    query = _load_subscribe_query()
     account = _load_account()
 
     if account is None:
@@ -83,7 +90,7 @@ async def subscribe() -> None:
         import httpx
 
         async with httpx.AsyncClient() as http:
-            resp = await http.post(f"{API_BASE}{ENDPOINT}", json=body)
+            resp = await http.get(f"{API_BASE}{ENDPOINT}", params=query)
             print(f"상태 코드: {resp.status_code}")
             print(resp.text[:1000])
             return
@@ -95,7 +102,7 @@ async def subscribe() -> None:
     http_client = x402HTTPClient(client)
 
     async with x402HttpxClient(client) as http:
-        response = await http.post(f"{API_BASE}{ENDPOINT}", json=body)
+        response = await http.get(f"{API_BASE}{ENDPOINT}", params=query)
         await response.aread()
 
         print(f"상태 코드: {response.status_code}")
