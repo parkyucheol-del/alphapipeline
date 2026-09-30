@@ -1048,6 +1048,75 @@ def build_routes(
             service_name="AlphaPipeline HIP-4 Snapshot",
             tags=["prediction-market", "hyperliquid", "hip4", "pre-trade-signal"],
         ),
+        # 2026-09-30 round 4: every isolated content probe (hyperliquid alone,
+        # hip4/HIP-4 alone as tag or text, prediction-market+hyperliquid tag
+        # combo, prediction-market+hyperliquid word combo) has SETTLED
+        # SUCCESSFULLY, so no single keyword or pairwise combination
+        # reproduces the rejection. This route is a byte-for-byte clone of
+        # "GET /v1/prediction/hip4-snapshot" above - identical accepts price,
+        # description, tags, service_name, and the real (not simplified)
+        # bazaar extensions/schema - registered at a brand-new resource path
+        # that has never been submitted to CDP before. If THIS succeeds, the
+        # cause is not content at all (not even in full combination) and must
+        # be specific to the literal "/v1/prediction/hip4-snapshot" resource
+        # itself (some CDP-side state keyed in a way we haven't captured, or
+        # a bug in our own route-matching). If THIS also fails, it confirms
+        # the real (full, non-simplified) content of hip4-snapshot is the
+        # trigger even though no individual piece of it reproduced alone -
+        # meaning some other single field we haven't yet isolated (the actual
+        # complex output_schema, the real input_schema, or the exact
+        # description wording combined) is responsible. Delete once resolved.
+        "GET /v1/_diag/hip4-snapshot-clone": _make_route_config(
+            accepts=[hip4_snapshot_option],
+            mime_type="application/json",
+            description=(
+                "Real-time pre-trade signal: a probability snapshot of Hyperliquid's "
+                "HIP-4 outcome (prediction) markets - crypto price binaries, sports game "
+                "winners, tournament winners, Fed rate decisions, and more, all in one "
+                "call. No curated market list - every field under `fields` is parsed "
+                "verbatim from Hyperliquid's own description string, so new HIP-4 market "
+                "types appear automatically. Optional `template` (substring filter on the "
+                "market type, e.g. 'sportsContestWinner') and `underlying` (asset symbol "
+                "filter for crypto markets, e.g. 'BTC') narrow the result; `limit` caps "
+                "how many rows come back (default 100, max 500). Instead of polling this "
+                "endpoint yourself, you can subscribe to push webhook alerts on probability "
+                "jumps via GET /v1/prediction/hip4-alerts/subscribe-v2 (event subscription, "
+                "EXPERIMENTAL). Paid in USDC on Base."
+            ),
+            resource=_resource_url("/v1/_diag/hip4-snapshot-clone"),
+            extensions=_bazaar_extension(
+                input_example={"underlying": "BTC"},
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "template": {
+                            "type": "string",
+                            "description": (
+                                "Optional substring filter on the market's template name "
+                                "(e.g. 'sportsContestWinner', 'priceBinary', "
+                                "'policyRateDecision')."
+                            ),
+                        },
+                        "underlying": {
+                            "type": "string",
+                            "description": (
+                                "Optional asset symbol filter for crypto markets (e.g. "
+                                "'BTC', 'ETH', 'SOL', 'HYPE')."
+                            ),
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Max rows per list (standalone_markets / grouped_questions each). Defaults to 100, max 500.",
+                        },
+                    },
+                    "required": [],
+                },
+                output_example=HIP4_SNAPSHOT_EXAMPLE,
+                output_schema=_inline_schema_defs(PredictionHip4SnapshotResponse.model_json_schema()),
+            ),
+            service_name="AlphaPipeline HIP-4 Snapshot",
+            tags=["prediction-market", "hyperliquid", "hip4", "pre-trade-signal"],
+        ),
     }
     if dump_risk_enabled:
         routes["GET /v1/unlocks/dump-risk"] = _make_route_config(

@@ -373,6 +373,17 @@ async def diag_payment_test_combo_words_endpoint():
     return {"ok": True, "note": "Temporary diagnostic route - safe to ignore."}
 
 
+# 2026-09-30 TEMPORARY diagnostic route, round 4. A byte-for-byte clone of
+# hip4-snapshot's full real RouteConfig (same price, description, tags, and
+# actual bazaar extension/schema - not simplified) registered at a brand-new
+# path, since no simplified content probe reproduced the rejection. See the
+# long comment in app/payment.py's build_routes() above this route's
+# registration. Delete once resolved, alongside the routes above.
+@app.get("/v1/_diag/hip4-snapshot-clone", include_in_schema=False)
+async def diag_hip4_snapshot_clone_endpoint():
+    return {"ok": True, "note": "Temporary diagnostic route - safe to ignore."}
+
+
 @app.get(
     "/llms.txt",
     include_in_schema=False,  # x402 결제 대상 데이터 엔드포인트가 아니라 크롤러용 정적 문서라 OpenAPI 스펙에서는 뺌
