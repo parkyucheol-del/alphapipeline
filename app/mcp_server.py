@@ -506,6 +506,33 @@ HIP4_SNAPSHOT_OUTPUT_SCHEMA = {
     ],
 }
 
+HIP4_PRICE_LADDER_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "generated_at": _TIMESTAMP_PAIR_SCHEMA,
+        "underlying": {"type": "string"},
+        "rung_count": {"type": "integer"},
+        "skipped_unparsable_count": {"type": "integer"},
+        "rungs": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "outcome_id": {"type": "integer"},
+                    "strike": {"type": "number"},
+                    "expiry": {"type": ["string", "null"]},
+                    "period": {"type": ["string", "null"]},
+                    "yes_price": {"type": ["number", "null"]},
+                },
+                "required": ["outcome_id", "strike"],
+            },
+        },
+        "data_source": {"type": "string"},
+        "notice": {"type": ["string", "null"]},
+    },
+    "required": ["generated_at", "underlying", "rung_count", "skipped_unparsable_count", "rungs", "data_source"],
+}
+
 WHALE_AUDIT_OUTPUT_SCHEMA = {
     "type": "object",
     "properties": {
@@ -1123,6 +1150,37 @@ _TOOLS: list[dict] = [
             "required": [],
         },
         "output_schema": HIP4_SNAPSHOT_OUTPUT_SCHEMA,
+        "annotations": _READ_ONLY_ANNOTATIONS,
+    },
+    {
+        "name": "prediction.hip4_price_ladder",
+        "path": "/v1/prediction/hip4-price-ladder",
+        "price_attr": "PRICE_HIP4_PRICE_LADDER_USDC",
+        "description": (
+            "Use this tool to see one underlying's Hyperliquid HIP-4 'above $X' "
+            "price-binary markets laid out as a strike-sorted ladder, each rung with its "
+            "live Yes probability - e.g. to read the market's implied BTC price "
+            "distribution at a glance. Reuses the same cached data as "
+            "prediction.hip4_snapshot - no new upstream call. No volume field "
+            "(Hyperliquid doesn't expose per-outcome volume for HIP-4). Do not use for "
+            "mutually-exclusive multi-outcome groups (use prediction.hip4_snapshot's "
+            "grouped_questions instead) or for Polymarket data. Paid in USDC on Base."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "underlying": {
+                    "type": "string",
+                    "description": "Asset symbol for crypto price-binary markets (e.g. 'BTC', 'ETH', 'SOL', 'HYPE').",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max rungs returned. Defaults to 100, max 500.",
+                },
+            },
+            "required": ["underlying"],
+        },
+        "output_schema": HIP4_PRICE_LADDER_OUTPUT_SCHEMA,
         "annotations": _READ_ONLY_ANNOTATIONS,
     },
     {

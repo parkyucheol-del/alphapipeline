@@ -105,6 +105,7 @@ from app.schemas import (
     FUNDING_APR_EXAMPLE,
     FUNDING_RATE_EXAMPLE,
     HIP4_ALERTS_SUBSCRIBE_EXAMPLE,
+    HIP4_PRICE_LADDER_EXAMPLE,
     HIP4_SNAPSHOT_EXAMPLE,
     KIMCHI_ALERT_EXAMPLE,
     MACRO_DDAY_EXAMPLE,
@@ -124,6 +125,7 @@ from app.schemas import (
     MacroDdayResponse,
     MarkdownResponse,
     PredictionExitCapacityAuditResponse,
+    PredictionHip4PriceLadderResponse,
     PredictionHip4SnapshotResponse,
     PredictionNegRiskArbitrageResponse,
     TokenDiagnosticResponse,
@@ -397,6 +399,7 @@ def build_routes(
     neg_risk_arbitrage_option = _payment_option(settings.PRICE_NEG_RISK_ARBITRAGE_USDC)
     exit_capacity_audit_option = _payment_option(settings.PRICE_EXIT_CAPACITY_AUDIT_USDC)
     hip4_snapshot_option = _payment_option(settings.PRICE_HIP4_SNAPSHOT_USDC)
+    hip4_price_ladder_option = _payment_option(settings.PRICE_HIP4_PRICE_LADDER_USDC)
     hip4_events_subscribe_option = _payment_option(settings.PRICE_HIP4_EVENTS_SUBSCRIBE_USDC)
 
     macro_dday_option = _payment_option(settings.PRICE_MACRO_DDAY_USDC)
@@ -906,6 +909,44 @@ def build_routes(
                 output_schema=_inline_schema_defs(PredictionHip4SnapshotResponse.model_json_schema()),
             ),
             service_name="AlphaPipeline HIP-4 Snapshot",
+            tags=["prediction-market", "hyperliquid", "hip4", "pre-trade-signal"],
+        ),
+        # 2026-10-01: hip4_snapshot의 캐시된 두 무료 API를 재사용하는 파생 뷰라
+        # 신규 업스트림 의존성이 없다 - app/logic.py의 get_hip4_price_ladder()
+        # 모듈 docstring 참고. description은 반드시 ~450자 미만으로 유지할 것
+        # (2026-09-30 CDP 설명문 길이 제한 버그 - 위 hip4-snapshot 주석 참고).
+        "GET /v1/prediction/hip4-price-ladder": _make_route_config(
+            accepts=[hip4_price_ladder_option],
+            mime_type="application/json",
+            description=(
+                "Price ladder for Hyperliquid HIP-4 'above $X' price-binary markets: "
+                "same-underlying outcomes sorted by strike, each with its live Yes "
+                "probability. Reuses hip4-snapshot's cached data - no new upstream call. "
+                "No volume field (Hyperliquid doesn't expose one for HIP-4). Required "
+                "`underlying` (e.g. BTC, ETH, SOL, HYPE); optional `limit` (max 500). "
+                "Paid in USDC on Base."
+            ),
+            resource=_resource_url("/v1/prediction/hip4-price-ladder"),
+            extensions=_bazaar_extension(
+                input_example={"underlying": "BTC"},
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "underlying": {
+                            "type": "string",
+                            "description": "Asset symbol for crypto price-binary markets (e.g. 'BTC', 'ETH', 'SOL', 'HYPE').",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Max rungs returned. Defaults to 100, max 500.",
+                        },
+                    },
+                    "required": ["underlying"],
+                },
+                output_example=HIP4_PRICE_LADDER_EXAMPLE,
+                output_schema=_inline_schema_defs(PredictionHip4PriceLadderResponse.model_json_schema()),
+            ),
+            service_name="AlphaPipeline HIP-4 Price Ladder",
             tags=["prediction-market", "hyperliquid", "hip4", "pre-trade-signal"],
         ),
     }

@@ -1004,6 +1004,47 @@ HIP4_SNAPSHOT_EXAMPLE = {
 }
 
 
+class Hip4LadderRung(BaseModel):
+    outcome_id: int
+    strike: float = Field(description="The outcome's own targetPrice field, parsed as a number.")
+    expiry: str | None = None
+    period: str | None = None
+    yes_price: float | None = Field(
+        default=None, description="Live mid-price for the 'Yes' side (0.0-1.0, an implied probability)."
+    )
+
+
+class PredictionHip4PriceLadderResponse(BaseModel):
+    generated_at: TimestampPair
+    underlying: str
+    rung_count: int
+    skipped_unparsable_count: int = Field(
+        description="Matching outcomes whose targetPrice wasn't a parseable number - excluded from rungs."
+    )
+    rungs: list[Hip4LadderRung]
+    data_source: str
+    notice: str | None = None
+
+
+HIP4_PRICE_LADDER_EXAMPLE = {
+    "generated_at": {"utc": "2026-10-01T12:00:00Z", "kst": "2026-10-01 21:00:00 KST"},
+    "underlying": "BTC",
+    "rung_count": 2,
+    "skipped_unparsable_count": 0,
+    "rungs": [
+        {"outcome_id": 6297, "strike": 83142.0, "expiry": "20260929-0600", "period": "1d", "yes_price": 0.399},
+        {"outcome_id": 6301, "strike": 90000.0, "expiry": "20260929-0600", "period": "1d", "yes_price": 0.081},
+    ],
+    "data_source": "hyperliquid_info_api",
+    "notice": (
+        "Derived from the same hip4_snapshot data (outcomeMeta + allMids, both cached) - no "
+        "separate upstream call. Only standalone 'priceBinary' outcomes for the given "
+        "underlying are included. Hyperliquid's public API does not expose per-outcome "
+        "volume for HIP-4 markets, so this ladder has no volume field."
+    ),
+}
+
+
 # ===== HIP-4 확률 급변 웹훅 이벤트 (2026-09-30 추가, EXPERIMENTAL) =====
 # app/events.py 모듈 docstring 참고 - 스펙이 아직 초안이라 필드가 나중에 바뀔 수 있다.
 class Hip4AlertsSubscribeRequest(BaseModel):

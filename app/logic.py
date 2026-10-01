@@ -2412,3 +2412,112 @@ async def get_hip4_snapshot(
         "data_source": "hyperliquid_info_api",
         "notice": _HIP4_SNAPSHOT_NOTICE,
     }
+
+
+# ============================================================================
+# prediction.hip4_price_ladder (2026-10-01) - Daily Alpha 아티팩트 2026-09-29
+# 브리핑("HIP-4 확률 데이터, 이렇게 쓴다") 활용법 1 구현. hip4_snapshot이 이미
+# 가져오는 두 무료 API(outcomeMeta/allMids, 둘 다 hip4_cache로 캐시됨)를
+# 그대로 재사용해서 재구조화만 한다 - 신규 업스트림 호출이 없다.
+#
+# 같은 브리핑의 활용법 2("매크로 리스크 점수")는 의도적으로 구현하지 않았다:
+# 연준/CPI 확률을 하나의 점수로 합치려면 임의의 가중치/정성적 판단이
+# 들어가는데, 이 프로젝트는 "safe_to_execute"/"confidence": "medium" 같은
+# 합성 정성 필드를 이미 두 번 반려한 전례가 있다(claude/pending-backlog-
+# 2026-09-10.md 참고) - 원시 확률 숫자만 제공하고 해석은 호출자에게 맡긴다.
+# ============================================================================
+
+_HIP4_PRICE_LADDER_NOTICE = (
+    "Derived from the same hip4_snapshot data (outcomeMeta + allMids, both "
+    "cached) - no separate upstream call. Only standalone 'priceBinary' "
+    "outcomes for the given underlying are included; grouped/mutually-"
+    "exclusive questions are not a price ladder and are excluded. strike is "
+    "the outcome's own targetPrice field, parsed as a number - rungs whose "
+    "targetPrice wasn't a parseable number are skipped (see "
+    "skipped_unparsable_count). Hyperliquid's public API does not expose "
+    "per-outcome trading volume for HIP-4 markets, so this ladder has no "
+    "volume field - never assume liquidity from a rung's presence here. The "
+    "outcome_id -> allMids price mapping is reverse-engineered, not "
+    "documented by Hyperliquid (see hip4_snapshot's notice) - treat any "
+    "single rung as a signal to cross-check, not a certainty."
+)
+
+
+def _hip4_target_price(fields: dict) -> float | None:
+    raw = fields.get("targetPrice")
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+async def get_hip4_price_ladder(underlying: str, limit: int = 100) -> dict:
+    """
+    Hyperliquid HIP-4의 'X가 특정 가격 이상/구간'형 priceBinary 마켓들을 같은
+    underlying(BTC/ETH/SOL/HYPE 등) 기준으로 모아, strike(targetPrice) 오름차순
+    사다리로 정렬해 돌려준다. GET /v1/prediction/hip4-price-ladder가 사용한다.
+
+    get_hip4_snapshot()과 같은 두 캐시된 무료 API(outcomeMeta/allMids)를
+    재사용하는 순수 재구조화 엔드포인트라 신규 의존성이 없다 - 모듈 docstring
+    참고(왜 "매크로 리스크 점수"는 의도적으로 안 만들었는지 포함).
+    """
+    meta, all_mids = await asyncio.gather(
+        ds.get_hyperliquid_outcome_meta(),
+        ds.get_hyperliquid_all_mids(),
+    )
+    outcomes_by_id = {o["outcome"]: o for o in meta.get("outcomes", [])}
+    questions = meta.get("questions", [])
+
+    grouped_outcome_ids: set[int] = set()
+    for q in questions:
+        if q.get("fallbackOutcome") is not None:
+            grouped_outcome_ids.add(q["fallbackOutcome"])
+        grouped_outcome_ids.update(q.get("namedOutcomes") or [])
+
+    underlying_filter = (underlying or "").strip().upper()
+    limit = max(1, min(limit or 100, 500))
+
+    rungs = []
+    skipped_unparsable = 0
+    for outcome_id in sorted(outcomes_by_id):
+        if outcome_id in grouped_outcome_ids:
+            continue
+        o = outcomes_by_id[outcome_id]
+        fields = _parse_hip4_description(o.get("description"))
+        if fields.get("class") != "priceBinary":
+            continue
+        asset = (fields.get("underlying") or fields.get("perp") or "").upper()
+        if asset != underlying_filter:
+            continue
+        strike = _hip4_target_price(fields)
+        if strike is None:
+            skipped_unparsable += 1
+            continue
+        sides = {
+            _hip4_side_name(spec.get("name", ""), fields): _hip4_price(all_mids, outcome_id, idx)
+            for idx, spec in enumerate(o.get("sideSpecs") or [])
+        }
+        rungs.append(
+            {
+                "outcome_id": outcome_id,
+                "strike": strike,
+                "expiry": fields.get("expiry"),
+                "period": fields.get("period"),
+                "yes_price": sides.get("Yes"),
+            }
+        )
+
+    rungs.sort(key=lambda r: r["strike"])
+    rungs = rungs[:limit]
+
+    return {
+        "generated_at": _timestamp_now(),
+        "underlying": underlying_filter,
+        "rung_count": len(rungs),
+        "skipped_unparsable_count": skipped_unparsable,
+        "rungs": rungs,
+        "data_source": "hyperliquid_info_api",
+        "notice": _HIP4_PRICE_LADDER_NOTICE,
+    }

@@ -57,6 +57,13 @@ class Settings:
     # 조합해서 재구조화만 하는 엔드포인트라(자체 오더북 조회/바스켓 계산 없음),
     # funding_rate/macro_dday와 같은 기본 티어로 매겼다.
     PRICE_HIP4_SNAPSHOT_USDC: float = float(os.getenv("PRICE_HIP4_SNAPSHOT_USDC", "0.01"))
+    # 2026-10-01 추가. hip4_snapshot이 이미 캐시해둔 동일한 두 무료 API 응답을
+    # 재사용해서 재정렬만 하는 파생 뷰라(신규 업스트림 호출 없음), 같은 기본
+    # 티어로 매겼다. Daily Alpha 아티팩트 2026-09-29 브리핑의 "BTC 확률 사다리"
+    # 아이디어 구현 - "매크로 리스크 점수" 쪽은 의도적으로 제외함(아래
+    # get_hip4_price_ladder() docstring 참고 - 정성적 합성 점수는 이미 두 번
+    # 반려된 safe_to_execute/confidence 패턴과 같은 리스크라 채택 금지 확정).
+    PRICE_HIP4_PRICE_LADDER_USDC: float = float(os.getenv("PRICE_HIP4_PRICE_LADDER_USDC", "0.01"))
 
     # ===== HIP-4 확률 급변 웹훅 이벤트 (2026-09-30 추가, EXPERIMENTAL) =====
     # app/events.py 모듈 docstring 참고. 기본값 False - dump-risk/kimchi-alert와

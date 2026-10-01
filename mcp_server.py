@@ -7,7 +7,7 @@ Also the exact server Glama's automated Docker build test introspects for
 this listing's "Server" score, so its tool count should track app/mcp_server.py
 (the paid remote server) 1:1 even though calls here bypass payment entirely.
 
-15 tools provided (same coverage as the paid remote /mcp server, just called
+16 tools provided (same coverage as the paid remote /mcp server, just called
 directly against app/logic.py instead of going through x402 payment):
   1.  convert_to_markdown(url)                              -> app/markdown_tool.py: url_to_markdown
   2.  get_token_dump_risk(symbol)                            -> app/logic.py: get_symbol_dump_risk
@@ -24,6 +24,7 @@ directly against app/logic.py instead of going through x402 payment):
   13. get_neg_risk_arbitrage(event_slug, ...)                -> app/logic.py: get_neg_risk_arbitrage
   14. get_exit_capacity_audit(position_size_shares, ...)     -> app/logic.py: get_exit_capacity_audit
   15. get_hip4_snapshot(template, underlying, limit)         -> app/logic.py: get_hip4_snapshot
+  16. get_hip4_price_ladder(underlying, limit)                -> app/logic.py: get_hip4_price_ladder
 
 Note (important, stated honestly):
   - This MCP server is a separate "distribution build" from the paid x402 HTTP
@@ -59,6 +60,7 @@ from app.logic import (
     get_exit_capacity_audit as _logic_exit_capacity_audit,
     get_funding_apr_matrix as _logic_funding_apr_matrix,
     get_funding_rate as _logic_funding_rate,
+    get_hip4_price_ladder as _logic_hip4_price_ladder,
     get_hip4_snapshot as _logic_hip4_snapshot,
     get_kimchi_alert as _logic_kimchi_alert,
     get_macro_calendar_dday as _logic_macro_calendar_dday,
@@ -681,6 +683,37 @@ async def get_hip4_snapshot(
     return await _safe_call(
         "get_hip4_snapshot",
         _logic_hip4_snapshot(template=template, underlying=underlying, limit=limit),
+    )
+
+
+@mcp.tool(name="prediction.hip4_price_ladder")
+async def get_hip4_price_ladder(underlying: str, limit: int = 100) -> dict:
+    """
+    One underlying's Hyperliquid HIP-4 "above $X" price-binary markets laid
+    out as a strike-sorted ladder, each rung with its live Yes probability -
+    e.g. to read the market's implied BTC price distribution at a glance.
+    Reuses the same cached data as prediction.hip4_snapshot - no new upstream
+    call. No volume field: Hyperliquid's public API does not expose
+    per-outcome trading volume for HIP-4 markets.
+
+    Do NOT use for mutually-exclusive multi-outcome groups (use
+    prediction.hip4_snapshot's grouped_questions instead) or for Polymarket
+    data. Always check the response's `notice` field - same
+    reverse-engineered-mapping caveat as prediction.hip4_snapshot.
+
+    Args:
+        underlying: Asset symbol for crypto price-binary markets (e.g. "BTC",
+            "ETH", "SOL", "HYPE").
+        limit: Max rungs returned. Defaults to 100, max 500.
+
+    Returns:
+        On success: {"success": true, "underlying", "rung_count",
+            "skipped_unparsable_count", "rungs", ...}
+        On failure: {"success": false, "error": {"type", "message"}}
+    """
+    return await _safe_call(
+        "get_hip4_price_ladder",
+        _logic_hip4_price_ladder(underlying=underlying, limit=limit),
     )
 
 

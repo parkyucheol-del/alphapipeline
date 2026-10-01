@@ -22,6 +22,7 @@ from app.logic import (
     get_exit_capacity_audit,
     get_funding_apr_matrix,
     get_funding_rate,
+    get_hip4_price_ladder,
     get_hip4_snapshot,
     get_kimchi_alert,
     get_macro_calendar_dday,
@@ -50,6 +51,7 @@ from app.schemas import (
     MacroDdayResponse,
     MarkdownResponse,
     PredictionExitCapacityAuditResponse,
+    PredictionHip4PriceLadderResponse,
     PredictionHip4SnapshotResponse,
     PredictionNegRiskArbitrageResponse,
     TokenDiagnosticResponse,
@@ -249,6 +251,7 @@ async def root(request: Request):
             "/v1/prediction/neg-risk-arbitrage": settings.PRICE_NEG_RISK_ARBITRAGE_USDC,
             "/v1/prediction/exit-capacity-audit": settings.PRICE_EXIT_CAPACITY_AUDIT_USDC,
             "/v1/prediction/hip4-snapshot": settings.PRICE_HIP4_SNAPSHOT_USDC,
+            "/v1/prediction/hip4-price-ladder": settings.PRICE_HIP4_PRICE_LADDER_USDC,
             "/v1/calendar/macro-dday": settings.PRICE_MACRO_DDAY_USDC,
             "/v1/tools/ai-markdown": settings.PRICE_AI_MARKDOWN_USDC,
             # KIMCHI_ALERT_ENABLED/DUMP_RISK_ENABLED가 실제 과금 여부를 결정하는 것과
@@ -279,6 +282,7 @@ async def root(request: Request):
             "/v1/prediction/neg-risk-arbitrage",
             "/v1/prediction/exit-capacity-audit",
             "/v1/prediction/hip4-snapshot",
+            "/v1/prediction/hip4-price-ladder",
             "/v1/calendar/macro-dday",
             "/v1/tools/ai-markdown",
             "/v1/market/kimchi-alert",
@@ -924,6 +928,41 @@ async def hip4_snapshot_endpoint(
         return JSONResponse(content=data)
     except Exception as e:
         logger.exception("hip4-snapshot 처리 실패")
+        return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
+
+
+@app.get(
+    "/v1/prediction/hip4-price-ladder",
+    tags=["market"],
+    summary="HIP-4 'price above $X' markets as a strike-sorted ladder",
+    description=(
+        "Use this endpoint to see a single underlying's Hyperliquid HIP-4 price-binary "
+        "markets (e.g. 'BTC above $X by <date>') laid out as a ladder sorted by strike, "
+        "each with its live Yes probability. Reuses the same cached data as "
+        "hip4-snapshot - no new upstream call. Input: required `underlying` (asset "
+        "symbol, e.g. 'BTC', 'ETH', 'SOL', 'HYPE') and optional `limit` (default 100, "
+        "max 500). Hyperliquid's public API does not expose per-outcome trading volume "
+        "for HIP-4 markets, so rungs have no volume field - do not assume liquidity "
+        "depth from a rung's presence. Read the response `notice` field for the same "
+        "reverse-engineered-mapping caveat as hip4-snapshot."
+    ),
+    responses={
+        200: {"model": PredictionHip4PriceLadderResponse, "description": "HIP-4 price ladder for one underlying"},
+        402: {"description": "x402 payment required"},
+        502: {"model": ErrorResponse, "description": "Upstream (Hyperliquid) error"},
+    },
+)
+async def hip4_price_ladder_endpoint(
+    underlying: str = Query(..., description="Asset symbol for crypto price-binary markets (e.g. 'BTC', 'ETH', 'SOL', 'HYPE')."),
+    limit: int = Query(100, description="Max rungs returned. Max 500."),
+):
+    _t0 = time.monotonic()
+    try:
+        data = await get_hip4_price_ladder(underlying=underlying, limit=limit)
+        data["latency_ms"] = round((time.monotonic() - _t0) * 1000)
+        return JSONResponse(content=data)
+    except Exception as e:
+        logger.exception("hip4-price-ladder 처리 실패")
         return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
 
 
