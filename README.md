@@ -222,6 +222,23 @@ Every number returned is either passed through unchanged from one of these upstr
 
 ---
 
+## In progress — stock discrepancy feed (4-week data trial, started 2026-10-08)
+
+Collecting hourly, not selling yet. `scripts/collect_stock_discrepancy.py` runs via `.github/workflows/stock-discrepancy-collect.yml` once an hour and appends to `data/stock_discrepancy_log.jsonl`. Nothing here is a paid endpoint — this is purely assembling the evidence to decide whether it should become one.
+
+**What's tracked**: last regular-session close, Base B20 token price (Aerodrome, via GeckoTerminal), Hyperliquid HIP-3 stock perp mark price + funding, and the discrepancy % between them, per symbol, per hour. Symbol list: NVDA, AAPL, META, GOOGL — **not** TSLA/MSTR/COIN, which an earlier brief named but which don't have a confirmed Coinbase B20/cbStock token on Aerodrome as of this writing (re-check before adding them back in).
+
+**Launch/hold decision, due ~2026-11-05 (4 weeks from start)** — needs 2 of 3 to clear:
+1. Weekend discrepancy direction (Friday close → Sunday night) matches the following Monday's opening-gap direction ≥65% of the time (sample: 4 weekends × symbol count, roughly 16-20 data points).
+2. A discrepancy >1% occurs at least once per weekend, across any symbol — this is what makes an alert product viable in the first place.
+3. Data gaps (`data_gap: true` rows — pool illiquidity, upstream API errors) stay ≤10% of all rows.
+
+**If it doesn't clear 2 of 3**: don't force a paid launch on a thin signal. Turn it into a free public dashboard instead and use it as a traffic funnel into the rest of AlphaPipeline.
+
+**Secondary, free feed**: the same cron also snapshots Kalshi's `KXBTC15M` 15-minute/hourly crypto prediction markets (public, no-auth API) into `data/kalshi_btc15m_log.jsonl`, to compare against `prediction.hip4_snapshot`'s own BTC probability later. No extra infrastructure cost; not part of the launch/hold decision above.
+
+---
+
 ## Disclaimer
 
 AlphaPipeline provides quantitative market data and analytics for informational and research purposes only. It does not execute trades, place orders, hold custody of user funds, or provide brokerage/betting/gambling services of any kind — it is a read-only data layer. Users are solely responsible for ensuring their use of this data complies with the laws and regulations applicable in their own jurisdiction.
