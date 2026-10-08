@@ -1,4 +1,4 @@
-name: stock-discrepancy-collect
+﻿name: stock-discrepancy-collect
 
 # Hourly collector for the Base B20 vs Hyperliquid HIP-3 stock weekend
 # discrepancy experiment (Daily Alpha brief, 2026-10-07/08). Separate from
@@ -8,8 +8,10 @@ name: stock-discrepancy-collect
 # keepalive cron actually exists.
 #
 # Runs scripts/collect_stock_discrepancy.py and commits whatever it appended
-# to data/*.jsonl straight back to main. No secrets needed - this job only
-# reads public market data, it never signs or sends a payment.
+# to data-public/*.jsonl straight back to main. Deliberately NOT data/ -
+# that directory is gitignored (HIP-4 webhook secrets live there, see
+# app/events.py) and silently refuses new files. No secrets needed here -
+# this job only reads public market data, it never signs or sends a payment.
 
 on:
   schedule:
@@ -41,7 +43,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/stock_discrepancy_log.jsonl data/kalshi_btc15m_log.jsonl
+          git add data-public/stock_discrepancy_log.jsonl data-public/kalshi_btc15m_log.jsonl
           git diff --cached --quiet && echo "no changes to commit" && exit 0
           git commit -m "data: hourly stock discrepancy + kalshi snapshot"
           git push

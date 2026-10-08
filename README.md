@@ -224,7 +224,7 @@ Every number returned is either passed through unchanged from one of these upstr
 
 ## In progress — stock discrepancy feed (4-week data trial, started 2026-10-08)
 
-Collecting hourly, not selling yet. `scripts/collect_stock_discrepancy.py` runs via `.github/workflows/stock-discrepancy-collect.yml` once an hour and appends to `data/stock_discrepancy_log.jsonl`. Nothing here is a paid endpoint — this is purely assembling the evidence to decide whether it should become one.
+Collecting hourly, not selling yet. `scripts/collect_stock_discrepancy.py` runs via `.github/workflows/stock-discrepancy-collect.yml` once an hour and appends to `data-public/stock_discrepancy_log.jsonl` (not `data/` — that directory is gitignored for HIP-4 webhook secrets; this data has nothing sensitive in it). Nothing here is a paid endpoint — this is purely assembling the evidence to decide whether it should become one.
 
 **What's tracked**: last regular-session close, Base B20 token price (Aerodrome, via GeckoTerminal), Hyperliquid HIP-3 stock perp mark price + funding, and the discrepancy % between them, per symbol, per hour. Symbol list: NVDA, AAPL, META, GOOGL — **not** TSLA/MSTR/COIN, which an earlier brief named but which don't have a confirmed Coinbase B20/cbStock token on Aerodrome as of this writing (re-check before adding them back in).
 
@@ -235,7 +235,7 @@ Collecting hourly, not selling yet. `scripts/collect_stock_discrepancy.py` runs 
 
 **If it doesn't clear 2 of 3**: don't force a paid launch on a thin signal. Turn it into a free public dashboard instead and use it as a traffic funnel into the rest of AlphaPipeline.
 
-**Secondary, free feed**: the same cron also snapshots Kalshi's `KXBTC15M` 15-minute/hourly crypto prediction markets (public, no-auth API) into `data/kalshi_btc15m_log.jsonl`, to compare against `prediction.hip4_snapshot`'s own BTC probability later. No extra infrastructure cost; not part of the launch/hold decision above.
+**Secondary, free feed**: the same cron also snapshots Kalshi's `KXBTC15M` 15-minute/hourly crypto prediction markets (public, no-auth API) into `data-public/kalshi_btc15m_log.jsonl`, to compare against `prediction.hip4_snapshot`'s own BTC probability later. No extra infrastructure cost; not part of the launch/hold decision above.
 
 ---
 

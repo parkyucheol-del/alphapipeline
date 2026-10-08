@@ -3,7 +3,9 @@ Hourly collector for the "Base B20 vs Hyperliquid HIP-3 stock perp" weekend
 discrepancy experiment (Daily Alpha brief, 2026-10-07/08).
 
 What this writes, once per run, one JSON line per tracked symbol, to
-data/stock_discrepancy_log.jsonl:
+data-public/stock_discrepancy_log.jsonl (not data/ - that directory is
+gitignored for HIP-4 webhook secrets, see app/events.py; this data has
+nothing sensitive in it so it lives somewhere that actually gets committed):
     {
       "symbol": "NVDA",
       "timestamp_utc": "...", "timestamp_kst": "...",
@@ -64,7 +66,7 @@ SYMBOLS = {
 
 KALSHI_SERIES_TICKER = "KXBTC15M"
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+DATA_DIR = Path(__file__).resolve().parent.parent / "data-public"
 STOCK_LOG_PATH = DATA_DIR / "stock_discrepancy_log.jsonl"
 KALSHI_LOG_PATH = DATA_DIR / "kalshi_btc15m_log.jsonl"
 
