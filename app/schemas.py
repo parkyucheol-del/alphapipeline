@@ -261,6 +261,15 @@ class ContractHealthAuditResponse(BaseModel):
     lp_locked_pct: float | None = None
     lp_burned_pct: float | None = None
     top_unlocked_holder_pct: float | None = None
+    top5_unlocked_holder_pct: float | None = Field(
+        default=None,
+        description=(
+            "Sum of the top 5 non-locked/non-burned LP holders' percentages (same "
+            "lp_holders data, no extra upstream call) - catches concentration spread "
+            "across several wallets that top_unlocked_holder_pct (single largest "
+            "holder only) would miss."
+        ),
+    )
     liquidity_health: str
     risk_flags: list[str] = []
     data_source: str
@@ -278,6 +287,7 @@ CONTRACT_HEALTH_EXAMPLE = {
     "lp_locked_pct": 0.0,
     "lp_burned_pct": 98.7,
     "top_unlocked_holder_pct": 1.1,
+    "top5_unlocked_holder_pct": 1.1,
     "liquidity_health": "LOCKED",
     "risk_flags": [],
     "data_source": "goplus",
@@ -288,10 +298,13 @@ CONTRACT_HEALTH_EXAMPLE = {
         "chain and is generally weaker outside Ethereum/BSC, so a low lp_locked_pct can "
         "mean 'actually unlocked' or just 'GoPlus doesn't recognize this locker'. Burn "
         "addresses are matched against a small known list and are always counted as "
-        "permanently secured. This tool checks LP lock/burn status only - it does not "
-        "re-run the honeypot/tax checks from security.token_risk, and it does not "
-        "evaluate transaction history for suspicious activity. Always cross-verify on a "
-        "block explorer before trusting liquidity as safe."
+        "permanently secured. top_unlocked_holder_pct is only the single largest "
+        "non-locked/non-burned holder - top5_unlocked_holder_pct sums the top 5 such "
+        "holders instead, since several wallets each under 50% individually can still "
+        "collectively hold most of the LP. This tool checks LP lock/burn status only - "
+        "it does not re-run the honeypot/tax checks from security.token_risk, and it "
+        "does not evaluate transaction history for suspicious activity. Always "
+        "cross-verify on a block explorer before trusting liquidity as safe."
     ),
 }
 
@@ -408,6 +421,10 @@ class TokenDiagnosticResponse(BaseModel):
     lp_locked_pct: float | None = None
     lp_burned_pct: float | None = None
     top_unlocked_holder_pct: float | None = None
+    top5_unlocked_holder_pct: float | None = Field(
+        default=None,
+        description="Sum of the top 5 non-locked/non-burned LP holders - see security.contract_health_audit's own field for detail.",
+    )
     risk_flags: list[str] = Field(
         default=[],
         description="Deduped union of security.token_risk's and security.contract_health_audit's risk_flags - no new flags are computed here.",
@@ -436,6 +453,7 @@ TOKEN_DIAGNOSTIC_EXAMPLE = {
     "lp_locked_pct": 0.0,
     "lp_burned_pct": 98.7,
     "top_unlocked_holder_pct": 1.1,
+    "top5_unlocked_holder_pct": 1.1,
     "risk_flags": [],
     "risk_flags_count": 0,
     "checks_completed": 2,

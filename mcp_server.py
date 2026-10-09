@@ -274,9 +274,11 @@ async def get_token_risk(chain_id: int, contract_address: str) -> dict:
 async def get_contract_health_audit(chain_id: int, contract_address: str) -> dict:
     """
     Audit LP lock/burn status for a token contract (GoPlus): lp_locked_pct,
-    lp_burned_pct, top_unlocked_holder_pct, rolled up into a liquidity_health
-    category (LOCKED / PARTIALLY_LOCKED / UNLOCKED / NO_LP_DATA). A key
-    rug-pull signal that get_token_risk does not cover.
+    lp_burned_pct, top_unlocked_holder_pct (largest single non-locked holder)
+    and top5_unlocked_holder_pct (top 5 non-locked holders summed, catches
+    multi-wallet concentration the single-holder field misses), rolled up
+    into a liquidity_health category (LOCKED / PARTIALLY_LOCKED / UNLOCKED /
+    NO_LP_DATA). A key rug-pull signal that get_token_risk does not cover.
 
     Use this to check whether a token's liquidity is locked, burned, or freely
     held by a single wallet before trusting it - complements, not replaces,

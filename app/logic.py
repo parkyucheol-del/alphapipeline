@@ -800,10 +800,13 @@ _CONTRACT_HEALTH_NOTICE = (
     "chain and is generally weaker outside Ethereum/BSC, so a low lp_locked_pct can "
     "mean 'actually unlocked' or just 'GoPlus doesn't recognize this locker'. Burn "
     "addresses are matched against a small known list and are always counted as "
-    "permanently secured. This tool checks LP lock/burn status only - it does not "
-    "re-run the honeypot/tax checks from security.token_risk, and it does not "
-    "evaluate transaction history for suspicious activity. Always cross-verify on a "
-    "block explorer before trusting liquidity as safe."
+    "permanently secured. top_unlocked_holder_pct is only the single largest "
+    "non-locked/non-burned holder - top5_unlocked_holder_pct sums the top 5 such "
+    "holders instead, since several wallets each under 50% individually can still "
+    "collectively hold most of the LP. This tool checks LP lock/burn status only - "
+    "it does not re-run the honeypot/tax checks from security.token_risk, and it "
+    "does not evaluate transaction history for suspicious activity. Always "
+    "cross-verify on a block explorer before trusting liquidity as safe."
 )
 
 
@@ -847,7 +850,7 @@ async def get_contract_health_audit(chain_id: int, contract_address: str) -> dic
 
     locked_pct = 0.0
     burned_pct = 0.0
-    top_unlocked_holder_pct = 0.0
+    unlocked_holder_pcts: list[float] = []
     for h in lp_holders_raw:
         addr = (h.get("address") or "").lower()
         try:
@@ -860,7 +863,15 @@ async def get_contract_health_audit(chain_id: int, contract_address: str) -> dic
         elif is_locked_flag:
             locked_pct += pct
         else:
-            top_unlocked_holder_pct = max(top_unlocked_holder_pct, pct)
+            unlocked_holder_pcts.append(pct)
+
+    unlocked_holder_pcts.sort(reverse=True)
+    top_unlocked_holder_pct = unlocked_holder_pcts[0] if unlocked_holder_pcts else 0.0
+    # top_unlocked_holder_pct는 "지갑 1개가 50%를 넘게 들고 있나"만 잡는다 - 여러
+    # 지갑이 각자 50% 밑으로 나눠 들었지만 합치면 LP 대부분을 쥔 경우는 놓친다.
+    # top5_unlocked_holder_pct(상위 5개 지갑 합산)로 그 사각지대를 보강한다
+    # (추가 업스트림 호출 없음 - 이미 받아온 lp_holders_raw를 재사용할 뿐).
+    top5_unlocked_holder_pct = sum(unlocked_holder_pcts[:5])
 
     risk_flags: list[str] = []
     if not lp_holders_raw:
@@ -889,6 +900,7 @@ async def get_contract_health_audit(chain_id: int, contract_address: str) -> dic
         "lp_locked_pct": round(locked_pct, 2) if lp_holders_raw else None,
         "lp_burned_pct": round(burned_pct, 2) if lp_holders_raw else None,
         "top_unlocked_holder_pct": round(top_unlocked_holder_pct, 2) if lp_holders_raw else None,
+        "top5_unlocked_holder_pct": round(top5_unlocked_holder_pct, 2) if lp_holders_raw else None,
         "liquidity_health": liquidity_health,
         "risk_flags": risk_flags,
         "data_source": "goplus",
@@ -1075,6 +1087,7 @@ async def get_token_diagnostic(chain_id: int, contract_address: str) -> dict:
         "lp_locked_pct": health.get("lp_locked_pct"),
         "lp_burned_pct": health.get("lp_burned_pct"),
         "top_unlocked_holder_pct": health.get("top_unlocked_holder_pct"),
+        "top5_unlocked_holder_pct": health.get("top5_unlocked_holder_pct"),
         "risk_flags": risk_flags,
         "risk_flags_count": len(risk_flags),
         "checks_completed": checks_completed,

@@ -189,6 +189,10 @@ CONTRACT_HEALTH_OUTPUT_SCHEMA = {
         "lp_locked_pct": {"type": ["number", "null"]},
         "lp_burned_pct": {"type": ["number", "null"]},
         "top_unlocked_holder_pct": {"type": ["number", "null"]},
+        "top5_unlocked_holder_pct": {
+            "type": ["number", "null"],
+            "description": "Sum of the top 5 non-locked/non-burned LP holders - catches concentration spread across several wallets that top_unlocked_holder_pct (single largest holder only) would miss.",
+        },
         "liquidity_health": {"type": "string"},
         "risk_flags": {"type": "array", "items": {"type": "string"}},
         "data_source": {"type": "string"},
@@ -219,6 +223,7 @@ TOKEN_DIAGNOSTIC_OUTPUT_SCHEMA = {
         "lp_locked_pct": {"type": ["number", "null"]},
         "lp_burned_pct": {"type": ["number", "null"]},
         "top_unlocked_holder_pct": {"type": ["number", "null"]},
+        "top5_unlocked_holder_pct": {"type": ["number", "null"]},
         "risk_flags": {"type": "array", "items": {"type": "string"}},
         "risk_flags_count": {"type": "integer"},
         "checks_completed": {"type": "integer"},
