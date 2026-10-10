@@ -1,0 +1,57 @@
+name: btc-cycle-metrics-collect
+
+# Daily cache refresh for market.cycle_compare (2026-10-10). Unlike
+# stock-discrepancy-collect.yml (hourly - that experiment needs intraday
+# granularity), this only needs to run once a day: days_since_halving and
+# the cycle-comparison fields don't meaningfully change within a day, and
+# BTC/ETH's own daily candle from Yahoo doesn't update faster than that
+# either.
+#
+# Writes/overwrites data-public/btc_cycle_metrics_cache.json (a derived
+# snapshot, not an append-only log like the stock-discrepancy JSONL files)
+# and commits it straight back to main. No wallet secret needed - this job
+# only reads public market data, same as stock-discrepancy-collect.yml.
+#
+# COINGECKO_API_KEY is optional: without it, btc_dominance_pct_today comes
+# back null (CoinGecko's /global needs a free Demo key - signed up
+# 2026-10-10, no card required) but the BTC/ETH price-cycle fields (the
+# main payload, sourced from Yahoo) still work fine. Add the key as a repo
+# secret of the same name to fill in dominance too.
+
+on:
+  schedule:
+    # :17 past midnight UTC, not :00, to avoid piling onto the exact top of
+    # the hour with everyone else's cron jobs (same reasoning as :13 in
+    # stock-discrepancy-collect.yml).
+    - cron: "17 0 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install httpx
+
+      - name: Run collector
+        env:
+          COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
+        run: python scripts/collect_btc_cycle_metrics.py
+
+      - name: Commit updated cache file
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data-public/btc_cycle_metrics_cache.json
+          git diff --cached --quiet && echo "no changes to commit" && exit 0
+          git commit -m "data: daily btc-cycle-metrics cache refresh"
+          git push
