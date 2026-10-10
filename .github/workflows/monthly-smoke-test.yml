@@ -1,0 +1,27 @@
+﻿name: monthly-smoke-test
+
+# Monthly paid smoke test for all 16 REST endpoints (examples/call_all_endpoints.py).
+# Needs a funded wallet private key as a GitHub secret to sign x402 payments unattended.
+# Before enabling: use a DEDICATED small wallet (never the trading wallet), fund with
+# ~$2-3 USDC on Base mainnet, add its private key as repo secret EVM_PRIVATE_KEY.
+# Until that secret exists, this runs but only does payment-free 402 checks.
+
+on:
+  schedule:
+    - cron: "19 5 1 * *"
+  workflow_dispatch: {}
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install "x402[https]" eth_account httpx
+      - name: Run full-endpoint smoke test
+        env:
+          EVM_PRIVATE_KEY: ${{ secrets.EVM_PRIVATE_KEY }}
+        run: python examples/call_all_endpoints.py

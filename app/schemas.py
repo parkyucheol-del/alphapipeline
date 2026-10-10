@@ -1063,6 +1063,96 @@ HIP4_PRICE_LADDER_EXAMPLE = {
 }
 
 
+# ===== market.cycle_compare (2026-10-10) =====
+# Scoped down from the original "historical dominance comparison" idea - see
+# app/logic.py's get_btc_cycle_compare() module comment for why.
+class CycleCoinMetrics(BaseModel):
+    price_usd_today: float | None = None
+    price_usd_on_current_halving: float | None = Field(
+        default=None, description="Price on the current cycle's halving date (2024-04-20)."
+    )
+    return_since_halving_pct: float | None = Field(
+        default=None, description="% change from price_usd_on_current_halving to today."
+    )
+    return_since_halving_pct_2016_cycle_same_day: float | None = Field(
+        default=None,
+        description=(
+            "What the % return since halving was for the 2016 cycle, at the same "
+            "days_since_halving offset. Null if price history doesn't reach back that far "
+            "(see notice)."
+        ),
+    )
+    return_vs_2016_cycle_pct: float | None = Field(
+        default=None,
+        description="return_since_halving_pct minus the 2016-cycle figure (percentage points).",
+    )
+    return_since_halving_pct_2020_cycle_same_day: float | None = Field(
+        default=None, description="Same as the 2016 field, but for the 2020 cycle."
+    )
+    return_vs_2020_cycle_pct: float | None = Field(
+        default=None, description="return_since_halving_pct minus the 2020-cycle figure."
+    )
+    data_ok: bool
+
+
+class CycleCompareResponse(BaseModel):
+    generated_at: TimestampPair
+    cache_generated_at_utc: str | None = Field(
+        default=None,
+        description="When the underlying daily cache was last refreshed - prices can be up to ~24h stale.",
+    )
+    current_cycle_halving_date: str
+    days_since_halving: int
+    btc: CycleCoinMetrics
+    eth: CycleCoinMetrics
+    btc_dominance_pct_today: float | None = Field(
+        default=None, description="Real BTC market-cap dominance, TODAY only - no historical comparison (see notice)."
+    )
+    dxy_level: float | None = None
+    us10y_yield_pct: float | None = None
+    data_source: str
+    notice: str | None = None
+
+
+CYCLE_COMPARE_EXAMPLE = {
+    "generated_at": {"utc": "2026-10-10T08:40:39Z", "kst": "2026-10-10 17:40:39 KST"},
+    "cache_generated_at_utc": "2026-10-10T08:40:39.726604+00:00",
+    "current_cycle_halving_date": "2024-04-20",
+    "days_since_halving": 903,
+    "btc": {
+        "price_usd_today": 82749.64,
+        "price_usd_on_current_halving": 60636.86,
+        "return_since_halving_pct": 36.47,
+        "return_since_halving_pct_2016_cycle_same_day": 499.14,
+        "return_vs_2016_cycle_pct": -462.67,
+        "return_since_halving_pct_2020_cycle_same_day": 116.63,
+        "return_vs_2020_cycle_pct": -80.16,
+        "data_ok": True,
+    },
+    "eth": {
+        "price_usd_today": 2491.83,
+        "price_usd_on_current_halving": 3147.29,
+        "return_since_halving_pct": -20.83,
+        "return_since_halving_pct_2016_cycle_same_day": None,
+        "return_vs_2016_cycle_pct": None,
+        "return_since_halving_pct_2020_cycle_same_day": 658.95,
+        "return_vs_2020_cycle_pct": -679.78,
+        "data_ok": True,
+    },
+    "btc_dominance_pct_today": 59.11,
+    "dxy_level": 102.21,
+    "us10y_yield_pct": 5.24,
+    "data_source": "yahoo_finance+coingecko_global",
+    "notice": (
+        "Price fields compare BTC/ETH's own USD price (Yahoo Finance) today vs the same "
+        "day-offset from each cycle's halving date - NOT total-market dominance compared "
+        "across cycles (that needs paid data everywhere checked). btc_dominance_pct_today "
+        "is real but is TODAY's value only, with no historical comparison. A null eth "
+        "2016-cycle field means Yahoo's ETH-USD history doesn't reach back that far."
+    ),
+}
+
+
 # ===== HIP-4 확률 급변 웹훅 이벤트 (2026-09-30 추가, EXPERIMENTAL) =====
 # app/events.py 모듈 docstring 참고 - 스펙이 아직 초안이라 필드가 나중에 바뀔 수 있다.
 class Hip4AlertsSubscribeRequest(BaseModel):

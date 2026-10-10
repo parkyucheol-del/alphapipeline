@@ -7,7 +7,7 @@ Also the exact server Glama's automated Docker build test introspects for
 this listing's "Server" score, so its tool count should track app/mcp_server.py
 (the paid remote server) 1:1 even though calls here bypass payment entirely.
 
-16 tools provided (same coverage as the paid remote /mcp server, just called
+17 tools provided (same coverage as the paid remote /mcp server, just called
 directly against app/logic.py instead of going through x402 payment):
   1.  convert_to_markdown(url)                              -> app/markdown_tool.py: url_to_markdown
   2.  get_token_dump_risk(symbol)                            -> app/logic.py: get_symbol_dump_risk
@@ -25,6 +25,7 @@ directly against app/logic.py instead of going through x402 payment):
   14. get_exit_capacity_audit(position_size_shares, ...)     -> app/logic.py: get_exit_capacity_audit
   15. get_hip4_snapshot(template, underlying, limit)         -> app/logic.py: get_hip4_snapshot
   16. get_hip4_price_ladder(underlying, limit)                -> app/logic.py: get_hip4_price_ladder
+  17. get_btc_cycle_compare()                                 -> app/logic.py: get_btc_cycle_compare
 
 Note (important, stated honestly):
   - This MCP server is a separate "distribution build" from the paid x402 HTTP
@@ -38,7 +39,7 @@ Note (important, stated honestly):
     get_token_dump_risk returns a structured "not yet available" response
     instead of an error (a business decision: pay for the DropsTab plan only
     after demand is validated).
-  - The other 10 tools call the same read-only app/logic.py functions the
+  - The other 11 tools call the same read-only app/logic.py functions the
     paid REST/remote-MCP endpoints call - no separate implementation to keep
     in sync, and no extra upstream cost beyond what those functions already do.
 
@@ -55,6 +56,7 @@ from mcp.server.fastmcp import FastMCP
 
 from app.logic import (
     get_arb_spread_matrix as _logic_arb_spread_matrix,
+    get_btc_cycle_compare as _logic_btc_cycle_compare,
     get_contract_health_audit as _logic_contract_health_audit,
     get_dex_liquidity_slippage as _logic_dex_liquidity_slippage,
     get_exit_capacity_audit as _logic_exit_capacity_audit,
@@ -717,6 +719,24 @@ async def get_hip4_price_ladder(underlying: str, limit: int = 100) -> dict:
         "get_hip4_price_ladder",
         _logic_hip4_price_ladder(underlying=underlying, limit=limit),
     )
+
+
+@mcp.tool(name="market.cycle_compare")
+async def get_btc_cycle_compare() -> dict:
+    """
+    BTC/ETH's own USD price position vs the same day-offset in the 2016 and
+    2020 halving cycles, plus today's real BTC dominance. NOT a historical
+    dominance comparison (no free data source exists for that - see the
+    response's notice field). Derived from a cache refreshed once daily (see
+    scripts/collect_btc_cycle_metrics.py), so prices can be up to ~24h stale.
+    No input params.
+
+    Returns:
+        On success: {"success": true, "btc", "eth", "btc_dominance_pct_today",
+            "dxy_level", "us10y_yield_pct", "days_since_halving", ...}
+        On failure: {"success": false, "error": {"type", "message"}}
+    """
+    return await _safe_call("get_btc_cycle_compare", _logic_btc_cycle_compare())
 
 
 if __name__ == "__main__":

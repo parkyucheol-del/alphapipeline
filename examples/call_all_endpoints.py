@@ -179,6 +179,10 @@ ENDPOINTS: list[EndpointCall] = [
         "/v1/prediction/hip4-price-ladder",
         {"underlying": "BTC"},
     ),
+    # --- 사이클 비교 (2026-10-10 추가) ---
+    EndpointCall(
+        "market.cycle_compare", "GET", "/v1/market/cycle-compare", {}
+    ),
     # --- 도구 ---
     EndpointCall(
         "tools.ai_markdown", "GET", "/v1/tools/ai-markdown", {"url": "https://example.com"}

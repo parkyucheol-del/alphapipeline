@@ -538,6 +538,39 @@ HIP4_PRICE_LADDER_OUTPUT_SCHEMA = {
     "required": ["generated_at", "underlying", "rung_count", "skipped_unparsable_count", "rungs", "data_source"],
 }
 
+_CYCLE_COIN_METRICS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "price_usd_today": {"type": ["number", "null"]},
+        "price_usd_on_current_halving": {"type": ["number", "null"]},
+        "return_since_halving_pct": {"type": ["number", "null"]},
+        "return_since_halving_pct_2016_cycle_same_day": {"type": ["number", "null"]},
+        "return_vs_2016_cycle_pct": {"type": ["number", "null"]},
+        "return_since_halving_pct_2020_cycle_same_day": {"type": ["number", "null"]},
+        "return_vs_2020_cycle_pct": {"type": ["number", "null"]},
+        "data_ok": {"type": "boolean"},
+    },
+    "required": ["data_ok"],
+}
+
+CYCLE_COMPARE_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "generated_at": _TIMESTAMP_PAIR_SCHEMA,
+        "cache_generated_at_utc": {"type": ["string", "null"]},
+        "current_cycle_halving_date": {"type": "string"},
+        "days_since_halving": {"type": "integer"},
+        "btc": _CYCLE_COIN_METRICS_SCHEMA,
+        "eth": _CYCLE_COIN_METRICS_SCHEMA,
+        "btc_dominance_pct_today": {"type": ["number", "null"]},
+        "dxy_level": {"type": ["number", "null"]},
+        "us10y_yield_pct": {"type": ["number", "null"]},
+        "data_source": {"type": "string"},
+        "notice": {"type": ["string", "null"]},
+    },
+    "required": ["generated_at", "current_cycle_halving_date", "days_since_halving", "btc", "eth", "data_source"],
+}
+
 WHALE_AUDIT_OUTPUT_SCHEMA = {
     "type": "object",
     "properties": {
@@ -1186,6 +1219,22 @@ _TOOLS: list[dict] = [
             "required": ["underlying"],
         },
         "output_schema": HIP4_PRICE_LADDER_OUTPUT_SCHEMA,
+        "annotations": _READ_ONLY_ANNOTATIONS,
+    },
+    {
+        "name": "market.cycle_compare",
+        "path": "/v1/market/cycle-compare",
+        "price_attr": "PRICE_CYCLE_COMPARE_USDC",
+        "description": (
+            "Use this tool to see BTC/ETH's own price position vs the same day-offset "
+            "in the 2016 and 2020 halving cycles, plus today's real BTC dominance. This "
+            "is NOT a historical dominance comparison (no free data source exists for "
+            "that - see the response's notice field). Derived from a cache refreshed "
+            "once daily, so prices can be up to ~24h stale. No input params. Paid in "
+            "USDC on Base."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+        "output_schema": CYCLE_COMPARE_OUTPUT_SCHEMA,
         "annotations": _READ_ONLY_ANNOTATIONS,
     },
     {

@@ -8,7 +8,8 @@ import json
 import logging
 import re
 import time
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
+from pathlib import Path
 from app import data_sources as ds
 from app.cache import unlock_cache, price_cache, ttl_cached
 from app.config import settings
@@ -2533,4 +2534,91 @@ async def get_hip4_price_ladder(underlying: str, limit: int = 100) -> dict:
         "rungs": rungs,
         "data_source": "hyperliquid_info_api",
         "notice": _HIP4_PRICE_LADDER_NOTICE,
+    }
+
+
+# ============================================================================
+# market.cycle_compare (2026-10-10) - scoped-down version of a pitched "BTC
+# halving-cycle dominance comparison" idea. True historical dominance needs
+# paid data everywhere checked (see PRICE_CYCLE_COMPARE_USDC's comment in
+# app/config.py and scripts/collect_btc_cycle_metrics.py's module docstring
+# for the full trail: CoinGecko's historical global market-cap chart is
+# Analyst-plan ($103/mo) and up, CoinMetrics Community 401s even on its
+# catalog endpoint, CoinGecko's free Demo plan caps ALL historical data at
+# 365 days, Kraken's free public OHLC caps at ~2 years with no way to page
+# further back). So this compares BTC/ETH's own USD PRICE against the same
+# day-offset in the 2016 and 2020 halving cycles instead, plus today's real
+# (non-historical) BTC dominance.
+#
+# Pure re-serve of a daily-refreshed cache file - no upstream call at
+# request time, same "derived view, no new dependency" shape as
+# get_hip4_price_ladder() above. scripts/collect_btc_cycle_metrics.py (run
+# daily via .github/workflows/btc-cycle-metrics-collect.yml) does the
+# actual fetching/computing from Yahoo Finance (BTC-USD/ETH-USD, range=max)
+# + CoinGecko (/global, today's dominance only) and writes
+# data-public/btc_cycle_metrics_cache.json; this function just reads that
+# back and recomputes days_since_halving live (pure calendar math, correct
+# even if the cache itself is up to a day stale).
+# ============================================================================
+
+_CYCLE_COMPARE_CACHE_PATH = Path(__file__).resolve().parent.parent / "data-public" / "btc_cycle_metrics_cache.json"
+
+_CYCLE_HALVING_DATES = {
+    "2016_cycle": date(2016, 7, 9),
+    "2020_cycle": date(2020, 5, 11),
+    "current_cycle": date(2024, 4, 20),
+}
+
+_CYCLE_COMPARE_NOTICE = (
+    "Price fields compare BTC/ETH's own USD price (Yahoo Finance) today vs the "
+    "same day-offset from each cycle's halving date - NOT total-market dominance "
+    "compared across cycles (that needs paid data everywhere checked: CoinGecko's "
+    "historical global market-cap chart is Analyst-plan and up, CoinMetrics "
+    "Community 401s, CoinGecko's free Demo plan caps history at 365 days, Kraken's "
+    "free OHLC caps at ~2 years). btc_dominance_pct_today is real but is TODAY's "
+    "value only, with no historical comparison. A null return_since_halving_pct_"
+    "2016_cycle_same_day for eth means Yahoo's ETH-USD history doesn't reach back "
+    "that far - btc and the 2020-cycle fields are unaffected. Pure re-serve of a "
+    "cache file refreshed once daily - prices can be up to ~24h stale."
+)
+
+
+async def get_btc_cycle_compare() -> dict:
+    """
+    반감기 이후 경과일수 기준 BTC/ETH 가격이 2016/2020 사이클의 같은 시점 대비
+    몇 % 위/아래인지, 오늘자 실제 BTC 도미넌스, DXY/US10Y를 묶어서 돌려준다.
+    GET /v1/market/cycle-compare가 사용한다.
+
+    신규 업스트림 호출 없음 - scripts/collect_btc_cycle_metrics.py가 매일 1회
+    채워두는 data-public/btc_cycle_metrics_cache.json을 그대로 읽기만 한다
+    (hip4_price_ladder와 같은 "파생 재사용, 신규 의존성 없음" 패턴). 모듈 위
+    주석 참고 - 원래 의도였던 "과거 도미넌스 비교"가 왜 가격 비교로 축소됐는지.
+    """
+    if not _CYCLE_COMPARE_CACHE_PATH.exists():
+        raise ValueError(
+            "btc_cycle_metrics 캐시 파일이 없습니다 - "
+            "scripts/collect_btc_cycle_metrics.py가 아직 한 번도 안 돌았거나 "
+            "GitHub Actions 크론(btc-cycle-metrics-collect.yml)이 실패했습니다"
+        )
+
+    try:
+        cached = json.loads(_CYCLE_COMPARE_CACHE_PATH.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        raise ValueError(f"btc_cycle_metrics 캐시 파일을 읽지 못했습니다: {exc}") from exc
+
+    today = date.today()
+    days_since_halving = (today - _CYCLE_HALVING_DATES["current_cycle"]).days
+
+    return {
+        "generated_at": _timestamp_now(),
+        "cache_generated_at_utc": cached.get("generated_at_utc"),
+        "current_cycle_halving_date": str(_CYCLE_HALVING_DATES["current_cycle"]),
+        "days_since_halving": days_since_halving,
+        "btc": cached.get("btc"),
+        "eth": cached.get("eth"),
+        "btc_dominance_pct_today": cached.get("btc_dominance_pct_today"),
+        "dxy_level": cached.get("dxy_level"),
+        "us10y_yield_pct": cached.get("us10y_yield_pct"),
+        "data_source": "yahoo_finance+coingecko_global",
+        "notice": _CYCLE_COMPARE_NOTICE,
     }

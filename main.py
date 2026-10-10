@@ -16,6 +16,7 @@ from app.config import settings
 from app.scheduler import start_scheduler
 from app.logic import (
     get_arb_spread_matrix,
+    get_btc_cycle_compare,
     get_contract_health_audit,
     get_dex_liquidity_slippage,
     get_dump_risk,
@@ -39,6 +40,7 @@ from app.events import cancel_subscription, create_subscription, list_event_type
 from app.schemas import (
     ArbSpreadResponse,
     ContractHealthAuditResponse,
+    CycleCompareResponse,
     DexSlippageResponse,
     DumpRiskResponse,
     ErrorResponse,
@@ -252,6 +254,7 @@ async def root(request: Request):
             "/v1/prediction/exit-capacity-audit": settings.PRICE_EXIT_CAPACITY_AUDIT_USDC,
             "/v1/prediction/hip4-snapshot": settings.PRICE_HIP4_SNAPSHOT_USDC,
             "/v1/prediction/hip4-price-ladder": settings.PRICE_HIP4_PRICE_LADDER_USDC,
+            "/v1/market/cycle-compare": settings.PRICE_CYCLE_COMPARE_USDC,
             "/v1/calendar/macro-dday": settings.PRICE_MACRO_DDAY_USDC,
             "/v1/tools/ai-markdown": settings.PRICE_AI_MARKDOWN_USDC,
             # KIMCHI_ALERT_ENABLED/DUMP_RISK_ENABLED가 실제 과금 여부를 결정하는 것과
@@ -283,6 +286,7 @@ async def root(request: Request):
             "/v1/prediction/exit-capacity-audit",
             "/v1/prediction/hip4-snapshot",
             "/v1/prediction/hip4-price-ladder",
+            "/v1/market/cycle-compare",
             "/v1/calendar/macro-dday",
             "/v1/tools/ai-markdown",
             "/v1/market/kimchi-alert",
@@ -964,6 +968,37 @@ async def hip4_price_ladder_endpoint(
         return JSONResponse(content=data)
     except Exception as e:
         logger.exception("hip4-price-ladder 처리 실패")
+        return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
+
+
+@app.get(
+    "/v1/market/cycle-compare",
+    tags=["market"],
+    summary="BTC/ETH price performance vs. prior post-halving cycles, plus macro context",
+    description=(
+        "Use this endpoint to see how far BTC/ETH price performance since the current "
+        "halving (2024-04-20) compares to the same point in the 2016 and 2020 post-halving "
+        "cycles, plus today's real BTC dominance and macro context (DXY, US 10Y yield). "
+        "Reads from a daily-refreshed cache (no live upstream call at request time). "
+        "Note: this compares raw price return, not true market-cap dominance history - "
+        "free dominance-history data does not exist, so 2016-cycle dominance comparison "
+        "is not included (see response `notice` field). ETH has no 2016-cycle figures "
+        "since ETH did not exist yet."
+    ),
+    responses={
+        200: {"model": CycleCompareResponse, "description": "BTC/ETH cycle-relative price comparison"},
+        402: {"description": "x402 payment required"},
+        502: {"model": ErrorResponse, "description": "Upstream (cache read) error"},
+    },
+)
+async def cycle_compare_endpoint():
+    _t0 = time.monotonic()
+    try:
+        data = await get_btc_cycle_compare()
+        data["latency_ms"] = round((time.monotonic() - _t0) * 1000)
+        return JSONResponse(content=data)
+    except Exception as e:
+        logger.exception("cycle-compare 처리 실패")
         return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
 
 

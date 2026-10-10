@@ -65,6 +65,18 @@ class Settings:
     # 반려된 safe_to_execute/confidence 패턴과 같은 리스크라 채택 금지 확정).
     PRICE_HIP4_PRICE_LADDER_USDC: float = float(os.getenv("PRICE_HIP4_PRICE_LADDER_USDC", "0.01"))
 
+    # 2026-10-10 추가. 원래 아이디어("과거 사이클 대비 도미넌스 괴리율")는 무료
+    # 소스가 없어서(CoinGecko 과거 글로벌 시총 차트=Analyst 플랜 이상, CoinMetrics
+    # Community=인증 필요, CoinGecko Demo 플랜도 과거 데이터 365일 제한, Kraken
+    # 공개 OHLC=최근 720개봉 제한) 가격 기반 사이클 비교로 축소함(scripts/
+    # collect_btc_cycle_metrics.py 모듈 docstring 참고). 매일 1회 크론이 BTC/ETH
+    # 전체 가격 히스토리(Yahoo Finance)를 받아 반감기 사이클 비교를 미리 계산해
+    # data-public/btc_cycle_metrics_cache.json에 캐시해두고, 이 엔드포인트는 그
+    # 파일만 읽는다(요청 시 신규 업스트림 호출 없음) - hip4_price_ladder와 같은
+    # "파생 재사용" 패턴이라 같은 기본 티어로 매겼다. 검증 안 된 시황 계열(
+    # kimchi-alert/dump-risk와 같은 분류)이라 기대치는 낮게 잡을 것.
+    PRICE_CYCLE_COMPARE_USDC: float = float(os.getenv("PRICE_CYCLE_COMPARE_USDC", "0.01"))
+
     # ===== HIP-4 확률 급변 웹훅 이벤트 (2026-09-30 추가, EXPERIMENTAL) =====
     # app/events.py 모듈 docstring 참고. 기본값 False - dump-risk/kimchi-alert와
     # 같은 패턴으로, 실제 webhook.site 등으로 직접 동작을 검증하기 전까지는

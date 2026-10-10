@@ -99,6 +99,7 @@ from app.config import settings
 from app.schemas import (
     ARB_SPREAD_EXAMPLE,
     CONTRACT_HEALTH_EXAMPLE,
+    CYCLE_COMPARE_EXAMPLE,
     DEX_SLIPPAGE_EXAMPLE,
     DUMP_RISK_EXAMPLE,
     EXIT_CAPACITY_AUDIT_EXAMPLE,
@@ -116,6 +117,7 @@ from app.schemas import (
     WHALE_AUDIT_EXAMPLE,
     ArbSpreadResponse,
     ContractHealthAuditResponse,
+    CycleCompareResponse,
     DexSlippageResponse,
     DumpRiskResponse,
     FundingAprMatrixResponse,
@@ -401,6 +403,7 @@ def build_routes(
     hip4_snapshot_option = _payment_option(settings.PRICE_HIP4_SNAPSHOT_USDC)
     hip4_price_ladder_option = _payment_option(settings.PRICE_HIP4_PRICE_LADDER_USDC)
     hip4_events_subscribe_option = _payment_option(settings.PRICE_HIP4_EVENTS_SUBSCRIBE_USDC)
+    cycle_compare_option = _payment_option(settings.PRICE_CYCLE_COMPARE_USDC)
 
     macro_dday_option = _payment_option(settings.PRICE_MACRO_DDAY_USDC)
     routes: dict[str, RouteConfig] = {
@@ -948,6 +951,31 @@ def build_routes(
             ),
             service_name="AlphaPipeline HIP-4 Price Ladder",
             tags=["prediction-market", "hyperliquid", "hip4", "pre-trade-signal"],
+        ),
+        # 2026-10-10: 원래 "과거 사이클 대비 도미넌스 괴리율" 아이디어는 무료
+        # 데이터 소스가 없어서(app/logic.py의 get_btc_cycle_compare() 모듈 주석
+        # 참고) BTC/ETH 가격 기반 사이클 비교로 축소. 매일 1회 크론이 채워두는
+        # 캐시 파일만 읽는 파생 뷰라 신규 업스트림 호출 없음. description은
+        # 반드시 ~450자 미만으로 유지할 것(2026-09-30 CDP 설명문 길이 제한 버그).
+        "GET /v1/market/cycle-compare": _make_route_config(
+            accepts=[cycle_compare_option],
+            mime_type="application/json",
+            description=(
+                "BTC/ETH price position vs the same day-offset in the 2016 and 2020 "
+                "halving cycles, plus today's real BTC dominance. NOT a historical "
+                "dominance comparison (no free data source exists for that - see "
+                "response notice). Derived from a cache refreshed once daily - no new "
+                "upstream call per request. No input params. Paid in USDC on Base."
+            ),
+            resource=_resource_url("/v1/market/cycle-compare"),
+            extensions=_bazaar_extension(
+                input_example={},
+                input_schema={"type": "object", "properties": {}, "required": []},
+                output_example=CYCLE_COMPARE_EXAMPLE,
+                output_schema=_inline_schema_defs(CycleCompareResponse.model_json_schema()),
+            ),
+            service_name="AlphaPipeline BTC Cycle Compare",
+            tags=["market", "bitcoin", "halving-cycle", "macro"],
         ),
     }
     if dump_risk_enabled:
