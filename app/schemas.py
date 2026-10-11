@@ -586,11 +586,14 @@ class SlippageTier(BaseModel):
     )
 
 
+# quote_token_is_stablecoin이 false/null일 때, 그래도 이 토큰에 USD 직결 풀이
+# 존재한다면 그 풀 정보를 담는다 - 멀티홉 없이 재조회할 수 있게 하기 위함.
+# (주의: 이 클래스는 docstring을 쓰지 않는다 - BaseModel의 docstring은
+# model_json_schema()에 description으로 그대로 노출되어 Bazaar 확장 스키마를
+# 통해 공개 402 응답에 그대로 실린다. 다른 nested model들과 동일하게 Field()로만
+# 설명을 넣는다.)
 class AlternateDirectPool(BaseModel):
-    """quote_token_is_stablecoin이 false/null일 때, 그래도 이 토큰에 USD 직결
-    풀이 존재한다면 그 풀 정보를 담는다 - 멀티홉 없이 재조회할 수 있게 하기 위함."""
-
-    pool_address: str | None = None
+    pool_address: str | None = Field(default=None, description="The alternate pool's contract address.")
     pool_name: str | None = None
     liquidity_usd: float | None = None
     quote_token_symbol: str | None = None
