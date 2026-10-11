@@ -309,6 +309,56 @@ CONTRACT_HEALTH_EXAMPLE = {
 }
 
 
+# 2026-10-11 추가: 저가 1차 스크리닝 티어. GoPlus LP락(contract_health_audit과
+# 동일 호출) + GeckoTerminal 최대유동성 풀(dex_liquidity_slippage와 동일 소스)만
+# 묶은 최소 응답 - token_name/symbol, lp_holder_count, top5_unlocked_holder_pct 등
+# 세부 필드는 의도적으로 빼서 contract_health_audit보다 더 가볍게 유지한다.
+class TokenPrescreenResponse(BaseModel):
+    generated_at: TimestampPair
+    chain_id: int
+    contract_address: str
+    liquidity_usd: float | None = Field(
+        default=None,
+        description=(
+            "Top pool's aggregate USD liquidity from GeckoTerminal (same source as "
+            "dex.liquidity_slippage) - null when chain_id isn't mapped to a "
+            "GeckoTerminal network, or no pool was found for this token."
+        ),
+    )
+    liquidity_health: str = Field(
+        description=(
+            "Same categories/thresholds as security.contract_health_audit's own "
+            "liquidity_health: LOCKED / PARTIALLY_LOCKED / UNLOCKED / NO_LP_DATA / "
+            "UNKNOWN (GoPlus lookup itself failed)."
+        )
+    )
+    risk_flags: list[str] = []
+    data_source: str
+    notice: str | None = None
+
+
+TOKEN_PRESCREEN_EXAMPLE = {
+    "generated_at": {"utc": "2026-10-11T12:00:00Z", "kst": "2026-10-11 21:00:00 KST"},
+    "chain_id": 8453,
+    "contract_address": "0x532f27101965dd16442e59d40670faf5ebb142e",
+    "liquidity_usd": 128500.42,
+    "liquidity_health": "LOCKED",
+    "risk_flags": [],
+    "data_source": "goplus+geckoterminal",
+    "notice": (
+        "Cheap first-pass filter only - combines GoPlus's LP lock/burn check (same "
+        "signal as security.contract_health_audit, same underlying GoPlus call, no "
+        "extra upstream cost) with GeckoTerminal's top-pool USD liquidity (same source "
+        "as dex.liquidity_slippage). Does NOT check honeypot/tax/mint risk (use "
+        "security.token_risk) or give the full LP-holder breakdown - use "
+        "security.contract_health_audit for that. Intended use: call this first on a "
+        "batch of candidates to cheaply drop the ones with no real liquidity or "
+        "unlocked LP, then only spend the pricier token_risk/token_diagnostic calls on "
+        "survivors."
+    ),
+}
+
+
 class WhalePosition(BaseModel):
     coin: str
     side: str = Field(description="LONG or SHORT, derived from the sign of Hyperliquid's szi (signed size).")

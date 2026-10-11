@@ -113,6 +113,7 @@ from app.schemas import (
     MARKDOWN_EXAMPLE,
     NEG_RISK_ARBITRAGE_EXAMPLE,
     TOKEN_DIAGNOSTIC_EXAMPLE,
+    TOKEN_PRESCREEN_EXAMPLE,
     TOKEN_RISK_EXAMPLE,
     WHALE_AUDIT_EXAMPLE,
     ArbSpreadResponse,
@@ -131,6 +132,7 @@ from app.schemas import (
     PredictionHip4SnapshotResponse,
     PredictionNegRiskArbitrageResponse,
     TokenDiagnosticResponse,
+    TokenPrescreenResponse,
     TokenRiskResponse,
     WhalePositionAuditResponse,
 )
@@ -392,6 +394,7 @@ def build_routes(
     dump_risk_option = _payment_option(settings.PRICE_DUMP_RISK_USDC)
     token_risk_option = _payment_option(settings.PRICE_TOKEN_RISK_USDC)
     contract_health_option = _payment_option(settings.PRICE_CONTRACT_HEALTH_USDC)
+    token_prescreen_option = _payment_option(settings.PRICE_TOKEN_PRESCREEN_USDC)
     funding_rate_option = _payment_option(settings.PRICE_FUNDING_RATE_USDC)
     funding_apr_option = _payment_option(settings.PRICE_FUNDING_APR_USDC)
     dex_slippage_option = _payment_option(settings.PRICE_DEX_SLIPPAGE_USDC)
@@ -461,7 +464,8 @@ def build_routes(
                 "GoPlus/Honeypot.is-backed token security check - honeypot flag, "
                 "buy/sell tax, mintability, and ownership renouncement for a given "
                 "contract address. A pre-trade safety check a bot runs before it "
-                "buys. Paid in USDC on Base."
+                "buys. Screening many candidates? Run the cheaper token-prescreen "
+                "first to drop obvious fails. Paid in USDC on Base."
             ),
             resource=_resource_url("/v1/security/token-risk"),
             extensions=_bazaar_extension(
@@ -496,8 +500,9 @@ def build_routes(
                 "LP (liquidity pool) lock/burn audit reusing the same GoPlus data as "
                 "token-risk - checks whether liquidity is locked, burned, or freely "
                 "held by a single wallet, a rug-pull signal token-risk does not cover. "
-                "No qualitative judgment, only GoPlus's own lock/burn numbers. Paid in "
-                "USDC on Base."
+                "No qualitative judgment, only GoPlus's own lock/burn numbers. For a "
+                "cheaper liquidity+LP-lock-only pre-filter, see token-prescreen. Paid "
+                "in USDC on Base."
             ),
             resource=_resource_url("/v1/security/contract-health-audit"),
             extensions=_bazaar_extension(
@@ -525,6 +530,43 @@ def build_routes(
             service_name="AlphaPipeline Contract Health Audit",
             tags=["crypto", "security", "liquidity", "lp-lock"],
         ),
+        "GET /v1/security/token-prescreen": _make_route_config(
+            accepts=[token_prescreen_option],
+            mime_type="application/json",
+            description=(
+                "Cheap first-pass filter for batch-screening candidates before paying "
+                "for a full check: combines GoPlus LP lock/burn status (same call as "
+                "contract-health-audit) with GeckoTerminal top-pool USD liquidity (same "
+                "source as dex-liquidity-slippage). No honeypot/tax check and no "
+                "detailed LP-holder breakdown - use token-risk / contract-health-audit "
+                "for that. Paid in USDC on Base."
+            ),
+            resource=_resource_url("/v1/security/token-prescreen"),
+            extensions=_bazaar_extension(
+                input_example={
+                    "chain_id": 8453,
+                    "contract_address": "0x532f27101965dd16442e59d40670faf5ebb142e",
+                },
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "chain_id": {
+                            "type": "integer",
+                            "description": "EVM chain id, e.g. 8453 for Base.",
+                        },
+                        "contract_address": {
+                            "type": "string",
+                            "description": "Token contract address (0x...).",
+                        },
+                    },
+                    "required": ["chain_id", "contract_address"],
+                },
+                output_example=TOKEN_PRESCREEN_EXAMPLE,
+                output_schema=_inline_schema_defs(TokenPrescreenResponse.model_json_schema()),
+            ),
+            service_name="AlphaPipeline Token Prescreen",
+            tags=["crypto", "security", "liquidity", "low-cost", "pre-filter"],
+        ),
         "GET /v1/security/token-diagnostic": _make_route_config(
             accepts=[token_diagnostic_option],
             mime_type="application/json",
@@ -533,7 +575,8 @@ def build_routes(
                 "contract-health-audit in parallel against the same GoPlus data and "
                 "returns both, plus a deduped union of risk_flags. No composite score "
                 "or letter grade is computed - every field is copied unchanged from "
-                "the two underlying checks. Paid in USDC on Base."
+                "the two underlying checks. Screening many candidates at once? Run "
+                "the cheaper token-prescreen first. Paid in USDC on Base."
             ),
             resource=_resource_url("/v1/security/token-diagnostic"),
             extensions=_bazaar_extension(

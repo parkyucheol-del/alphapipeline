@@ -811,42 +811,18 @@ _CONTRACT_HEALTH_NOTICE = (
 )
 
 
-async def get_contract_health_audit(chain_id: int, contract_address: str) -> dict:
-    """
-    token_risk와 동일한 GoPlus Security token_security 응답(추가 업스트림 호출
-    없음)에서 LP(유동성 풀) 보유자의 잠금(is_locked)/소각(burn address) 비율만
-    뽑아서 계산하는 경량 감사 도구. GET /v1/security/contract-health-audit가
-    사용한다 (main.py 참고).
-
-    의도적으로 하지 않는 것: "의심스러운 트랜잭션" 같은 정성적 판단은 절대 하지
-    않는다 - GoPlus가 준 숫자(잠금/소각 비율)만 그대로 계산해서 보여준다.
-    Honeypot.is는 LP 락업 데이터를 제공하지 않으므로 이 도구는 GoPlus 실패 시
-    폴백이 없다.
-    """
-    contract_address = contract_address.lower()
-
-    try:
-        gp = await ds.get_goplus_token_security(chain_id, contract_address)
-    except Exception as e:
-        return {
-            "generated_at": _timestamp_now(),
-            "chain_id": chain_id,
-            "contract_address": contract_address,
-            "liquidity_health": "UNKNOWN",
-            "risk_flags": ["data_unavailable"],
-            "data_source": "none",
-            "notice": f"GoPlus lookup failed (this tool has no fallback source for LP lock data): {e}",
-        }
-
-    token_name = gp.get("token_name") or None
-    token_symbol = gp.get("token_symbol") or None
+def _compute_lp_lock_health(gp: dict) -> dict:
+    """GoPlus token_security 응답(gp)에서 LP 잠금(is_locked)/소각(burn address)
+    비율만 뽑아 계산한다 - get_contract_health_audit과 get_token_prescreen이
+    똑같은 GoPlus 응답을 받아서 이 계산을 공유한다(추가 업스트림 호출 없음).
+    2026-10-11: 저가 프리스크린 티어 추가하면서 중복 코드 없이 재사용하도록 분리."""
+    lp_holders_raw = gp.get("lp_holders") or []
 
     try:
         lp_total_supply = float(gp.get("lp_total_supply") or 0) or None
     except (TypeError, ValueError):
         lp_total_supply = None
 
-    lp_holders_raw = gp.get("lp_holders") or []
     lp_holder_count = len(lp_holders_raw) if lp_holders_raw else None
 
     locked_pct = 0.0
@@ -891,11 +867,6 @@ async def get_contract_health_audit(chain_id: int, contract_address: str) -> dic
             risk_flags.append("single_holder_concentration")
 
     return {
-        "generated_at": _timestamp_now(),
-        "chain_id": chain_id,
-        "contract_address": contract_address,
-        "token_name": token_name,
-        "token_symbol": token_symbol,
         "lp_total_supply": lp_total_supply,
         "lp_holder_count": lp_holder_count,
         "lp_locked_pct": round(locked_pct, 2) if lp_holders_raw else None,
@@ -904,8 +875,157 @@ async def get_contract_health_audit(chain_id: int, contract_address: str) -> dic
         "top5_unlocked_holder_pct": round(top5_unlocked_holder_pct, 2) if lp_holders_raw else None,
         "liquidity_health": liquidity_health,
         "risk_flags": risk_flags,
+    }
+
+
+async def get_contract_health_audit(chain_id: int, contract_address: str) -> dict:
+    """
+    token_risk와 동일한 GoPlus Security token_security 응답(추가 업스트림 호출
+    없음)에서 LP(유동성 풀) 보유자의 잠금(is_locked)/소각(burn address) 비율만
+    뽑아서 계산하는 경량 감사 도구. GET /v1/security/contract-health-audit가
+    사용한다 (main.py 참고).
+
+    의도적으로 하지 않는 것: "의심스러운 트랜잭션" 같은 정성적 판단은 절대 하지
+    않는다 - GoPlus가 준 숫자(잠금/소각 비율)만 그대로 계산해서 보여준다.
+    Honeypot.is는 LP 락업 데이터를 제공하지 않으므로 이 도구는 GoPlus 실패 시
+    폴백이 없다.
+    """
+    contract_address = contract_address.lower()
+
+    try:
+        gp = await ds.get_goplus_token_security(chain_id, contract_address)
+    except Exception as e:
+        return {
+            "generated_at": _timestamp_now(),
+            "chain_id": chain_id,
+            "contract_address": contract_address,
+            "liquidity_health": "UNKNOWN",
+            "risk_flags": ["data_unavailable"],
+            "data_source": "none",
+            "notice": f"GoPlus lookup failed (this tool has no fallback source for LP lock data): {e}",
+        }
+
+    token_name = gp.get("token_name") or None
+    token_symbol = gp.get("token_symbol") or None
+    lp_health = _compute_lp_lock_health(gp)
+
+    return {
+        "generated_at": _timestamp_now(),
+        "chain_id": chain_id,
+        "contract_address": contract_address,
+        "token_name": token_name,
+        "token_symbol": token_symbol,
+        **lp_health,
         "data_source": "goplus",
         "notice": _CONTRACT_HEALTH_NOTICE,
+    }
+
+
+# 2026-10-11 추가: GoPlus의 chain_id(EVM 체인ID)와 GeckoTerminal의 network slug는
+# 같은 체인을 가리키지만 표기가 다르다 - token_prescreen이 두 소스(GoPlus LP락 +
+# GeckoTerminal 유동성)를 한 번에 묶으려면 둘을 매핑해야 한다. 이 프로젝트가 실제로
+# 테스트/운영하는 체인은 Base뿐이고, 나머지는 공개적으로 알려진 GeckoTerminal
+# network id를 참고로 추가한 것 - 매핑에 없는 chain_id는 에러 없이 liquidity_usd만
+# null로 둔다(아래 get_token_prescreen 참고).
+_CHAIN_ID_TO_GECKOTERMINAL_NETWORK = {
+    8453: "base",
+    1: "eth",
+    56: "bsc",
+    137: "polygon_pos",
+    42161: "arbitrum",
+    10: "optimism",
+    43114: "avax",
+}
+
+_TOKEN_PRESCREEN_NOTICE = (
+    "Cheap first-pass filter only - combines GoPlus's LP lock/burn check (same "
+    "signal as security.contract_health_audit, same underlying GoPlus call, no "
+    "extra upstream cost) with GeckoTerminal's top-pool USD liquidity (same source "
+    "as dex.liquidity_slippage). Does NOT check honeypot/tax/mint risk (use "
+    "security.token_risk) or give the full LP-holder breakdown (top_unlocked_holder_pct, "
+    "lp_holder_count, etc. - use security.contract_health_audit for that). Intended use: "
+    "call this first on a batch of candidates to cheaply drop the ones with no real "
+    "liquidity or unlocked LP, then only spend the pricier token_risk/token_diagnostic "
+    "calls on survivors. liquidity_usd is null when chain_id isn't one this endpoint "
+    "maps to a GeckoTerminal network for (currently: Base, Ethereum, BSC, Polygon, "
+    "Arbitrum, Optimism, Avalanche) - LP lock data is unaffected by this, since GoPlus "
+    "takes chain_id directly. liquidity_health shares the exact same categories and "
+    "thresholds as security.contract_health_audit (LOCKED >=95% secured, "
+    "PARTIALLY_LOCKED >=50%, else UNLOCKED; NO_LP_DATA when GoPlus has no LP holder data). "
+    "liquidity_usd pool selection skips pools whose 24h trading volume is implausibly "
+    "tiny relative to their reported reserve (likely corrupted/fake liquidity data) in "
+    "favor of a pool with corroborating volume, when one exists - see dex.liquidity_slippage "
+    "for the real-world case that prompted this."
+)
+
+
+async def get_token_prescreen(chain_id: int, contract_address: str) -> dict:
+    """
+    저가 1차 스크리닝: GoPlus LP락(contract_health_audit과 동일 호출, 추가
+    업스트림 비용 없음) + GeckoTerminal 최대유동성 풀(dex_liquidity_slippage와
+    동일 소스)만 묶어서 가장 가벼운 "이 후보, 더 비싼 전체 검사를 돌릴 가치가
+    있나" 필터를 제공한다. GET /v1/security/token-prescreen이 사용한다
+    (main.py 참고).
+
+    2026-09-14 도그푸딩 피드백에서 나온 아이디어: 신규 토큰 후보 100개 중
+    98개가 유동성/LP락 기본 필터에서 어차피 걸러지는데, 그런 후보에도 전체
+    token_diagnostic($0.03)이 그대로 나가는 게 비효율적이라는 실사용 관찰.
+    호출당 upstream 비용은 contract_health_audit과 동일(GoPlus 1회 호출
+    재사용)하지만, 응답을 의도적으로 최소화해서 더 싼 티어로 제공한다.
+    """
+    contract_address = contract_address.lower()
+
+    try:
+        gp = await ds.get_goplus_token_security(chain_id, contract_address)
+        lp_health = _compute_lp_lock_health(gp)
+        goplus_ok = True
+    except Exception as e:
+        lp_health = {
+            "liquidity_health": "UNKNOWN",
+            "risk_flags": ["lp_data_unavailable"],
+        }
+        goplus_ok = False
+        goplus_error = str(e)
+
+    network = _CHAIN_ID_TO_GECKOTERMINAL_NETWORK.get(chain_id)
+    liquidity_usd = None
+    risk_flags = list(lp_health.get("risk_flags") or [])
+    if network is None:
+        risk_flags.append("liquidity_data_unavailable")
+    else:
+        try:
+            pools = await ds.get_geckoterminal_pools_for_token(network, contract_address)
+            best_pool = _pick_most_liquid_pool(pools)
+            if best_pool:
+                attrs = best_pool.get("attributes") or {}
+                try:
+                    liquidity_usd = float(attrs.get("reserve_in_usd") or 0) or None
+                except (TypeError, ValueError):
+                    liquidity_usd = None
+            if liquidity_usd is None:
+                risk_flags.append("liquidity_data_unavailable")
+        except Exception:
+            risk_flags.append("liquidity_data_unavailable")
+
+    if not goplus_ok:
+        data_source = "geckoterminal" if network is not None else "none"
+        notice = _TOKEN_PRESCREEN_NOTICE + f" (GoPlus lookup failed, LP lock status unavailable: {goplus_error})"
+    elif network is None:
+        data_source = "goplus"
+        notice = _TOKEN_PRESCREEN_NOTICE
+    else:
+        data_source = "goplus+geckoterminal"
+        notice = _TOKEN_PRESCREEN_NOTICE
+
+    return {
+        "generated_at": _timestamp_now(),
+        "chain_id": chain_id,
+        "contract_address": contract_address,
+        "liquidity_usd": liquidity_usd,
+        "liquidity_health": lp_health.get("liquidity_health", "UNKNOWN"),
+        "risk_flags": sorted(set(risk_flags)),
+        "data_source": data_source,
+        "notice": notice,
     }
 
 
@@ -1339,16 +1459,52 @@ def _quote_symbol_from_pool_name(pool_name: str | None) -> str | None:
     return symbol or None
 
 
+def _pool_reserve_usd(pool: dict) -> float:
+    attrs = pool.get("attributes") or {}
+    try:
+        return float(attrs.get("reserve_in_usd") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _pool_volume_24h_usd(pool: dict) -> float:
+    attrs = pool.get("attributes") or {}
+    volume_obj = attrs.get("volume_usd") or {}
+    try:
+        return float(volume_obj.get("h24") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+# 2026-10-11 추가: reserve_in_usd만 보고 풀을 고르면 "가짜 유동성" 풀에 속을 수 있다.
+# 실사례: WETH의 "ATFS/WETH 0.3%" 풀이 reserve_in_usd $94억을 보였는데 volume_24h_usd는
+# $1.1만뿐이었다(같은 토큰의 정상 WETH/USDC 풀은 유동성 $1.48억, 거래량도 정상 범위) -
+# ATFS 쪽 컨트랙트의 balanceOf/decimals가 조작됐거나 GeckoTerminal의 reserve 계산이
+# 깨진 걸로 추정. 24시간 거래량이 reserve 대비 극단적으로 작은(이 비율 미만) 풀은
+# "유동성 숫자를 신뢰할 수 없음"으로 보고 최우선 후보에서 제외한다.
+_MIN_VOLUME_TO_RESERVE_RATIO = 0.0001  # 0.01%
+
+
+def _filter_plausible_liquidity_pools(pools: list[dict]) -> list[dict]:
+    """reserve_in_usd가 있는 풀 중, 거래량이 reserve 대비 너무 작아 가짜 유동성으로
+    보이는 풀을 제외한다. 후보 전체가 이 기준에 걸리면(거래가 거의 없는 토큰/체인일
+    뿐일 수 있음 - "거래량 데이터가 희박하다"와 "유동성이 가짜다"는 구분할 수 없으므로)
+    필터 없이 원래 후보 전체를 그대로 반환해 과잉 제외를 피한다."""
+    candidates = [p for p in pools if _pool_reserve_usd(p) > 0]
+    plausible = [
+        p for p in candidates
+        if _pool_volume_24h_usd(p) >= _pool_reserve_usd(p) * _MIN_VOLUME_TO_RESERVE_RATIO
+    ]
+    return plausible if plausible else candidates
+
+
 def _pick_most_liquid_pool(pools: list[dict]) -> dict | None:
-    """토큰의 풀 목록 중 reserve_in_usd(합산 USD 유동성)가 가장 큰 풀을 고른다."""
+    """토큰의 풀 목록 중 reserve_in_usd(합산 USD 유동성)가 가장 큰 풀을 고른다.
+    가짜 유동성 풀은 _filter_plausible_liquidity_pools로 먼저 걸러낸다."""
     best = None
     best_liquidity = -1.0
-    for pool in pools:
-        attrs = pool.get("attributes") or {}
-        try:
-            liquidity = float(attrs.get("reserve_in_usd") or 0)
-        except (TypeError, ValueError):
-            liquidity = 0.0
+    for pool in _filter_plausible_liquidity_pools(pools):
+        liquidity = _pool_reserve_usd(pool)
         if liquidity > best_liquidity:
             best_liquidity = liquidity
             best = pool
@@ -1359,18 +1515,16 @@ def _pick_best_stablecoin_pool(pools: list[dict]) -> dict | None:
     """풀 목록 중 quote 쪽이 스테이블코인인 풀들만 추려서 그 중 유동성이 가장 큰 것을
     고른다. 기본으로 선택된 풀(_pick_most_liquid_pool)이 스테이블코인 직결이 아닐 때,
     "그래도 이 토큰에 USD 직결 풀 자체는 존재하는지"를 알려주기 위함 - 실제 도그푸딩
-    트레이딩 봇이 CLANKER를 사려다 USDC 직결 풀이 없어 포기한 마찰에서 나온 필드."""
+    트레이딩 봇이 CLANKER를 사려다 USDC 직결 풀이 없어 포기한 마찰에서 나온 필드.
+    가짜 유동성 풀은 _filter_plausible_liquidity_pools로 먼저 걸러낸다."""
     best = None
     best_liquidity = -1.0
-    for pool in pools:
+    for pool in _filter_plausible_liquidity_pools(pools):
         attrs = pool.get("attributes") or {}
         quote_symbol = _quote_symbol_from_pool_name(attrs.get("name"))
         if not quote_symbol or quote_symbol not in _STABLECOIN_QUOTE_SYMBOLS:
             continue
-        try:
-            liquidity = float(attrs.get("reserve_in_usd") or 0)
-        except (TypeError, ValueError):
-            liquidity = 0.0
+        liquidity = _pool_reserve_usd(pool)
         if liquidity > best_liquidity:
             best_liquidity = liquidity
             best = pool
@@ -1404,7 +1558,12 @@ _DEX_SLIPPAGE_NOTICE = (
     "stablecoin-quoted pool exists elsewhere for this token, alternate_direct_pool "
     "gives that pool's address/name/liquidity so you can re-query this endpoint with "
     "that pool_address instead of assuming a multi-hop route is required; null if no "
-    "such pool exists or wasn't checked."
+    "such pool exists or wasn't checked. When auto-selecting a pool via token_address, "
+    "a pool whose 24h volume is implausibly tiny relative to its reported reserve_in_usd "
+    "(under 0.01%) is treated as unreliable liquidity data and skipped in favor of a "
+    "pool with corroborating trade volume, when one exists for that token - added after "
+    "a real case where GeckoTerminal reported a $9.4B reserve on a pool with ~$12k in "
+    "24h volume."
 )
 
 _SLIPPAGE_TIER_SIZES_USD = (1000.0, 5000.0, 10000.0)
@@ -1507,12 +1666,15 @@ async def get_dex_liquidity_slippage(
         direct_stablecoin_pool_exists = None
         alternate_direct_pool = None
     else:
+        # _filter_plausible_liquidity_pools를 거쳐 가짜 유동성 풀은 제외한다 - 안 그러면
+        # 이름만 스테이블코인인 가짜 풀 때문에 True가 나오고 alternate_direct_pool은
+        # (_pick_best_stablecoin_pool이 같은 필터를 쓰므로) null이 되는 불일치가 생긴다.
         direct_stablecoin_pool_exists = any(
             (
                 _quote_symbol_from_pool_name((p.get("attributes") or {}).get("name"))
                 in _STABLECOIN_QUOTE_SYMBOLS
             )
-            for p in pools
+            for p in _filter_plausible_liquidity_pools(pools)
         )
         alternate_direct_pool = None
         if not quote_token_is_stablecoin:

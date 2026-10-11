@@ -7,25 +7,26 @@ Also the exact server Glama's automated Docker build test introspects for
 this listing's "Server" score, so its tool count should track app/mcp_server.py
 (the paid remote server) 1:1 even though calls here bypass payment entirely.
 
-17 tools provided (same coverage as the paid remote /mcp server, just called
+18 tools provided (same coverage as the paid remote /mcp server, just called
 directly against app/logic.py instead of going through x402 payment):
   1.  convert_to_markdown(url)                              -> app/markdown_tool.py: url_to_markdown
   2.  get_token_dump_risk(symbol)                            -> app/logic.py: get_symbol_dump_risk
   3.  get_kimchi_alert(symbol)                               -> app/logic.py: get_kimchi_alert
   4.  get_token_risk(chain_id, contract_address)             -> app/logic.py: get_token_risk
   5.  get_contract_health_audit(chain_id, contract_address)  -> app/logic.py: get_contract_health_audit
-  6.  get_token_diagnostic(chain_id, contract_address)       -> app/logic.py: get_token_diagnostic
-  7.  get_whale_position_audit(address)                      -> app/logic.py: get_whale_position_audit
-  8.  get_funding_rate(symbol)                               -> app/logic.py: get_funding_rate
-  9.  get_funding_apr_matrix(symbol, ...)                    -> app/logic.py: get_funding_apr_matrix
-  10. get_dex_liquidity_slippage(...)                        -> app/logic.py: get_dex_liquidity_slippage
-  11. get_arb_spread_matrix(...)                             -> app/logic.py: get_arb_spread_matrix
-  12. get_macro_dday()                                       -> app/logic.py: get_macro_calendar_dday
-  13. get_neg_risk_arbitrage(event_slug, ...)                -> app/logic.py: get_neg_risk_arbitrage
-  14. get_exit_capacity_audit(position_size_shares, ...)     -> app/logic.py: get_exit_capacity_audit
-  15. get_hip4_snapshot(template, underlying, limit)         -> app/logic.py: get_hip4_snapshot
-  16. get_hip4_price_ladder(underlying, limit)                -> app/logic.py: get_hip4_price_ladder
-  17. get_btc_cycle_compare()                                 -> app/logic.py: get_btc_cycle_compare
+  6.  get_token_prescreen(chain_id, contract_address)        -> app/logic.py: get_token_prescreen
+  7.  get_token_diagnostic(chain_id, contract_address)       -> app/logic.py: get_token_diagnostic
+  8.  get_whale_position_audit(address)                      -> app/logic.py: get_whale_position_audit
+  9.  get_funding_rate(symbol)                               -> app/logic.py: get_funding_rate
+  10. get_funding_apr_matrix(symbol, ...)                    -> app/logic.py: get_funding_apr_matrix
+  11. get_dex_liquidity_slippage(...)                        -> app/logic.py: get_dex_liquidity_slippage
+  12. get_arb_spread_matrix(...)                             -> app/logic.py: get_arb_spread_matrix
+  13. get_macro_dday()                                       -> app/logic.py: get_macro_calendar_dday
+  14. get_neg_risk_arbitrage(event_slug, ...)                -> app/logic.py: get_neg_risk_arbitrage
+  15. get_exit_capacity_audit(position_size_shares, ...)     -> app/logic.py: get_exit_capacity_audit
+  16. get_hip4_snapshot(template, underlying, limit)         -> app/logic.py: get_hip4_snapshot
+  17. get_hip4_price_ladder(underlying, limit)                -> app/logic.py: get_hip4_price_ladder
+  18. get_btc_cycle_compare()                                 -> app/logic.py: get_btc_cycle_compare
 
 Note (important, stated honestly):
   - This MCP server is a separate "distribution build" from the paid x402 HTTP
@@ -69,6 +70,7 @@ from app.logic import (
     get_neg_risk_arbitrage as _logic_neg_risk_arbitrage,
     get_symbol_dump_risk,
     get_token_diagnostic as _logic_token_diagnostic,
+    get_token_prescreen as _logic_token_prescreen,
     get_token_risk as _logic_token_risk,
     get_whale_position_audit as _logic_whale_position_audit,
 )
@@ -299,6 +301,38 @@ async def get_contract_health_audit(chain_id: int, contract_address: str) -> dic
     """
     return await _safe_call(
         "get_contract_health_audit", _logic_contract_health_audit(chain_id, contract_address)
+    )
+
+
+@mcp.tool(name="security.token_prescreen")
+async def get_token_prescreen(chain_id: int, contract_address: str) -> dict:
+    """
+    Cheap first-pass filter for batch-screening candidates before paying for a
+    full check: combines GoPlus's LP lock/burn status (same underlying call as
+    get_contract_health_audit, no extra upstream cost) with GeckoTerminal's
+    top-pool USD liquidity (same source as get_dex_liquidity_slippage) into one
+    minimal response.
+
+    Use this first when screening many candidates (e.g. a new-pool discovery
+    loop) to cheaply drop the ones with no real liquidity or unlocked LP, then
+    only spend the pricier get_token_risk/get_token_diagnostic calls on
+    survivors. Does NOT check honeypot/tax/mint risk and does NOT give the
+    full LP-holder breakdown (top_unlocked_holder_pct, lp_holder_count,
+    etc.) - use get_token_risk / get_contract_health_audit for that.
+    liquidity_usd is null when chain_id isn't mapped to a GeckoTerminal
+    network (currently Base, Ethereum, BSC, Polygon, Arbitrum, Optimism,
+    Avalanche) - LP lock data is unaffected by this.
+
+    Args:
+        chain_id: EVM chain id, e.g. 8453 for Base.
+        contract_address: Token contract address (0x...).
+
+    Returns:
+        On success: {"success": true, "liquidity_usd", "liquidity_health", ...}
+        On failure: {"success": false, "error": {"type", "message"}}
+    """
+    return await _safe_call(
+        "get_token_prescreen", _logic_token_prescreen(chain_id, contract_address)
     )
 
 

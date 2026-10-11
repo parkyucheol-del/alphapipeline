@@ -47,6 +47,11 @@ class Settings:
     PRICE_CONTRACT_HEALTH_USDC: float = float(os.getenv("PRICE_CONTRACT_HEALTH_USDC", "0.02"))
     PRICE_WHALE_AUDIT_USDC: float = float(os.getenv("PRICE_WHALE_AUDIT_USDC", "0.02"))
     PRICE_TOKEN_DIAGNOSTIC_USDC: float = float(os.getenv("PRICE_TOKEN_DIAGNOSTIC_USDC", "0.03"))
+    # 2026-10-11 추가: 도그푸딩 피드백(유동성+LP락만 보는 저가 1차 스크리닝 티어)에서
+    # 나온 가격대 - token_diagnostic/token_risk/contract_health_audit보다 싸게,
+    # 고빈도 자동화 클라이언트가 "이 후보, 더 비싼 전체 검사를 돌릴 가치가 있나"를
+    # 먼저 거를 수 있게 한다.
+    PRICE_TOKEN_PRESCREEN_USDC: float = float(os.getenv("PRICE_TOKEN_PRESCREEN_USDC", "0.01"))
     # 2026-09 예측시장(Polymarket) 확장 Wave 1. neg_risk_arbitrage는 여러 outcome을
     # 동시에 계산하고 실행 가능성(유동성 병목)까지 판정하는 고부가 시그널이라
     # dump-risk/token-diagnostic과 같은 최고가 티어로, exit_capacity_audit은

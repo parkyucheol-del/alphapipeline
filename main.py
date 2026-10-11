@@ -29,6 +29,7 @@ from app.logic import (
     get_macro_calendar_dday,
     get_neg_risk_arbitrage,
     get_token_diagnostic,
+    get_token_prescreen,
     get_token_risk,
     get_whale_position_audit,
     refresh_unlock_cache,
@@ -57,6 +58,7 @@ from app.schemas import (
     PredictionHip4SnapshotResponse,
     PredictionNegRiskArbitrageResponse,
     TokenDiagnosticResponse,
+    TokenPrescreenResponse,
     TokenRiskResponse,
     WhalePositionAuditResponse,
 )
@@ -244,6 +246,7 @@ async def root(request: Request):
             # 랜딩페이지에 그대로 노출되므로, 실제로 검증된 제품이 먼저 보이게 한다.
             "/v1/security/token-risk": settings.PRICE_TOKEN_RISK_USDC,
             "/v1/security/contract-health-audit": settings.PRICE_CONTRACT_HEALTH_USDC,
+            "/v1/security/token-prescreen": settings.PRICE_TOKEN_PRESCREEN_USDC,
             "/v1/security/token-diagnostic": settings.PRICE_TOKEN_DIAGNOSTIC_USDC,
             "/v1/dex/liquidity-slippage": settings.PRICE_DEX_SLIPPAGE_USDC,
             "/v1/derivatives/whale-position-audit": settings.PRICE_WHALE_AUDIT_USDC,
@@ -276,6 +279,7 @@ async def root(request: Request):
         "endpoints": [
             "/v1/security/token-risk",
             "/v1/security/contract-health-audit",
+            "/v1/security/token-prescreen",
             "/v1/security/token-diagnostic",
             "/v1/dex/liquidity-slippage",
             "/v1/derivatives/whale-position-audit",
@@ -512,6 +516,46 @@ async def contract_health_audit_endpoint(
         return JSONResponse(content=data)
     except Exception as e:
         logger.exception("contract-health-audit 처리 실패")
+        return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
+
+
+@app.get(
+    "/v1/security/token-prescreen",
+    tags=["market"],
+    summary="Cheap liquidity + LP-lock pre-filter before a full security check (GoPlus + GeckoTerminal)",
+    description=(
+        "Use this endpoint to cheaply drop obviously-bad candidates out of a batch before "
+        "spending the pricier security.token_risk / security.token_diagnostic calls on the "
+        "survivors - this is the exact workflow the dogfooding trading bot's own new-pool "
+        "discovery loop needed (2026-09-14 feedback): most new-pool candidates fail a basic "
+        "liquidity/LP-lock check anyway. Combines GoPlus's LP lock/burn status (same "
+        "underlying call as contract-health-audit, no extra upstream cost) with "
+        "GeckoTerminal's top-pool USD liquidity (same source as dex-liquidity-slippage) "
+        "into one minimal response: `liquidity_usd` and `liquidity_health` (same categories "
+        "as contract-health-audit: LOCKED / PARTIALLY_LOCKED / UNLOCKED / NO_LP_DATA / "
+        "UNKNOWN). Does NOT check honeypot/tax/mint risk and does NOT give the full "
+        "LP-holder breakdown (top_unlocked_holder_pct, lp_holder_count, etc.) - use "
+        "security.token_risk / security.contract_health_audit for that. `liquidity_usd` is "
+        "null when `chain_id` isn't one this endpoint maps to a GeckoTerminal network for "
+        "(currently Base, Ethereum, BSC, Polygon, Arbitrum, Optimism, Avalanche) - LP lock "
+        "data is unaffected, since GoPlus takes chain_id directly. Input: `chain_id` (e.g. "
+        "8453 for Base) and `contract_address` (required)."
+    ),
+    responses={
+        200: {"model": TokenPrescreenResponse, "description": "Cheap liquidity + LP-lock pre-screen result"},
+        402: {"description": "x402 payment required"},
+        502: {"model": ErrorResponse, "description": "Upstream (GoPlus/GeckoTerminal) error"},
+    },
+)
+async def token_prescreen_endpoint(
+    chain_id: int = Query(..., description="EVM chain id, e.g. 8453 for Base"),
+    contract_address: str = Query(..., description="Token contract address (0x...)"),
+):
+    try:
+        data = await get_token_prescreen(chain_id, contract_address)
+        return JSONResponse(content=data)
+    except Exception as e:
+        logger.exception("token-prescreen 처리 실패")
         return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
 
 

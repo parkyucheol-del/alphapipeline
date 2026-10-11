@@ -204,6 +204,30 @@ CONTRACT_HEALTH_OUTPUT_SCHEMA = {
     ],
 }
 
+TOKEN_PRESCREEN_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "generated_at": _TIMESTAMP_PAIR_SCHEMA,
+        "chain_id": {"type": "integer"},
+        "contract_address": {"type": "string"},
+        "liquidity_usd": {
+            "type": ["number", "null"],
+            "description": "Top pool's aggregate USD liquidity from GeckoTerminal (same source as dex.liquidity_slippage) - null when chain_id isn't mapped to a GeckoTerminal network, or no pool was found.",
+        },
+        "liquidity_health": {
+            "type": "string",
+            "description": "Same categories/thresholds as security.contract_health_audit's own liquidity_health: LOCKED / PARTIALLY_LOCKED / UNLOCKED / NO_LP_DATA / UNKNOWN.",
+        },
+        "risk_flags": {"type": "array", "items": {"type": "string"}},
+        "data_source": {"type": "string"},
+        "notice": {"type": ["string", "null"]},
+    },
+    "required": [
+        "generated_at", "chain_id", "contract_address", "liquidity_health",
+        "risk_flags", "data_source",
+    ],
+}
+
 TOKEN_DIAGNOSTIC_OUTPUT_SCHEMA = {
     "type": "object",
     "properties": {
@@ -847,6 +871,42 @@ _TOOLS: list[dict] = [
             "required": ["chain_id", "contract_address"],
         },
         "output_schema": CONTRACT_HEALTH_OUTPUT_SCHEMA,
+        "annotations": _READ_ONLY_ANNOTATIONS,
+    },
+    {
+        "name": "security.token_prescreen",
+        "path": "/v1/security/token-prescreen",
+        "price_attr": "PRICE_TOKEN_PRESCREEN_USDC",
+        "description": (
+            "Use this tool to cheaply drop obviously-bad candidates out of a batch "
+            "before spending the pricier security.token_risk / "
+            "security.token_diagnostic calls on survivors - built for exactly the "
+            "high-volume new-pool screening pattern where most candidates fail a "
+            "basic liquidity/LP-lock check anyway. Combines GoPlus's LP lock/burn "
+            "status (same underlying call as security.contract_health_audit, no "
+            "extra upstream cost) with GeckoTerminal's top-pool USD liquidity (same "
+            "source as dex.liquidity_slippage) into one minimal response. Does NOT "
+            "check honeypot/tax/mint risk and does NOT give the full LP-holder "
+            "breakdown - use security.token_risk / security.contract_health_audit for "
+            "that. liquidity_usd is null when chain_id isn't mapped to a "
+            "GeckoTerminal network (currently Base, Ethereum, BSC, Polygon, "
+            "Arbitrum, Optimism, Avalanche). Paid in USDC on Base."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "chain_id": {
+                    "type": "integer",
+                    "description": "EVM chain id, e.g. 8453 for Base.",
+                },
+                "contract_address": {
+                    "type": "string",
+                    "description": "Token contract address (0x...).",
+                },
+            },
+            "required": ["chain_id", "contract_address"],
+        },
+        "output_schema": TOKEN_PRESCREEN_OUTPUT_SCHEMA,
         "annotations": _READ_ONLY_ANNOTATIONS,
     },
     {

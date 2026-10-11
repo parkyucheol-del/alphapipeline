@@ -89,7 +89,13 @@ ENDPOINTS: list[EndpointCall] = [
     EndpointCall(
         "prediction.hip4_alerts_event_types", "GET", "/v1/prediction/hip4-alerts/event-types"
     ),
-    # --- 보안 계열 ($0.02~$0.03) ---
+    # --- 보안 계열 ($0.01~$0.03) ---
+    EndpointCall(
+        "security.token_prescreen",
+        "GET",
+        "/v1/security/token-prescreen",
+        {"chain_id": 8453, "contract_address": _WETH_BASE},
+    ),
     EndpointCall(
         "security.token_risk",
         "GET",
