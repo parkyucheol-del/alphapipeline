@@ -435,7 +435,13 @@ async def get_dex_liquidity_slippage(
     USD-quoted - an extra hop is needed to reach USD, not accounted for here),
     pool_fee_pct (the pool's swap fee tier, disclosed for reference only - not
     subtracted from the slippage estimate), and assumed_gas_cost_usd (a flat
-    per-network estimate, not a live quote).
+    per-network estimate, not a live quote). When called with token_address,
+    also returns direct_stablecoin_pool_exists (whether ANY pool for this
+    token - not just the selected one - is quoted directly against a USD
+    stablecoin; null when pool_address was passed instead) and, when the
+    selected pool isn't USD-quoted, alternate_direct_pool (a different pool
+    for the same token that is, so you can re-query with that pool_address
+    instead of assuming a multi-hop route is required).
 
     Use this before sizing a trade or comparing pools for a given token, to
     check depth before swapping. Do NOT treat estimated_slippage_pct or

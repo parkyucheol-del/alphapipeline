@@ -630,7 +630,9 @@ def build_routes(
                 "GeckoTerminal-backed DEX pool liquidity and estimated trade slippage, "
                 "plus fixed $1k/$5k/$10k slippage_tiers for at-a-glance depth checks - "
                 "size a trade or compare pools before swapping, with a clearly-flagged "
-                "constant-product approximation model. Paid in USDC on Base."
+                "constant-product approximation model. Also flags whether a direct "
+                "USD-stablecoin pool exists for the token, so you know before swapping "
+                "if a multi-hop route would be needed. Paid in USDC on Base."
             ),
             resource=_resource_url("/v1/dex/liquidity-slippage"),
             extensions=_bazaar_extension(

@@ -586,6 +586,16 @@ class SlippageTier(BaseModel):
     )
 
 
+class AlternateDirectPool(BaseModel):
+    """quote_token_is_stablecoin이 false/null일 때, 그래도 이 토큰에 USD 직결
+    풀이 존재한다면 그 풀 정보를 담는다 - 멀티홉 없이 재조회할 수 있게 하기 위함."""
+
+    pool_address: str | None = None
+    pool_name: str | None = None
+    liquidity_usd: float | None = None
+    quote_token_symbol: str | None = None
+
+
 class DexSlippageResponse(BaseModel):
     generated_at: TimestampPair
     network: str
@@ -637,6 +647,24 @@ class DexSlippageResponse(BaseModel):
             "arb-spread-matrix), not a live on-chain gas quote."
         ),
     )
+    direct_stablecoin_pool_exists: bool | None = Field(
+        default=None,
+        description=(
+            "Whether ANY pool for this token (not just the single most-liquid one "
+            "selected above) is quoted directly against a USD stablecoin. Null when "
+            "you passed pool_address directly instead of token_address - the full "
+            "pool list for the token was never fetched, so this can't be checked."
+        ),
+    )
+    alternate_direct_pool: AlternateDirectPool | None = Field(
+        default=None,
+        description=(
+            "Only populated when quote_token_is_stablecoin is false/null AND a "
+            "stablecoin-quoted pool exists elsewhere for this token - gives that "
+            "pool's address/name/liquidity so you can re-query this endpoint with "
+            "that pool_address instead of assuming a multi-hop route is required."
+        ),
+    )
     data_source: str
     notice: str | None = None
 
@@ -661,6 +689,8 @@ DEX_SLIPPAGE_EXAMPLE = {
     "quote_token_is_stablecoin": True,
     "pool_fee_pct": 0.05,
     "assumed_gas_cost_usd": 0.05,
+    "direct_stablecoin_pool_exists": True,
+    "alternate_direct_pool": None,
     "data_source": "geckoterminal",
     "notice": (
         "Slippage is an approximation computed only from the pool's aggregate USD "
@@ -674,7 +704,9 @@ DEX_SLIPPAGE_EXAMPLE = {
         "standard. assumed_gas_cost_usd is a flat per-swap estimate, not a live gas "
         "quote. quote_token_is_stablecoin tells you whether this pool's quote side is a "
         "USD stablecoin - if false or null, converting to USD requires an additional "
-        "hop this estimate does not account for."
+        "hop this estimate does not account for; direct_stablecoin_pool_exists/"
+        "alternate_direct_pool tell you whether a different pool for this same token "
+        "could be used instead to avoid that hop entirely."
     ),
 }
 

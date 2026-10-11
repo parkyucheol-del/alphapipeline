@@ -326,6 +326,20 @@ DEX_SLIPPAGE_OUTPUT_SCHEMA = {
             "type": ["number", "null"],
             "description": "Flat per-swap gas estimate for this network, not a live gas quote.",
         },
+        "direct_stablecoin_pool_exists": {
+            "type": ["boolean", "null"],
+            "description": "Whether ANY pool for this token (not just the one selected above) is quoted directly against a USD stablecoin. Null when pool_address was passed directly (no full pool list was fetched).",
+        },
+        "alternate_direct_pool": {
+            "type": ["object", "null"],
+            "description": "Only set when quote_token_is_stablecoin is false/null AND a stablecoin-quoted pool exists elsewhere for this token - lets you re-query with that pool_address instead of assuming a multi-hop route.",
+            "properties": {
+                "pool_address": {"type": ["string", "null"]},
+                "pool_name": {"type": ["string", "null"]},
+                "liquidity_usd": {"type": ["number", "null"]},
+                "quote_token_symbol": {"type": ["string", "null"]},
+            },
+        },
         "data_source": {"type": "string"},
         "notice": {"type": ["string", "null"]},
     },
@@ -937,9 +951,13 @@ _TOOLS: list[dict] = [
             "GeckoTerminal-backed pool analytics with constant-product slippage "
             "estimation for the requested trade_size_usd, plus a slippage_tiers array "
             "with the same estimate at fixed $1,000/$5,000/$10,000 sizes so an agent "
-            "can gauge depth at a glance without extra calls. Do not use for "
-            "centralized exchange (CEX) orderbooks or contract risk analysis. Paid in "
-            "USDC on Base."
+            "can gauge depth at a glance without extra calls. When called with "
+            "token_address, also returns direct_stablecoin_pool_exists and, when the "
+            "selected pool isn't USD-quoted, alternate_direct_pool - a different pool "
+            "for the same token that is, so you know before swapping whether a "
+            "multi-hop route is actually required or whether a direct pool exists "
+            "elsewhere. Do not use for centralized exchange (CEX) orderbooks or "
+            "contract risk analysis. Paid in USDC on Base."
         ),
         "input_schema": {
             "type": "object",

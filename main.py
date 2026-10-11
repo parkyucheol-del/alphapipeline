@@ -671,7 +671,11 @@ async def funding_apr_matrix_endpoint(
         "token is selected automatically) - one of the two is required. Do not treat "
         "estimated_slippage_pct or slippage_tiers as an exact on-chain quote - always "
         "re-verify with a live quote before executing, especially for concentrated-liquidity "
-        "or stableswap pools."
+        "or stableswap pools. When called with `token_address`, also returns "
+        "`direct_stablecoin_pool_exists` (whether ANY pool for this token - not just the "
+        "selected one - is quoted directly against a USD stablecoin) and, when the selected "
+        "pool isn't USD-quoted, `alternate_direct_pool` (a different pool for the same token "
+        "that is), so a multi-hop route is never assumed without checking first."
     ),
     responses={
         200: {"model": DexSlippageResponse, "description": "DEX liquidity/slippage estimate data"},

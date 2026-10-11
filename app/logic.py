@@ -1355,6 +1355,28 @@ def _pick_most_liquid_pool(pools: list[dict]) -> dict | None:
     return best
 
 
+def _pick_best_stablecoin_pool(pools: list[dict]) -> dict | None:
+    """풀 목록 중 quote 쪽이 스테이블코인인 풀들만 추려서 그 중 유동성이 가장 큰 것을
+    고른다. 기본으로 선택된 풀(_pick_most_liquid_pool)이 스테이블코인 직결이 아닐 때,
+    "그래도 이 토큰에 USD 직결 풀 자체는 존재하는지"를 알려주기 위함 - 실제 도그푸딩
+    트레이딩 봇이 CLANKER를 사려다 USDC 직결 풀이 없어 포기한 마찰에서 나온 필드."""
+    best = None
+    best_liquidity = -1.0
+    for pool in pools:
+        attrs = pool.get("attributes") or {}
+        quote_symbol = _quote_symbol_from_pool_name(attrs.get("name"))
+        if not quote_symbol or quote_symbol not in _STABLECOIN_QUOTE_SYMBOLS:
+            continue
+        try:
+            liquidity = float(attrs.get("reserve_in_usd") or 0)
+        except (TypeError, ValueError):
+            liquidity = 0.0
+        if liquidity > best_liquidity:
+            best_liquidity = liquidity
+            best = pool
+    return best
+
+
 _DEX_SLIPPAGE_NOTICE = (
     "Slippage is an approximation computed only from the pool's aggregate USD "
     "liquidity as reported by GeckoTerminal - it assumes the pool is a standard "
@@ -1374,7 +1396,15 @@ _DEX_SLIPPAGE_NOTICE = (
     "USD-quoted pool. pool_fee_pct is the swap fee tier of the selected pool (e.g. "
     "0.05 for a 0.05% Uniswap v3 tier), parsed from the pool name - it is disclosed "
     "for your own accounting only and is NOT subtracted from estimated_slippage_pct "
-    "or slippage_tiers."
+    "or slippage_tiers. direct_stablecoin_pool_exists tells you whether ANY pool for "
+    "this token (not just the single one selected above) is quoted directly against "
+    "a USD stablecoin - null when you passed pool_address directly instead of "
+    "token_address (the full pool list for the token was never fetched, so this "
+    "can't be checked). When quote_token_is_stablecoin is false/null and a "
+    "stablecoin-quoted pool exists elsewhere for this token, alternate_direct_pool "
+    "gives that pool's address/name/liquidity so you can re-query this endpoint with "
+    "that pool_address instead of assuming a multi-hop route is required; null if no "
+    "such pool exists or wasn't checked."
 )
 
 _SLIPPAGE_TIER_SIZES_USD = (1000.0, 5000.0, 10000.0)
@@ -1422,6 +1452,7 @@ async def get_dex_liquidity_slippage(
         raise ValueError("pool_address 또는 token_address 중 하나는 반드시 필요합니다")
 
     resolved_pool_address = pool_address
+    pools: list[dict] = []
     if not pool_address:
         pools = await ds.get_geckoterminal_pools_for_token(network, token_address)
         best_pool = _pick_most_liquid_pool(pools)
@@ -1438,6 +1469,8 @@ async def get_dex_liquidity_slippage(
                 "quote_token_is_stablecoin": None,
                 "pool_fee_pct": None,
                 "assumed_gas_cost_usd": _ASSUMED_GAS_COST_USD.get(network, _DEFAULT_GAS_COST_USD),
+                "direct_stablecoin_pool_exists": False,
+                "alternate_direct_pool": None,
                 "data_source": "none",
                 "notice": f"No pool linked to token {token_address} on {network} was found on GeckoTerminal.",
             }
@@ -1468,6 +1501,35 @@ async def get_dex_liquidity_slippage(
     assumed_gas_cost_usd = _ASSUMED_GAS_COST_USD.get(network, _DEFAULT_GAS_COST_USD)
     pool_fee_pct = _pool_fee_pct_from_pool_name(pool_name)
 
+    # 멀티홉 라우팅 힌트 (2026-10-11 추가): pool_address를 직접 준 경우는 전체 풀
+    # 목록을 조회하지 않았으므로 null로 둔다 - token_address 경로에서만 채워진다.
+    if pool_address:
+        direct_stablecoin_pool_exists = None
+        alternate_direct_pool = None
+    else:
+        direct_stablecoin_pool_exists = any(
+            (
+                _quote_symbol_from_pool_name((p.get("attributes") or {}).get("name"))
+                in _STABLECOIN_QUOTE_SYMBOLS
+            )
+            for p in pools
+        )
+        alternate_direct_pool = None
+        if not quote_token_is_stablecoin:
+            alt_pool = _pick_best_stablecoin_pool(pools)
+            if alt_pool:
+                alt_attrs = alt_pool.get("attributes") or {}
+                try:
+                    alt_liquidity_usd = float(alt_attrs.get("reserve_in_usd") or 0)
+                except (TypeError, ValueError):
+                    alt_liquidity_usd = None
+                alternate_direct_pool = {
+                    "pool_address": alt_attrs.get("address"),
+                    "pool_name": alt_attrs.get("name"),
+                    "liquidity_usd": alt_liquidity_usd,
+                    "quote_token_symbol": _quote_symbol_from_pool_name(alt_attrs.get("name")),
+                }
+
     if liquidity_usd <= 0:
         return {
             "generated_at": _timestamp_now(),
@@ -1485,6 +1547,8 @@ async def get_dex_liquidity_slippage(
             "quote_token_is_stablecoin": quote_token_is_stablecoin,
             "pool_fee_pct": pool_fee_pct,
             "assumed_gas_cost_usd": assumed_gas_cost_usd,
+            "direct_stablecoin_pool_exists": direct_stablecoin_pool_exists,
+            "alternate_direct_pool": alternate_direct_pool,
             "data_source": "geckoterminal",
             "notice": _DEX_SLIPPAGE_NOTICE + " (Could not compute slippage because this pool's liquidity data is unavailable.)",
         }
@@ -1508,6 +1572,8 @@ async def get_dex_liquidity_slippage(
         "quote_token_is_stablecoin": quote_token_is_stablecoin,
         "pool_fee_pct": pool_fee_pct,
         "assumed_gas_cost_usd": assumed_gas_cost_usd,
+        "direct_stablecoin_pool_exists": direct_stablecoin_pool_exists,
+        "alternate_direct_pool": alternate_direct_pool,
         "data_source": "geckoterminal",
         "notice": _DEX_SLIPPAGE_NOTICE,
     }
