@@ -1029,6 +1029,84 @@ async def get_token_prescreen(chain_id: int, contract_address: str) -> dict:
     }
 
 
+_TOKEN_AUTHENTICITY_NOTICE = (
+    "Checks whether this contract impersonates a known mainstream asset, using "
+    "GoPlus's fake_token/trust_list/honeypot_with_same_creator fields (same "
+    "token_security call as security.token_risk/contract_health_audit/"
+    "token_prescreen, no extra upstream cost). flagged_as_counterfeit=false is "
+    "NOT proof of authenticity - only that GoPlus found no such flag at query "
+    "time. No honeypot/tax/LP checks here - use token_risk/contract_health_audit "
+    "for those. No Honeypot.is fallback exists for these fields."
+)
+
+
+async def get_token_authenticity(chain_id: int, contract_address: str) -> dict:
+    """
+    GoPlus token_security 응답의 fake_token/trust_list/honeypot_with_same_creator
+    필드만 뽑아서 "이 컨트랙트가 유명 자산을 사칭하는가"를 알려준다.
+    token_risk/contract_health_audit/token_prescreen과 동일한
+    ds.get_goplus_token_security 호출을 재사용 - 추가 업스트림 비용 없음.
+    GET /v1/security/token-authenticity가 사용한다 (main.py 참고).
+
+    2026-10-11 조사 세션에서 실측 검증: 실제 사칭 토큰(가짜 USDC, Base
+    0x4fbEB3fE0F3131eFC089BB4094618E5cfaF906f4)으로 테스트했을 때
+    fake_token.value=1, true_token_address가 진짜 Circle USDC 주소
+    (0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913)와 정확히 일치하는 것을 확인함.
+    진짜 원본 토큰(CLANKER)은 fake_token/trust_list 필드 자체가 응답에서
+    생략됨 - 정상 동작(사칭이 아니므로 플래그가 안 붙는 것).
+    """
+    contract_address = contract_address.lower()
+    try:
+        gp = await ds.get_goplus_token_security(chain_id, contract_address)
+    except Exception as e:
+        return {
+            "generated_at": _timestamp_now(),
+            "chain_id": chain_id,
+            "contract_address": contract_address,
+            "risk_flags": ["data_unavailable"],
+            "data_source": "none",
+            "notice": f"{_TOKEN_AUTHENTICITY_NOTICE} (GoPlus lookup failed: {e})",
+        }
+
+    token_name = gp.get("token_name") or None
+    token_symbol = gp.get("token_symbol") or None
+
+    fake_token = gp.get("fake_token") or {}
+    flagged_as_counterfeit = bool(fake_token.get("value")) if fake_token else False
+    true_token_address = (
+        (fake_token.get("true_token_address") or None) if flagged_as_counterfeit else None
+    )
+
+    trust_list_raw = gp.get("trust_list")
+    trust_list = bool(trust_list_raw) if trust_list_raw not in (None, "") else False
+
+    try:
+        honeypot_with_same_creator = int(gp.get("honeypot_with_same_creator") or 0)
+    except (TypeError, ValueError):
+        honeypot_with_same_creator = None
+
+    risk_flags = []
+    if flagged_as_counterfeit:
+        risk_flags.append("flagged_as_counterfeit")
+    if honeypot_with_same_creator:
+        risk_flags.append("creator_has_other_honeypots")
+
+    return {
+        "generated_at": _timestamp_now(),
+        "chain_id": chain_id,
+        "contract_address": contract_address,
+        "token_name": token_name,
+        "token_symbol": token_symbol,
+        "flagged_as_counterfeit": flagged_as_counterfeit,
+        "true_token_address": true_token_address,
+        "trust_list": trust_list,
+        "honeypot_with_same_creator": honeypot_with_same_creator,
+        "risk_flags": risk_flags,
+        "data_source": "goplus",
+        "notice": _TOKEN_AUTHENTICITY_NOTICE,
+    }
+
+
 _WHALE_AUDIT_NOTICE = (
     "This tool audits a wallet address you already know - it does not discover or rank "
     "'smart money' wallets, because Hyperliquid's public API has no leaderboard or "

@@ -359,6 +359,81 @@ TOKEN_PRESCREEN_EXAMPLE = {
 }
 
 
+# 2026-10-11 추가: GoPlus token_security 응답에 이미 들어있던(그동안 안 쓰던)
+# fake_token/trust_list/honeypot_with_same_creator 필드만 뽑아 "이 컨트랙트가
+# 유명 자산을 사칭하는가"를 알려준다. token_risk/contract_health_audit/
+# token_prescreen과 동일한 GoPlus 호출 재사용 - 추가 업스트림 비용 없음.
+# 2026-10-11 세션에서 실제 사칭 토큰(가짜 USDC)으로 실측 검증 완료 - 아래
+# TOKEN_AUTHENTICITY_EXAMPLE이 그 실제 응답 기반.
+class TokenAuthenticityResponse(BaseModel):
+    generated_at: TimestampPair
+    chain_id: int
+    contract_address: str
+    token_name: str | None = None
+    token_symbol: str | None = None
+    flagged_as_counterfeit: bool | None = Field(
+        default=None,
+        description=(
+            "True when GoPlus's fake_token.value == 1 (this contract impersonates a "
+            "known mainstream asset). False means GoPlus found no such flag on this "
+            "contract at query time - NOT a positive guarantee of authenticity, just "
+            "the absence of this one signal. Null only when the GoPlus lookup itself "
+            "failed (see data_source/notice)."
+        ),
+    )
+    true_token_address: str | None = Field(
+        default=None,
+        description=(
+            "Only non-null when flagged_as_counterfeit is true - GoPlus's claimed "
+            "address of the genuine asset being impersonated, on the same chain."
+        ),
+    )
+    trust_list: bool | None = Field(
+        default=None,
+        description=(
+            "True when GoPlus's trust_list flags this contract as a known, "
+            "trustworthy token. False/absent does NOT imply risk (GoPlus's own "
+            "wording) - sparsely populated even for well-known tokens. Null only "
+            "when the GoPlus lookup itself failed."
+        ),
+    )
+    honeypot_with_same_creator: int | None = Field(
+        default=None,
+        description=(
+            "Count of other honeypot-flagged tokens deployed by the same creator "
+            "address, per GoPlus. Not specific to impersonation, but a useful "
+            "secondary signal from the same call at no extra cost."
+        ),
+    )
+    risk_flags: list[str] = []
+    data_source: str
+    notice: str | None = None
+
+
+TOKEN_AUTHENTICITY_EXAMPLE = {
+    "generated_at": {"utc": "2026-10-11T13:00:00Z", "kst": "2026-10-11 22:00:00 KST"},
+    "chain_id": 8453,
+    "contract_address": "0x4fbeb3fe0f3131efc089bb4094618e5cfaf906f4",
+    "token_name": "USD Coin",
+    "token_symbol": "USDC",
+    "flagged_as_counterfeit": True,
+    "true_token_address": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+    "trust_list": False,
+    "honeypot_with_same_creator": 4,
+    "risk_flags": ["flagged_as_counterfeit", "creator_has_other_honeypots"],
+    "data_source": "goplus",
+    "notice": (
+        "Checks whether this contract impersonates a known mainstream asset, using "
+        "GoPlus's fake_token/trust_list/honeypot_with_same_creator fields (same "
+        "token_security call as security.token_risk/contract_health_audit/"
+        "token_prescreen, no extra upstream cost). flagged_as_counterfeit=false is "
+        "NOT proof of authenticity - only that GoPlus found no such flag at query "
+        "time. No honeypot/tax/LP checks here - use token_risk/contract_health_audit "
+        "for those. No Honeypot.is fallback exists for these fields."
+    ),
+}
+
+
 class WhalePosition(BaseModel):
     coin: str
     side: str = Field(description="LONG or SHORT, derived from the sign of Hyperliquid's szi (signed size).")

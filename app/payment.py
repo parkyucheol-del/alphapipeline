@@ -112,6 +112,7 @@ from app.schemas import (
     MACRO_DDAY_EXAMPLE,
     MARKDOWN_EXAMPLE,
     NEG_RISK_ARBITRAGE_EXAMPLE,
+    TOKEN_AUTHENTICITY_EXAMPLE,
     TOKEN_DIAGNOSTIC_EXAMPLE,
     TOKEN_PRESCREEN_EXAMPLE,
     TOKEN_RISK_EXAMPLE,
@@ -131,6 +132,7 @@ from app.schemas import (
     PredictionHip4PriceLadderResponse,
     PredictionHip4SnapshotResponse,
     PredictionNegRiskArbitrageResponse,
+    TokenAuthenticityResponse,
     TokenDiagnosticResponse,
     TokenPrescreenResponse,
     TokenRiskResponse,
@@ -395,6 +397,7 @@ def build_routes(
     token_risk_option = _payment_option(settings.PRICE_TOKEN_RISK_USDC)
     contract_health_option = _payment_option(settings.PRICE_CONTRACT_HEALTH_USDC)
     token_prescreen_option = _payment_option(settings.PRICE_TOKEN_PRESCREEN_USDC)
+    token_authenticity_option = _payment_option(settings.PRICE_TOKEN_AUTHENTICITY_USDC)
     funding_rate_option = _payment_option(settings.PRICE_FUNDING_RATE_USDC)
     funding_apr_option = _payment_option(settings.PRICE_FUNDING_APR_USDC)
     dex_slippage_option = _payment_option(settings.PRICE_DEX_SLIPPAGE_USDC)
@@ -566,6 +569,42 @@ def build_routes(
             ),
             service_name="AlphaPipeline Token Prescreen",
             tags=["crypto", "security", "liquidity", "low-cost", "pre-filter"],
+        ),
+        "GET /v1/security/token-authenticity": _make_route_config(
+            accepts=[token_authenticity_option],
+            mime_type="application/json",
+            description=(
+                "Flags contracts impersonating a known mainstream asset (e.g. a fake "
+                "USDC), using GoPlus's fake_token/trust_list/honeypot_with_same_creator "
+                "fields (same call as token-risk/contract-health-audit/token-prescreen, "
+                "no extra upstream cost). flagged_as_counterfeit=false is not proof of "
+                "authenticity - only that GoPlus found no flag. Paid in USDC on Base."
+            ),
+            resource=_resource_url("/v1/security/token-authenticity"),
+            extensions=_bazaar_extension(
+                input_example={
+                    "chain_id": 8453,
+                    "contract_address": "0x4fbeb3fe0f3131efc089bb4094618e5cfaf906f4",
+                },
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "chain_id": {
+                            "type": "integer",
+                            "description": "EVM chain id, e.g. 8453 for Base.",
+                        },
+                        "contract_address": {
+                            "type": "string",
+                            "description": "Token contract address (0x...).",
+                        },
+                    },
+                    "required": ["chain_id", "contract_address"],
+                },
+                output_example=TOKEN_AUTHENTICITY_EXAMPLE,
+                output_schema=_inline_schema_defs(TokenAuthenticityResponse.model_json_schema()),
+            ),
+            service_name="AlphaPipeline Token Authenticity",
+            tags=["crypto", "security", "impersonator", "low-cost"],
         ),
         "GET /v1/security/token-diagnostic": _make_route_config(
             accepts=[token_diagnostic_option],

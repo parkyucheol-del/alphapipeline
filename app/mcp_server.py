@@ -228,6 +228,39 @@ TOKEN_PRESCREEN_OUTPUT_SCHEMA = {
     ],
 }
 
+TOKEN_AUTHENTICITY_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "generated_at": _TIMESTAMP_PAIR_SCHEMA,
+        "chain_id": {"type": "integer"},
+        "contract_address": {"type": "string"},
+        "token_name": {"type": ["string", "null"]},
+        "token_symbol": {"type": ["string", "null"]},
+        "flagged_as_counterfeit": {
+            "type": ["boolean", "null"],
+            "description": "True when GoPlus's fake_token.value == 1. False means no such flag was found (not proof of authenticity). Null only when the GoPlus lookup itself failed.",
+        },
+        "true_token_address": {
+            "type": ["string", "null"],
+            "description": "Only non-null when flagged_as_counterfeit is true - GoPlus's claimed address of the genuine asset being impersonated, on the same chain.",
+        },
+        "trust_list": {
+            "type": ["boolean", "null"],
+            "description": "True when GoPlus's trust_list flags this contract as a known, trustworthy token. Sparsely populated - absent/false does not imply risk.",
+        },
+        "honeypot_with_same_creator": {
+            "type": ["integer", "null"],
+            "description": "Count of other honeypot-flagged tokens deployed by the same creator address, per GoPlus.",
+        },
+        "risk_flags": {"type": "array", "items": {"type": "string"}},
+        "data_source": {"type": "string"},
+        "notice": {"type": ["string", "null"]},
+    },
+    "required": [
+        "generated_at", "chain_id", "contract_address", "risk_flags", "data_source",
+    ],
+}
+
 TOKEN_DIAGNOSTIC_OUTPUT_SCHEMA = {
     "type": "object",
     "properties": {
@@ -907,6 +940,39 @@ _TOOLS: list[dict] = [
             "required": ["chain_id", "contract_address"],
         },
         "output_schema": TOKEN_PRESCREEN_OUTPUT_SCHEMA,
+        "annotations": _READ_ONLY_ANNOTATIONS,
+    },
+    {
+        "name": "security.token_authenticity",
+        "path": "/v1/security/token-authenticity",
+        "price_attr": "PRICE_TOKEN_AUTHENTICITY_USDC",
+        "description": (
+            "Use this tool to check whether a contract impersonates a known "
+            "mainstream asset (e.g. a fake 'USDC'), using GoPlus's "
+            "fake_token/trust_list/honeypot_with_same_creator fields - same "
+            "underlying token_security call as security.token_risk / "
+            "contract_health_audit / token_prescreen, no extra upstream cost. "
+            "flagged_as_counterfeit=false is NOT proof of authenticity - it only "
+            "means GoPlus found no such flag at query time. true_token_address is "
+            "only set when flagged_as_counterfeit is true. No honeypot/tax/LP "
+            "checks here - use security.token_risk / security.contract_health_audit "
+            "for those. Paid in USDC on Base."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "chain_id": {
+                    "type": "integer",
+                    "description": "EVM chain id, e.g. 8453 for Base.",
+                },
+                "contract_address": {
+                    "type": "string",
+                    "description": "Token contract address (0x...).",
+                },
+            },
+            "required": ["chain_id", "contract_address"],
+        },
+        "output_schema": TOKEN_AUTHENTICITY_OUTPUT_SCHEMA,
         "annotations": _READ_ONLY_ANNOTATIONS,
     },
     {

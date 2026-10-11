@@ -97,6 +97,12 @@ ENDPOINTS: list[EndpointCall] = [
         {"chain_id": 8453, "contract_address": _WETH_BASE},
     ),
     EndpointCall(
+        "security.token_authenticity",
+        "GET",
+        "/v1/security/token-authenticity",
+        {"chain_id": 8453, "contract_address": _WETH_BASE},
+    ),
+    EndpointCall(
         "security.token_risk",
         "GET",
         "/v1/security/token-risk",

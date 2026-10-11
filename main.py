@@ -28,6 +28,7 @@ from app.logic import (
     get_kimchi_alert,
     get_macro_calendar_dday,
     get_neg_risk_arbitrage,
+    get_token_authenticity,
     get_token_diagnostic,
     get_token_prescreen,
     get_token_risk,
@@ -57,6 +58,7 @@ from app.schemas import (
     PredictionHip4PriceLadderResponse,
     PredictionHip4SnapshotResponse,
     PredictionNegRiskArbitrageResponse,
+    TokenAuthenticityResponse,
     TokenDiagnosticResponse,
     TokenPrescreenResponse,
     TokenRiskResponse,
@@ -247,6 +249,7 @@ async def root(request: Request):
             "/v1/security/token-risk": settings.PRICE_TOKEN_RISK_USDC,
             "/v1/security/contract-health-audit": settings.PRICE_CONTRACT_HEALTH_USDC,
             "/v1/security/token-prescreen": settings.PRICE_TOKEN_PRESCREEN_USDC,
+            "/v1/security/token-authenticity": settings.PRICE_TOKEN_AUTHENTICITY_USDC,
             "/v1/security/token-diagnostic": settings.PRICE_TOKEN_DIAGNOSTIC_USDC,
             "/v1/dex/liquidity-slippage": settings.PRICE_DEX_SLIPPAGE_USDC,
             "/v1/derivatives/whale-position-audit": settings.PRICE_WHALE_AUDIT_USDC,
@@ -280,6 +283,7 @@ async def root(request: Request):
             "/v1/security/token-risk",
             "/v1/security/contract-health-audit",
             "/v1/security/token-prescreen",
+            "/v1/security/token-authenticity",
             "/v1/security/token-diagnostic",
             "/v1/dex/liquidity-slippage",
             "/v1/derivatives/whale-position-audit",
@@ -556,6 +560,41 @@ async def token_prescreen_endpoint(
         return JSONResponse(content=data)
     except Exception as e:
         logger.exception("token-prescreen 처리 실패")
+        return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
+
+
+@app.get(
+    "/v1/security/token-authenticity",
+    tags=["market"],
+    summary="Flags contracts impersonating a known mainstream asset (GoPlus fake_token/trust_list)",
+    description=(
+        "Checks whether this contract impersonates a known mainstream asset (e.g. a "
+        "fake 'USDC'), using GoPlus's fake_token/trust_list/honeypot_with_same_creator "
+        "fields - same underlying token_security call as security.token_risk / "
+        "contract_health_audit / token_prescreen, no extra upstream cost. "
+        "`flagged_as_counterfeit=false` is NOT proof of authenticity - it only means "
+        "GoPlus found no such flag on this contract at query time. `true_token_address` "
+        "is only set when flagged_as_counterfeit is true. No honeypot/tax/LP checks "
+        "here - use security.token_risk / security.contract_health_audit for those. "
+        "No Honeypot.is fallback exists for these fields, so a GoPlus lookup failure "
+        "returns null fields with data_source=none. Input: `chain_id` (e.g. 8453 for "
+        "Base) and `contract_address` (required)."
+    ),
+    responses={
+        200: {"model": TokenAuthenticityResponse, "description": "Contract impersonation check result"},
+        402: {"description": "x402 payment required"},
+        502: {"model": ErrorResponse, "description": "Upstream (GoPlus) error"},
+    },
+)
+async def token_authenticity_endpoint(
+    chain_id: int = Query(..., description="EVM chain id, e.g. 8453 for Base"),
+    contract_address: str = Query(..., description="Token contract address (0x...)"),
+):
+    try:
+        data = await get_token_authenticity(chain_id, contract_address)
+        return JSONResponse(content=data)
+    except Exception as e:
+        logger.exception("token-authenticity 처리 실패")
         return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
 
 
