@@ -36,6 +36,12 @@ COINGECKO_SIMPLE_PRICE_URL = "https://api.coingecko.com/api/v3/simple/price"
 COINGECKO_COIN_DETAIL_URL = "https://api.coingecko.com/api/v3/coins/{coin_id}"
 COINBASE_SPOT_PRICE_URL = "https://api.coinbase.com/v2/prices/{base}-USD/spot"
 
+# Cloudflare Workers AI 결정 모델(clef-flash). HIP-4 이벤트 노이즈 필터 전용
+# (app/events.py) - 계정 ID/토큰은 settings.CLOUDFLARE_ACCOUNT_ID/_API_TOKEN.
+CLOUDFLARE_CLEF_FLASH_URL = (
+    "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/@cf/cloudflare/clef-flash"
+)
+
 # GoPlus Security 토큰 보안/허니팟 체크 (무료, 앱키 불필요 - 커뮤니티 래퍼로 검증됨)
 GOPLUS_TOKEN_SECURITY_URL = "https://api.gopluslabs.io/api/v1/token_security/{chain_id}"
 # Honeypot.is - GoPlus 실패 시 폴백 (공식 문서: API 키 불필요)
@@ -559,3 +565,38 @@ async def get_polymarket_order_book(token_id: str) -> dict:
         r = await client.get(f"{CLOB_API_BASE}/book", params={"token_id": token_id})
         r.raise_for_status()
         return r.json()
+
+
+async def get_clef_flash_signal(state: dict, instructions: str) -> float:
+    """
+    Cloudflare Workers AI의 clef-flash 결정 모델에 noul(0.0-1.0 확률) 질문 하나를
+    던지고 그 값만 돌려준다. 2026-10-12 수동 테스트(세션 로그 참고)에서 확인한
+    요청 스키마 그대로다 - model 필드는 "clef-flash"(URL 경로의 전체 모델명이
+    아님), state는 객체, 질문은 "instructions" 키를 쓴다.
+
+    app/events.py의 HIP-4 이벤트 노이즈 필터 전용으로 만들었지만, 다른 곳에서도
+    재사용 가능하도록 범용으로 뒀다 - state/instructions는 호출부가 채운다.
+
+    settings.CLOUDFLARE_ACCOUNT_ID/_API_TOKEN이 비어있으면 즉시 RuntimeError -
+    호출부가 이걸 "필터 불가, fail-open" 신호로 받아야 한다(설정 누락도 장애로
+    취급 - app/config.py 주석 참고).
+    """
+    if not settings.CLOUDFLARE_ACCOUNT_ID or not settings.CLOUDFLARE_API_TOKEN:
+        raise RuntimeError("CLOUDFLARE_ACCOUNT_ID/CLOUDFLARE_API_TOKEN이 설정되지 않았습니다")
+
+    body = {
+        "model": "clef-flash",
+        "state": state,
+        "questions": {
+            "signal": {"type": "noul", "instructions": instructions},
+        },
+    }
+    headers = {"Authorization": f"Bearer {settings.CLOUDFLARE_API_TOKEN}"}
+    url = CLOUDFLARE_CLEF_FLASH_URL.format(account_id=settings.CLOUDFLARE_ACCOUNT_ID)
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        r = await client.post(url, headers=headers, json=body)
+        r.raise_for_status()
+        payload = r.json()
+        if not payload.get("success"):
+            raise RuntimeError(f"clef-flash 응답 오류: {payload.get('errors')}")
+        return float(payload["result"]["answers"]["signal"]["noul"])

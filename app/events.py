@@ -235,6 +235,17 @@ async def list_event_types() -> dict:
         ],
         "poll_interval_seconds": settings.HIP4_EVENTS_POLL_INTERVAL_SECONDS,
         "default_threshold_pct": settings.HIP4_EVENTS_JUMP_THRESHOLD_PCT,
+        "clef_signal_filter": {
+            "enabled": settings.HIP4_EVENTS_CLEF_FILTER_ENABLED,
+            "signal_threshold": settings.HIP4_EVENTS_CLEF_SIGNAL_THRESHOLD,
+            "notice": (
+                "When enabled, hip4.prob_jump candidates are scored by Cloudflare "
+                "Workers AI's clef-flash decision model before delivery; candidates "
+                "scored below signal_threshold are not sent. On a scoring failure "
+                "the event is delivered anyway (fail-open), and a delivered event "
+                "carries a clef_signal field only when scoring actually ran."
+            ),
+        },
         "subscription_ttl_hours": settings.HIP4_EVENTS_SUBSCRIPTION_TTL_HOURS,
         "delivery": "Standard Webhooks (webhook-id / webhook-timestamp / webhook-signature headers, HMAC-SHA256, see standardwebhooks.com)",
         "status": "EXPERIMENTAL - based on a draft spec (github.com/modelcontextprotocol/experimental-ext-triggers-events) that has not stabilized yet. Subscriptions are not guaranteed to survive a server restart.",
@@ -379,6 +390,46 @@ async def poll_once() -> int:
     if not created_events and not jump_candidates:
         return 0
 
+    # ===== Clef-flash 노이즈 필터 (2026-10-12 추가, EXPERIMENTAL) =====
+    # settings.HIP4_EVENTS_CLEF_FILTER_ENABLED 참고. jump candidate 1개가 여러
+    # 구독에 걸릴 수 있어서 row_key당 한 번만 호출하도록 캐시한다. None은
+    # "필터를 안 돌렸거나(꺼짐/설정 없음) 호출이 실패했다"는 뜻이고, 이 경우
+    # fail-open(필터 없이 그대로 발송) - app/config.py의 설계 의도 참고.
+    clef_signal_cache: dict[str, float | None] = {}
+
+    async def _clef_signal_for(key: str, row: dict, prev_price: float, price: float, delta: float) -> float | None:
+        if key in clef_signal_cache:
+            return clef_signal_cache[key]
+        if not settings.HIP4_EVENTS_CLEF_FILTER_ENABLED:
+            clef_signal_cache[key] = None
+            return None
+        from app.data_sources import get_clef_flash_signal  # 순환 임포트 방지 지연 임포트
+
+        state = {
+            "market": row.get("label"),
+            "underlying": row.get("underlying"),
+            "probability_from": round(prev_price, 4),
+            "probability_to": round(price, 4),
+            "probability_delta": round(delta, 4),
+            "poll_interval_seconds": settings.HIP4_EVENTS_POLL_INTERVAL_SECONDS,
+            "note": "Trading volume and orderbook depth are not available from Hyperliquid's public HIP-4 API.",
+        }
+        instructions = (
+            "Does this probability swing represent a real, information-driven "
+            "market-moving signal rather than noise, given that no trading-volume "
+            "or orderbook-depth data is available for this market?"
+        )
+        try:
+            signal = await get_clef_flash_signal(state, instructions)
+        except Exception:
+            logger.warning(
+                "clef-flash 노이즈 필터 호출 실패 - fail-open으로 그대로 발송합니다 (row_key=%s)",
+                key, exc_info=True,
+            )
+            signal = None
+        clef_signal_cache[key] = signal
+        return signal
+
     delivered = 0
     async with httpx.AsyncClient() as client:
         active_records = [s for s in subs.values() if s.get("status") == "active" and s.get("expires_at", 0) > time.time()]
@@ -393,16 +444,20 @@ async def poll_once() -> int:
                     continue
                 if not _matches_subscription(record, "hip4.prob_jump", row):
                     continue
-                to_send.append(
-                    {
-                        "type": "hip4.prob_jump",
-                        "row_key": key,
-                        "from": round(prev_price, 4),
-                        "to": round(price, 4),
-                        "delta": round(delta, 4),
-                        **{k: v for k, v in row.items() if k != "price"},
-                    }
-                )
+                signal = await _clef_signal_for(key, row, prev_price, price, delta)
+                if signal is not None and signal < settings.HIP4_EVENTS_CLEF_SIGNAL_THRESHOLD:
+                    continue  # clef-flash가 노이즈로 판단 - 이 구독에는 발송 생략
+                event = {
+                    "type": "hip4.prob_jump",
+                    "row_key": key,
+                    "from": round(prev_price, 4),
+                    "to": round(price, 4),
+                    "delta": round(delta, 4),
+                    **{k: v for k, v in row.items() if k != "price"},
+                }
+                if signal is not None:
+                    event["clef_signal"] = round(signal, 4)
+                to_send.append(event)
 
             for ev in to_send:
                 payload = {

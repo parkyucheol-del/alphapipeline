@@ -116,6 +116,28 @@ class Settings:
     # 써주는 대가라서다.
     PRICE_HIP4_EVENTS_SUBSCRIBE_USDC: float = float(os.getenv("PRICE_HIP4_EVENTS_SUBSCRIBE_USDC", "0.05"))
 
+    # ===== HIP-4 이벤트 Clef-flash 노이즈 필터 (2026-10-12 추가, EXPERIMENTAL) =====
+    # app/events.py의 poll_once()가 hip4.prob_jump 후보를 웹훅으로 보내기 전에,
+    # Cloudflare Workers AI의 clef-flash 결정 모델에 "이게 진짜 신호인가"를
+    # 한 번 더 물어보는 선택적 필터. HIP4_EVENTS_ENABLED와 별개 플래그다 - 이벤트
+    # 기능 자체는 켜두고 필터만 끌 수도 있다(기본값). 끄면 이 필터는 전혀
+    # 호출되지 않고 기존 동작(임계값만 넘으면 바로 발송) 그대로다.
+    HIP4_EVENTS_CLEF_FILTER_ENABLED: bool = _get_bool("HIP4_EVENTS_CLEF_FILTER_ENABLED", False)
+    # signal(noul) 확률이 이 값 미만이면 노이즈로 보고 웹훅 발송을 건너뛴다.
+    # 2026-10-12 수동 테스트(합성 시나리오 6개, Haiku 5.5 대비 5/6 일치)에서
+    # 나온 대략적인 값 - 실거래량 데이터 없이 운영되므로(Hyperliquid HIP-4 공개
+    # API에 거래량 필드 자체가 없음) 실측 분포를 보고 재조정이 필요할 수 있다.
+    HIP4_EVENTS_CLEF_SIGNAL_THRESHOLD: float = float(os.getenv("HIP4_EVENTS_CLEF_SIGNAL_THRESHOLD", "0.3"))
+    # Cloudflare 호출이 실패/타임아웃되면 필터 없이 그대로 발송한다(fail-open).
+    # 외부 서비스 장애 때문에 진짜 알림을 조용히 누락시키지 않기 위한 의도적 선택 -
+    # 이 필터는 "있으면 노이즈를 줄여주는 보너스"지 "없으면 알림이 안 나가는
+    # 필수 게이트"가 아니어야 한다.
+    # Cloudflare Workers AI 계정 정보. clef-flash 호출에만 쓰인다. 비어있으면
+    # HIP4_EVENTS_CLEF_FILTER_ENABLED=true여도 필터를 건너뛰고 경고 로그만 남긴다
+    # (fail-open과 같은 원칙 - 설정 누락도 "장애"로 취급).
+    CLOUDFLARE_ACCOUNT_ID: str = os.getenv("CLOUDFLARE_ACCOUNT_ID", "")
+    CLOUDFLARE_API_TOKEN: str = os.getenv("CLOUDFLARE_API_TOKEN", "")
+
     # ===== x402 공식 결제 레이어 (Coinbase CDP Facilitator) =====
     # Coinbase Developer Platform(https://portal.cdp.coinbase.com)에서 발급받는 API 키.
     # 둘 다 채워지면 CDP Facilitator(메인넷 실결제 검증/정산)를 쓰고,

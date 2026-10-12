@@ -190,6 +190,16 @@ Honest caveats before you rely on this:
   (declared under the experimental `capabilities.extensions["io.modelcontextprotocol/events"]`
   key) - `events/subscribe` self-calls the same paid REST route internally,
   so pricing/payment is identical either way.
+- **Optional noise filter (`HIP4_EVENTS_CLEF_FILTER_ENABLED`, default `false`).**
+  When on, each `hip4.prob_jump` candidate is scored by Cloudflare Workers
+  AI's `clef-flash` decision model (needs `CLOUDFLARE_ACCOUNT_ID` /
+  `CLOUDFLARE_API_TOKEN`) before delivery; candidates scored below
+  `HIP4_EVENTS_CLEF_SIGNAL_THRESHOLD` (default `0.3`) are not sent. No
+  trading-volume or orderbook-depth data goes into that score - Hyperliquid's
+  public HIP-4 API doesn't expose either - so it's reasoning from the
+  probability move alone. If the Cloudflare call fails or the credentials
+  are missing, this fails **open**: the event is delivered anyway, just
+  without the extra `clef_signal` field it would otherwise carry.
 
 Quick test once `HIP4_EVENTS_ENABLED=true` is set and deployed:
 
