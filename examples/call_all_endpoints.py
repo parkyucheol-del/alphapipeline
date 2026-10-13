@@ -89,19 +89,7 @@ ENDPOINTS: list[EndpointCall] = [
     EndpointCall(
         "prediction.hip4_alerts_event_types", "GET", "/v1/prediction/hip4-alerts/event-types"
     ),
-    # --- 보안 계열 ($0.01~$0.03) ---
-    EndpointCall(
-        "security.token_prescreen",
-        "GET",
-        "/v1/security/token-prescreen",
-        {"chain_id": 8453, "contract_address": _WETH_BASE},
-    ),
-    EndpointCall(
-        "security.token_authenticity",
-        "GET",
-        "/v1/security/token-authenticity",
-        {"chain_id": 8453, "contract_address": _WETH_BASE},
-    ),
+    # --- 보안 계열 ($0.02~$0.03) ---
     EndpointCall(
         "security.token_risk",
         "GET",
@@ -161,6 +149,9 @@ ENDPOINTS: list[EndpointCall] = [
         "/v1/derivatives/funding-apr-matrix",
         {"symbol": "BTC"},
     ),
+    EndpointCall(
+        "market.oracle_gap", "GET", "/v1/market/oracle-gap", {"coin": "ETH"}
+    ),
     # --- 예측시장 (폴리마켓) - event_slug/market_slug는 만료될 수 있음, 상단 docstring 참고 ---
     EndpointCall(
         "prediction.neg_risk_arbitrage",
@@ -190,10 +181,6 @@ ENDPOINTS: list[EndpointCall] = [
         "GET",
         "/v1/prediction/hip4-price-ladder",
         {"underlying": "BTC"},
-    ),
-    # --- 사이클 비교 (2026-10-10 추가) ---
-    EndpointCall(
-        "market.cycle_compare", "GET", "/v1/market/cycle-compare", {}
     ),
     # --- 도구 ---
     EndpointCall(

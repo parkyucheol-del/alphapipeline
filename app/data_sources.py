@@ -16,7 +16,7 @@ import logging
 
 import httpx
 from app.config import settings
-from app.cache import goplus_cache, hip4_cache, polymarket_book_cache, ttl_cached
+from app.cache import goplus_cache, hip4_cache, oracle_gap_cache, polymarket_book_cache, ttl_cached
 
 logger = logging.getLogger("alphapipeline")
 
@@ -474,6 +474,25 @@ async def get_hyperliquid_clearinghouse_state(address: str) -> dict:
         )
         r.raise_for_status()
         return r.json()
+
+
+@ttl_cached(oracle_gap_cache, key_fn=lambda: "hl:metaAndAssetCtxs")
+async def get_hyperliquid_meta_and_asset_ctxs() -> tuple[dict, list[dict]]:
+    """
+    Hyperliquid 무기한선물(perp) 전체 유니버스의 메타(자산 목록)와 자산별
+    컨텍스트(mid/mark/oracle 가격 등)를 한 번의 호출로 받는다. market.oracle_gap이
+    쓴다(2026-10-13, Papertrade 사건 계기 - app/config.py 주석 참고). HIP-4
+    예측시장용 outcomeMeta/allMids와는 다른 자산군(perp)이라 별도 호출이다.
+
+    응답은 [meta, ctxs] 2원소 배열 - meta["universe"]가 자산 목록(순서대로
+    인덱스 부여), ctxs가 그 순서와 1:1 대응하는 가격 컨텍스트 리스트다(공식
+    문서에 명시됨, zip으로 짝지으면 된다).
+    """
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        r = await client.post(HYPERLIQUID_INFO_URL, json={"type": "metaAndAssetCtxs"})
+        r.raise_for_status()
+        meta, ctxs = r.json()
+        return meta, ctxs
 
 
 # ============================================================================

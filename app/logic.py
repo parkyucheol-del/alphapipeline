@@ -1413,6 +1413,70 @@ async def get_funding_rate(symbol: str) -> dict:
     }
 
 
+_ORACLE_GAP_NOTICE = (
+    "This is a single snapshot (no multi-minute trade-flow analysis) and elevated is "
+    "a fixed-threshold boolean (abs(mid_oracle_gap_bp) >= alert_threshold_bp), not a "
+    "manipulation determination - a large gap can also happen during real fast-moving "
+    "markets. Hyperliquid's own mark/oracle prices are unaffected by short-lived mid "
+    "swings (they blend multiple sources), which is why a protocol that prices directly "
+    "off the mid instead of mark/oracle is exposed to this - see the 2026-10-10 "
+    "Papertrade incident on HyperEVM."
+)
+
+
+async def get_oracle_gap(coin: str) -> dict:
+    """
+    GET /v1/market/oracle-gap가 사용한다. Hyperliquid 무기한선물의 mid(호가
+    중간값)가 oracle/mark 가격에서 몇 bp 벌어졌는지만 순수 계산해서 반환한다.
+
+    2026-10-10 Papertrade 사건(HyperEVM의 1,000배 레버리지 DEX가 Hyperliquid
+    mid를 그대로 기준가로 쓰다가 한 지갑이 Hyperliquid 쪽 물량으로 mid를 흔들어
+    약 128만 달러를 챙긴 사건) 계기로 추가. "기준가를 mid에 직접 거는 신생
+    프로토콜"에게 이 괴리가 바로 익스포저이기 때문 - mark/oracle 자체는 여러
+    소스를 블렌딩해서 짧은 mid 스윙에 영향을 덜 받는다(Hyperliquid 공식 설계).
+
+    데일리 알파 2026-10-13 카드는 flow_skew(1분 순체결 방향 쏠림)와 risk_score
+    (복합 점수)까지 제안했지만 둘 다 의도적으로 뺐다 - app/config.py의
+    ORACLE_GAP_* 설정 주석에 이유를 적어뒀다(요약: flow_skew는 이 프로젝트가
+    쓰지 않기로 한 시계열 폴러 인프라가 필요하고, risk_score는 이미 두 번
+    반려된 "검증 안 된 복합 판단 필드" 원칙과 충돌한다).
+    """
+    meta, ctxs = await ds.get_hyperliquid_meta_and_asset_ctxs()
+    universe = meta.get("universe") or []
+    coin_norm = (coin or "").strip().upper()
+
+    idx = next((i for i, u in enumerate(universe) if (u.get("name") or "").upper() == coin_norm), None)
+    if idx is None or idx >= len(ctxs):
+        raise ValueError(f"'{coin}'은(는) Hyperliquid 무기한선물 유니버스에 없습니다")
+
+    c = ctxs[idx]
+    try:
+        mid_price = float(c["midPx"])
+        mark_price = float(c["markPx"])
+        oracle_price = float(c["oraclePx"])
+    except (KeyError, TypeError, ValueError) as e:
+        raise RuntimeError(f"Hyperliquid 응답에서 mid/mark/oracle 가격을 읽지 못했습니다: {e}")
+
+    mid_oracle_gap_bp = (mid_price - oracle_price) / oracle_price * 1e4 if oracle_price else None
+    mark_oracle_gap_bp = (mark_price - oracle_price) / oracle_price * 1e4 if oracle_price else None
+    threshold = settings.ORACLE_GAP_ALERT_THRESHOLD_BP
+    elevated = mid_oracle_gap_bp is not None and abs(mid_oracle_gap_bp) >= threshold
+
+    return {
+        "generated_at": _timestamp_now(),
+        "coin": coin_norm,
+        "mid_price": mid_price,
+        "mark_price": mark_price,
+        "oracle_price": oracle_price,
+        "mid_oracle_gap_bp": round(mid_oracle_gap_bp, 2) if mid_oracle_gap_bp is not None else None,
+        "mark_oracle_gap_bp": round(mark_oracle_gap_bp, 2) if mark_oracle_gap_bp is not None else None,
+        "elevated": elevated,
+        "alert_threshold_bp": threshold,
+        "data_source": "hyperliquid",
+        "notice": _ORACLE_GAP_NOTICE,
+    }
+
+
 _FUNDING_APR_NOTICE = (
     "annualized_rate_pct is a flat extrapolation of the CURRENT funding rate "
     "(periods_per_year x current rate) - it assumes the rate stays constant, which "

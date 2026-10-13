@@ -138,6 +138,25 @@ class Settings:
     CLOUDFLARE_ACCOUNT_ID: str = os.getenv("CLOUDFLARE_ACCOUNT_ID", "")
     CLOUDFLARE_API_TOKEN: str = os.getenv("CLOUDFLARE_API_TOKEN", "")
 
+    # ===== market.oracle_gap (2026-10-13 추가) =====
+    # 2026-10-10 Papertrade 사건(HyperEVM 신생 DEX가 Hyperliquid 호가 중간값을
+    # 그대로 기준가로 썼다가 약 128만 달러 털림) 계기. Hyperliquid 공식
+    # metaAndAssetCtxs에서 mid/mark/oracle 가격을 가져와 mid가 oracle에서 몇
+    # bp 벌어졌는지만 순수 계산해서 반환한다 - 데일리 알파 카드가 제안한
+    # flow_skew(1분 순체결 쏠림)와 risk_score(복합 점수)는 의도적으로 뺐다:
+    # flow_skew는 스푸핑 감지 때와 똑같이 이 프로젝트가 쓰지 않는 시계열 폴러
+    # 인프라가 필요하고, risk_score는 "검증 안 된 복합/정성 판단 필드를 만들지
+    # 않는다"는, 이미 두 번 반려된 원칙(claude/pending-backlog-2026-09-10.md)과
+    # 정면으로 충돌한다. elevated는 risk_score와 달리 "하나의 실측 숫자가
+    # 고정 임계값을 넘었는가"라는 결정론적 불리언이라 token_authenticity의
+    # flagged_as_counterfeit과 같은 성격이라 원칙과 안 부딪힌다.
+    ORACLE_GAP_CACHE_TTL_SECONDS: int = int(os.getenv("ORACLE_GAP_CACHE_TTL_SECONDS", "3"))
+    # mid-oracle 괴리(bp)가 이 값 이상이면 elevated=true. 기본 5bp는 오늘 액션
+    # 카드 스크립트의 ALERT 임계값을 그대로 가져온 잠정값 - 실측 로그(오늘 10분
+    # 측정) 분포를 보고 재조정 예정.
+    ORACLE_GAP_ALERT_THRESHOLD_BP: float = float(os.getenv("ORACLE_GAP_ALERT_THRESHOLD_BP", "5.0"))
+    PRICE_ORACLE_GAP_USDC: float = float(os.getenv("PRICE_ORACLE_GAP_USDC", "0.01"))
+
     # ===== x402 공식 결제 레이어 (Coinbase CDP Facilitator) =====
     # Coinbase Developer Platform(https://portal.cdp.coinbase.com)에서 발급받는 API 키.
     # 둘 다 채워지면 CDP Facilitator(메인넷 실결제 검증/정산)를 쓰고,

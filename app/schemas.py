@@ -651,6 +651,57 @@ FUNDING_RATE_EXAMPLE = {
 }
 
 
+# Hyperliquid 무기한선물의 mid가 oracle/mark에서 몇 bp 벌어졌는지 - 순수 계산값.
+# elevated는 고정 임계값 비교 결과일 뿐 "조작 판정"이 아니다(logic.py의
+# get_oracle_gap 참고).
+class OracleGapResponse(BaseModel):
+    generated_at: TimestampPair
+    coin: str
+    mid_price: float | None = None
+    mark_price: float | None = None
+    oracle_price: float | None = None
+    mid_oracle_gap_bp: float | None = Field(
+        default=None,
+        description="(mid_price - oracle_price) / oracle_price * 10000, in basis points.",
+    )
+    mark_oracle_gap_bp: float | None = Field(
+        default=None,
+        description="(mark_price - oracle_price) / oracle_price * 10000, in basis points.",
+    )
+    elevated: bool = Field(
+        description=(
+            "True when abs(mid_oracle_gap_bp) >= alert_threshold_bp. A fixed-threshold "
+            "boolean, not a manipulation determination - see notice."
+        ),
+    )
+    alert_threshold_bp: float
+    data_source: str
+    notice: str | None = None
+
+
+ORACLE_GAP_EXAMPLE = {
+    "generated_at": {"utc": "2026-10-13T06:00:00Z", "kst": "2026-10-13 15:00:00 KST"},
+    "coin": "ETH",
+    "mid_price": 2505.3,
+    "mark_price": 2500.1,
+    "oracle_price": 2500.0,
+    "mid_oracle_gap_bp": 21.2,
+    "mark_oracle_gap_bp": 0.4,
+    "elevated": True,
+    "alert_threshold_bp": 15.0,
+    "data_source": "hyperliquid",
+    "notice": (
+        "This is a single snapshot (no multi-minute trade-flow analysis) and elevated is "
+        "a fixed-threshold boolean (abs(mid_oracle_gap_bp) >= alert_threshold_bp), not a "
+        "manipulation determination - a large gap can also happen during real fast-moving "
+        "markets. Hyperliquid's own mark/oracle prices are unaffected by short-lived mid "
+        "swings (they blend multiple sources), which is why a protocol that prices directly "
+        "off the mid instead of mark/oracle is exposed to this - see the 2026-10-10 "
+        "Papertrade incident on HyperEVM."
+    ),
+}
+
+
 class FundingAprMatrixResponse(BaseModel):
     generated_at: TimestampPair
     symbol: str

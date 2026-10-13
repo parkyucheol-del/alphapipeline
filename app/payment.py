@@ -112,6 +112,7 @@ from app.schemas import (
     MACRO_DDAY_EXAMPLE,
     MARKDOWN_EXAMPLE,
     NEG_RISK_ARBITRAGE_EXAMPLE,
+    ORACLE_GAP_EXAMPLE,
     TOKEN_AUTHENTICITY_EXAMPLE,
     TOKEN_DIAGNOSTIC_EXAMPLE,
     TOKEN_PRESCREEN_EXAMPLE,
@@ -128,6 +129,7 @@ from app.schemas import (
     KimchiAlertResponse,
     MacroDdayResponse,
     MarkdownResponse,
+    OracleGapResponse,
     PredictionExitCapacityAuditResponse,
     PredictionHip4PriceLadderResponse,
     PredictionHip4SnapshotResponse,
@@ -410,6 +412,7 @@ def build_routes(
     hip4_price_ladder_option = _payment_option(settings.PRICE_HIP4_PRICE_LADDER_USDC)
     hip4_events_subscribe_option = _payment_option(settings.PRICE_HIP4_EVENTS_SUBSCRIBE_USDC)
     cycle_compare_option = _payment_option(settings.PRICE_CYCLE_COMPARE_USDC)
+    oracle_gap_option = _payment_option(settings.PRICE_ORACLE_GAP_USDC)
 
     macro_dday_option = _payment_option(settings.PRICE_MACRO_DDAY_USDC)
     routes: dict[str, RouteConfig] = {
@@ -669,6 +672,35 @@ def build_routes(
             ),
             service_name="AlphaPipeline Funding Rate",
             tags=["crypto", "derivatives", "funding-rate"],
+        ),
+        "GET /v1/market/oracle-gap": _make_route_config(
+            accepts=[oracle_gap_option],
+            mime_type="application/json",
+            description=(
+                "Hyperliquid perpetual mid price's gap from its oracle/mark price, in basis "
+                "points - the exposure a protocol pricing off the raw mid (instead of "
+                "mark/oracle) carries, as the 2026-10-10 Papertrade incident on HyperEVM "
+                "showed. elevated is a fixed-threshold flag, not a manipulation "
+                "determination. Paid in USDC on Base."
+            ),
+            resource=_resource_url("/v1/market/oracle-gap"),
+            extensions=_bazaar_extension(
+                input_example={"coin": "ETH"},
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "coin": {
+                            "type": "string",
+                            "description": "Hyperliquid perpetual ticker, e.g. ETH or BTC.",
+                        }
+                    },
+                    "required": ["coin"],
+                },
+                output_example=ORACLE_GAP_EXAMPLE,
+                output_schema=_inline_schema_defs(OracleGapResponse.model_json_schema()),
+            ),
+            service_name="AlphaPipeline Oracle Gap",
+            tags=["crypto", "derivatives", "hyperliquid", "manipulation-risk", "low-cost"],
         ),
         "GET /v1/derivatives/funding-apr-matrix": _make_route_config(
             accepts=[funding_apr_option],

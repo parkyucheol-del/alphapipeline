@@ -323,6 +323,33 @@ FUNDING_RATE_OUTPUT_SCHEMA = {
     "required": ["generated_at", "symbol", "data_source"],
 }
 
+ORACLE_GAP_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "generated_at": _TIMESTAMP_PAIR_SCHEMA,
+        "coin": {"type": "string"},
+        "mid_price": {"type": ["number", "null"]},
+        "mark_price": {"type": ["number", "null"]},
+        "oracle_price": {"type": ["number", "null"]},
+        "mid_oracle_gap_bp": {
+            "type": ["number", "null"],
+            "description": "(mid_price - oracle_price) / oracle_price * 10000, in basis points.",
+        },
+        "mark_oracle_gap_bp": {
+            "type": ["number", "null"],
+            "description": "(mark_price - oracle_price) / oracle_price * 10000, in basis points.",
+        },
+        "elevated": {
+            "type": "boolean",
+            "description": "True when abs(mid_oracle_gap_bp) >= alert_threshold_bp. A fixed-threshold boolean, not a manipulation determination - see notice.",
+        },
+        "alert_threshold_bp": {"type": "number"},
+        "data_source": {"type": "string"},
+        "notice": {"type": ["string", "null"]},
+    },
+    "required": ["generated_at", "coin", "elevated", "alert_threshold_bp", "data_source"],
+}
+
 FUNDING_APR_OUTPUT_SCHEMA = {
     "type": "object",
     "properties": {
@@ -1379,6 +1406,28 @@ _TOOLS: list[dict] = [
         ),
         "input_schema": {"type": "object", "properties": {}, "required": []},
         "output_schema": CYCLE_COMPARE_OUTPUT_SCHEMA,
+        "annotations": _READ_ONLY_ANNOTATIONS,
+    },
+    {
+        "name": "market.oracle_gap",
+        "path": "/v1/market/oracle-gap",
+        "price_attr": "PRICE_ORACLE_GAP_USDC",
+        "description": (
+            "Use this tool to check whether a protocol pricing off Hyperliquid's raw mid "
+            "(instead of mark/oracle) is currently exposed to a mid-price swing - the "
+            "exact failure mode behind the 2026-10-10 Papertrade incident on HyperEVM. "
+            "elevated is a fixed-threshold flag (abs(mid_oracle_gap_bp) >= "
+            "alert_threshold_bp), not a manipulation determination. Single snapshot, no "
+            "trade-flow/volume data (Hyperliquid doesn't expose it). Paid in USDC on Base."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "coin": {"type": "string", "description": "Hyperliquid perpetual ticker, e.g. ETH or BTC."}
+            },
+            "required": ["coin"],
+        },
+        "output_schema": ORACLE_GAP_OUTPUT_SCHEMA,
         "annotations": _READ_ONLY_ANNOTATIONS,
     },
     {

@@ -49,6 +49,13 @@ polymarket_book_cache: TTLCache = TTLCache(maxsize=256, ttl=settings.POLYMARKET_
 # 그대로 징수되므로 마진에는 영향 없다(위 ttl_cached() 설명 참고).
 hip4_cache: TTLCache = TTLCache(maxsize=4, ttl=settings.HIP4_CACHE_TTL_SECONDS)
 
+# Hyperliquid 무기한선물(perp) metaAndAssetCtxs 원본 응답(mid/mark/oracle 가격
+# 전체 유니버스) 캐시. market.oracle_gap이 쓴다(2026-10-13). 짧은 TTL인 이유는
+# polymarket_book_cache와 같다 - 이 데이터는 실시간성이 핵심이라 TTL이 길면
+# 이미 지나간 괴리를 보여줄 위험이 있다. x402 결제는 캐시 히트와 무관하게 매
+# 호출 그대로 징수되므로 마진에는 영향 없다(ttl_cached() 설명 참고).
+oracle_gap_cache: TTLCache = TTLCache(maxsize=4, ttl=settings.ORACLE_GAP_CACHE_TTL_SECONDS)
+
 
 def ttl_cached(cache: TTLCache, key_fn: Callable[..., str] | None = None):
     """

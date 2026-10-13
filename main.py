@@ -28,6 +28,7 @@ from app.logic import (
     get_kimchi_alert,
     get_macro_calendar_dday,
     get_neg_risk_arbitrage,
+    get_oracle_gap,
     get_token_authenticity,
     get_token_diagnostic,
     get_token_prescreen,
@@ -54,6 +55,7 @@ from app.schemas import (
     KimchiAlertResponse,
     MacroDdayResponse,
     MarkdownResponse,
+    OracleGapResponse,
     PredictionExitCapacityAuditResponse,
     PredictionHip4PriceLadderResponse,
     PredictionHip4SnapshotResponse,
@@ -261,6 +263,7 @@ async def root(request: Request):
             "/v1/prediction/hip4-snapshot": settings.PRICE_HIP4_SNAPSHOT_USDC,
             "/v1/prediction/hip4-price-ladder": settings.PRICE_HIP4_PRICE_LADDER_USDC,
             "/v1/market/cycle-compare": settings.PRICE_CYCLE_COMPARE_USDC,
+            "/v1/market/oracle-gap": settings.PRICE_ORACLE_GAP_USDC,
             "/v1/calendar/macro-dday": settings.PRICE_MACRO_DDAY_USDC,
             "/v1/tools/ai-markdown": settings.PRICE_AI_MARKDOWN_USDC,
             # KIMCHI_ALERT_ENABLED/DUMP_RISK_ENABLED가 실제 과금 여부를 결정하는 것과
@@ -295,6 +298,7 @@ async def root(request: Request):
             "/v1/prediction/hip4-snapshot",
             "/v1/prediction/hip4-price-ladder",
             "/v1/market/cycle-compare",
+            "/v1/market/oracle-gap",
             "/v1/calendar/macro-dday",
             "/v1/tools/ai-markdown",
             "/v1/market/kimchi-alert",
@@ -697,6 +701,44 @@ async def funding_rate_endpoint(symbol: str = Query(..., description="e.g. BTC, 
         return JSONResponse(content=data)
     except Exception as e:
         logger.exception("funding-rate 처리 실패")
+        return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
+
+
+@app.get(
+    "/v1/market/oracle-gap",
+    tags=["market"],
+    summary="Hyperliquid perpetual mid price's gap from its oracle/mark price (bp)",
+    description=(
+        "Use this when checking whether a protocol that prices off Hyperliquid's raw "
+        "mid (instead of mark/oracle) is currently exposed to a mid-price swing - the "
+        "exact failure mode behind the 2026-10-10 Papertrade incident on HyperEVM "
+        "(a wallet moved ETH on Hyperliquid itself to swing the mid, netting roughly "
+        "$1.28M from a DEX that used that mid as its reference price). Returns "
+        "mid_price/mark_price/oracle_price plus mid_oracle_gap_bp and "
+        "mark_oracle_gap_bp (pure (a-oracle)/oracle*10000 calculations), and an "
+        "elevated boolean that is true when abs(mid_oracle_gap_bp) >= "
+        "alert_threshold_bp (default 15bp, configurable via ORACLE_GAP_ALERT_THRESHOLD_BP - "
+        "tuned from a 2026-10-13 quiet-market measurement where a 5bp threshold fired on "
+        "40-72% of samples). "
+        "elevated is a fixed-threshold flag, not a manipulation determination - read the "
+        "notice field. This is a single snapshot with no trade-flow/volume analysis "
+        "(Hyperliquid's public API does not expose per-market volume). Input: required "
+        "`coin` query parameter (Hyperliquid perpetual ticker, e.g. ETH or BTC)."
+    ),
+    responses={
+        200: {"model": OracleGapResponse, "description": "Mid/mark/oracle price gap for one Hyperliquid perpetual"},
+        402: {"description": "x402 payment required"},
+        502: {"model": ErrorResponse, "description": "Upstream (Hyperliquid) error"},
+    },
+)
+async def oracle_gap_endpoint(coin: str = Query(..., description="Hyperliquid perpetual ticker, e.g. ETH or BTC")):
+    try:
+        data = await get_oracle_gap(coin)
+        return JSONResponse(content=data)
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"error": "bad_request", "message": str(e)})
+    except Exception as e:
+        logger.exception("oracle-gap 처리 실패")
         return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
 
 
