@@ -1,5 +1,7 @@
 fastapi==0.115.0
-uvicorn[standard]==0.30.6
+# 2026-10-15: mcp==1.30.0(아래)이 uvicorn>=0.31.1을 요구해서 0.30.6 고정이랑
+# 충돌한다 - 로컬에서 mcp 업그레이드 시 자동으로 끌려온 0.54.0으로 같이 고정.
+uvicorn[standard]==0.54.0
 httpx==0.27.2
 python-dotenv==1.0.1
 apscheduler==3.10.4
@@ -9,7 +11,14 @@ readability-lxml==0.8.1
 lxml==5.1.0
 pydantic>=2.10.1,<3.0.0
 cachetools==5.5.0
-mcp==1.2.1
+# 2026-10-15: mcp==1.2.1은 pydantic 2.14.1(위 범위의 최신 호환판)과 맞물리면
+# "ImportError: cannot import name 'eval_type_backport' from
+# pydantic._internal._typing_extra"로 fastmcp 임포트 자체가 실패했다 (Glama
+# Docker 빌드 테스트 5연속 실패의 실제 원인 - mcp 1.2.1이 기대하던 pydantic
+# 내부 함수가 최신 pydantic에서 없어짐). 로컬에서 mcp==1.30.0 + uvicorn==0.54.0
+# 조합으로 실제 설치·`python mcp_server.py` 기동까지 검증 완료, 재현 가능하게
+# 그대로 고정.
+mcp==1.30.0
 
 # ===== x402 공식 결제 레이어 (app/payment.py) =====
 # web3==6.20.3는 자체 온체인 검증 코드(app/payment.py)를 걷어내면서 더 이상
