@@ -4,7 +4,8 @@ AlphaPipeline의 모든 REST 엔드포인트를 한 번씩 순서대로 호출�
 
 목적: 엔드포인트를 새로 추가/수정한 뒤 "다 한 번씩 불러서 살아있는지" 빠르게
 확인하는 용도. 각 호출은 실제 x402 결제가 나가는 라이브 호출이므로(총
-합산 약 $0.2~0.25 수준 - 무료 엔드포인트 3개 제외하고 나머지 단가 합),
+합산 약 $0.22~0.27 수준(2026-10-18 저가 티어 3개+hip4-mispricing 추가로 소폭 증가) -
+무료 엔드포인트 3개 제외하고 나머지 단가 합),
 실행 전에 그 점을 인지할 것.
 
 사용법:
@@ -196,6 +197,12 @@ ENDPOINTS: list[EndpointCall] = [
         "GET",
         "/v1/prediction/hip4-price",
         {"underlying": "BTC", "strike": 150000},
+    ),
+    EndpointCall(
+        "prediction.hip4_mispricing",
+        "GET",
+        "/v1/prediction/hip4-mispricing",
+        {"underlying": "BTC"},
     ),
     # --- 도구 ---
     EndpointCall(

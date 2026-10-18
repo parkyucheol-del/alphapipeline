@@ -689,6 +689,56 @@ HIP4_PRICE_OUTPUT_SCHEMA = {
     "required": ["generated_at", "underlying", "requested_strike", "data_source"],
 }
 
+# 2026-10-18 Phase 2 (architecture-roadmap.md "internal_mispricing") -
+# HIP4_PRICE_LADDER_OUTPUT_SCHEMA의 캐시를 재사용하는 단조성 검사 결과.
+HIP4_MISPRICING_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "generated_at": _TIMESTAMP_PAIR_SCHEMA,
+        "underlying": {"type": "string"},
+        "expiry_groups_checked": {"type": "integer"},
+        "total_rungs_checked": {"type": "integer"},
+        "violation_count": {"type": "integer"},
+        "violations": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "expiry": {"type": ["string", "null"]},
+                    "period": {"type": ["string", "null"]},
+                    "lower_strike": {"type": "number"},
+                    "lower_strike_yes_price": {"type": "number"},
+                    "higher_strike": {"type": "number"},
+                    "higher_strike_yes_price": {"type": "number"},
+                    "violation_bp": {"type": "number"},
+                    "max_riskless_profit_per_usd": {"type": "number"},
+                },
+                "required": [
+                    "lower_strike",
+                    "lower_strike_yes_price",
+                    "higher_strike",
+                    "higher_strike_yes_price",
+                    "violation_bp",
+                    "max_riskless_profit_per_usd",
+                ],
+            },
+        },
+        "settlement_condition_note": {"type": "string"},
+        "data_source": {"type": "string"},
+        "notice": {"type": ["string", "null"]},
+    },
+    "required": [
+        "generated_at",
+        "underlying",
+        "expiry_groups_checked",
+        "total_rungs_checked",
+        "violation_count",
+        "violations",
+        "settlement_condition_note",
+        "data_source",
+    ],
+}
+
 _CYCLE_COIN_METRICS_SCHEMA = {
     "type": "object",
     "properties": {
@@ -1495,6 +1545,33 @@ _TOOLS: list[dict] = [
             "required": ["underlying", "strike"],
         },
         "output_schema": HIP4_PRICE_OUTPUT_SCHEMA,
+        "annotations": _READ_ONLY_ANNOTATIONS,
+    },
+    {
+        "name": "prediction.hip4_mispricing",
+        "path": "/v1/prediction/hip4-mispricing",
+        "price_attr": "PRICE_HIP4_MISPRICING_USDC",
+        "description": (
+            "Finds monotonicity violations among Hyperliquid HIP-4 'above $X' "
+            "price-binary markets: within the same underlying/expiry/period, a higher "
+            "strike's Yes price should never exceed a lower strike's - any reversal is "
+            "a logical inconsistency, quantified as violation_bp and a textbook "
+            "max_riskless_profit_per_usd (before fees/slippage/execution risk - not "
+            "investment advice). Reuses prediction.hip4_price_ladder's cache - no new "
+            "upstream call. Only rungs sharing the exact same (expiry, period) are "
+            "ever compared. Paid in USDC on Base."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "underlying": {
+                    "type": "string",
+                    "description": "Asset symbol for crypto price-binary markets (e.g. 'BTC', 'ETH', 'SOL', 'HYPE').",
+                },
+            },
+            "required": ["underlying"],
+        },
+        "output_schema": HIP4_MISPRICING_OUTPUT_SCHEMA,
         "annotations": _READ_ONLY_ANNOTATIONS,
     },
     {

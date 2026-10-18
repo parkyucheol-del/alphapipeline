@@ -7,7 +7,7 @@ Also the exact server Glama's automated Docker build test introspects for
 this listing's "Server" score, so its tool count should track app/mcp_server.py
 (the paid remote server) 1:1 even though calls here bypass payment entirely.
 
-21 tools provided (same coverage as the paid remote /mcp server, just called
+22 tools provided (same coverage as the paid remote /mcp server, just called
 directly against app/logic.py instead of going through x402 payment):
   1.  convert_to_markdown(url)                              -> app/markdown_tool.py: url_to_markdown
   2.  get_token_dump_risk(symbol)                            -> app/logic.py: get_symbol_dump_risk
@@ -30,6 +30,7 @@ directly against app/logic.py instead of going through x402 payment):
   19. get_funding_rate_value(symbol)                          -> app/logic.py: get_funding_rate_value
   20. get_oracle_gap_bp(coin)                                  -> app/logic.py: get_oracle_gap_bp
   21. get_hip4_price(underlying, strike)                       -> app/logic.py: get_hip4_price
+  22. get_hip4_mispricing(underlying)                           -> app/logic.py: get_hip4_mispricing
 
 Note (important, stated honestly):
   - This MCP server is a separate "distribution build" from the paid x402 HTTP
@@ -67,6 +68,7 @@ from app.logic import (
     get_funding_apr_matrix as _logic_funding_apr_matrix,
     get_funding_rate as _logic_funding_rate,
     get_funding_rate_value as _logic_funding_rate_value,
+    get_hip4_mispricing as _logic_hip4_mispricing,
     get_hip4_price as _logic_hip4_price,
     get_hip4_price_ladder as _logic_hip4_price_ladder,
     get_hip4_snapshot as _logic_hip4_snapshot,
@@ -773,6 +775,34 @@ async def get_hip4_price(underlying: str, strike: float) -> dict:
     return await _safe_call(
         "get_hip4_price",
         _logic_hip4_price(underlying=underlying, strike=strike),
+    )
+
+
+@mcp.tool(name="prediction.hip4_mispricing")
+async def get_hip4_mispricing(underlying: str) -> dict:
+    """
+    Finds monotonicity violations among Hyperliquid HIP-4 "above $X"
+    price-binary markets: within the same underlying/expiry/period, a
+    higher strike's Yes price should never exceed a lower strike's - any
+    reversal is a logical inconsistency, quantified as violation_bp and a
+    textbook max_riskless_profit_per_usd (before fees/slippage/execution
+    risk - not investment advice). Reuses prediction.hip4_price_ladder's
+    cache (no new upstream call). Only rungs sharing the exact same
+    (expiry, period) are ever compared - see settlement_condition_note.
+
+    Args:
+        underlying: Asset symbol for crypto price-binary markets (e.g. "BTC",
+            "ETH", "SOL", "HYPE").
+
+    Returns:
+        On success: {"success": true, "underlying", "expiry_groups_checked",
+            "total_rungs_checked", "violation_count", "violations",
+            "settlement_condition_note", ...}
+        On failure: {"success": false, "error": {"type", "message"}}
+    """
+    return await _safe_call(
+        "get_hip4_mispricing",
+        _logic_hip4_mispricing(underlying=underlying),
     )
 
 

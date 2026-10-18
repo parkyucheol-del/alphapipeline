@@ -24,6 +24,7 @@ from app.logic import (
     get_funding_apr_matrix,
     get_funding_rate,
     get_funding_rate_value,
+    get_hip4_mispricing,
     get_hip4_price,
     get_hip4_price_ladder,
     get_hip4_snapshot,
@@ -57,6 +58,7 @@ from app.schemas import (
     Hip4AlertsUnsubscribeRequest,
     Hip4AlertsUnsubscribeResponse,
     Hip4PriceResponse,
+    PredictionHip4MispricingResponse,
     KimchiAlertResponse,
     MacroDdayResponse,
     MarkdownResponse,
@@ -270,6 +272,7 @@ async def root(request: Request):
             "/v1/prediction/hip4-snapshot": settings.PRICE_HIP4_SNAPSHOT_USDC,
             "/v1/prediction/hip4-price-ladder": settings.PRICE_HIP4_PRICE_LADDER_USDC,
             "/v1/prediction/hip4-price": settings.PRICE_HIP4_PRICE_USDC,
+            "/v1/prediction/hip4-mispricing": settings.PRICE_HIP4_MISPRICING_USDC,
             "/v1/market/cycle-compare": settings.PRICE_CYCLE_COMPARE_USDC,
             "/v1/market/oracle-gap": settings.PRICE_ORACLE_GAP_USDC,
             "/v1/market/oracle-gap-bp": settings.PRICE_ORACLE_GAP_BP_USDC,
@@ -308,6 +311,7 @@ async def root(request: Request):
             "/v1/prediction/hip4-snapshot",
             "/v1/prediction/hip4-price-ladder",
             "/v1/prediction/hip4-price",
+            "/v1/prediction/hip4-mispricing",
             "/v1/market/cycle-compare",
             "/v1/market/oracle-gap",
             "/v1/market/oracle-gap-bp",
@@ -1196,6 +1200,40 @@ async def hip4_price_endpoint(
         return JSONResponse(content=data)
     except Exception as e:
         logger.exception("hip4-price 처리 실패")
+        return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
+
+
+@app.get(
+    "/v1/prediction/hip4-mispricing",
+    tags=["market"],
+    summary="Monotonicity violations across HIP-4 'above $X' price-binary markets",
+    description=(
+        "Use this endpoint to find logical inconsistencies among a single underlying's "
+        "Hyperliquid HIP-4 'above $X' price-binary markets: within the same expiry/period, "
+        "a higher strike's Yes price should never exceed a lower strike's. Any reversal is "
+        "quantified as `violation_bp` and a textbook `max_riskless_profit_per_usd` (the "
+        "violation size itself, before fees/slippage/execution risk - not investment "
+        "advice). Reuses hip4-price-ladder's cached data - no new upstream call. Only rungs "
+        "sharing the exact same (expiry, period) are ever compared - see the response's "
+        "`settlement_condition_note`. Input: required `underlying` (e.g. 'BTC', 'ETH', "
+        "'SOL', 'HYPE')."
+    ),
+    responses={
+        200: {"model": PredictionHip4MispricingResponse, "description": "HIP-4 monotonicity-violation report"},
+        402: {"description": "x402 payment required"},
+        502: {"model": ErrorResponse, "description": "Upstream (Hyperliquid) error"},
+    },
+)
+async def hip4_mispricing_endpoint(
+    underlying: str = Query(..., description="Asset symbol for crypto price-binary markets (e.g. 'BTC', 'ETH', 'SOL', 'HYPE')."),
+):
+    _t0 = time.monotonic()
+    try:
+        data = await get_hip4_mispricing(underlying=underlying)
+        data["latency_ms"] = round((time.monotonic() - _t0) * 1000)
+        return JSONResponse(content=data)
+    except Exception as e:
+        logger.exception("hip4-mispricing 처리 실패")
         return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
 
 

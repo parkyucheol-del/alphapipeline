@@ -151,10 +151,13 @@ class Settings:
     # 고정 임계값을 넘었는가"라는 결정론적 불리언이라 token_authenticity의
     # flagged_as_counterfeit과 같은 성격이라 원칙과 안 부딪힌다.
     ORACLE_GAP_CACHE_TTL_SECONDS: int = int(os.getenv("ORACLE_GAP_CACHE_TTL_SECONDS", "3"))
-    # mid-oracle 괴리(bp)가 이 값 이상이면 elevated=true. 기본 5bp는 오늘 액션
-    # 카드 스크립트의 ALERT 임계값을 그대로 가져온 잠정값 - 실측 로그(오늘 10분
-    # 측정) 분포를 보고 재조정 예정.
-    ORACLE_GAP_ALERT_THRESHOLD_BP: float = float(os.getenv("ORACLE_GAP_ALERT_THRESHOLD_BP", "5.0"))
+    # mid-oracle 괴리(bp)가 이 값 이상이면 elevated=true. 2026-10-13 10분 실측
+    # (5초 간격 x 120회, ETH/BTC)에서 원래 액션 카드의 5bp 임계값은 평상시에도
+    # ETH 40%/BTC 72% 비율로 터져 경보로 못 쓴다는 게 확인됨 (평상시 노이즈 최대
+    # ~9.4bp) - 15.0으로 상향 조정 (claude/session-log-2026-10-13-oracle-gap-and-
+    # hermes-skill.md 참고). main.py의 oracle_gap_endpoint 독스트링과 반드시
+    # 일치시킬 것 - 둘 다 15bp를 가리켜야 함.
+    ORACLE_GAP_ALERT_THRESHOLD_BP: float = float(os.getenv("ORACLE_GAP_ALERT_THRESHOLD_BP", "15.0"))
     PRICE_ORACLE_GAP_USDC: float = float(os.getenv("PRICE_ORACLE_GAP_USDC", "0.01"))
 
     # ===== 2026-10-18 저가 티어 실험 (cheap single-number endpoints) =====
@@ -171,6 +174,20 @@ class Settings:
     PRICE_FUNDING_RATE_VALUE_USDC: float = float(os.getenv("PRICE_FUNDING_RATE_VALUE_USDC", "0.001"))
     PRICE_ORACLE_GAP_BP_USDC: float = float(os.getenv("PRICE_ORACLE_GAP_BP_USDC", "0.001"))
     PRICE_HIP4_PRICE_USDC: float = float(os.getenv("PRICE_HIP4_PRICE_USDC", "0.002"))
+
+    # ===== 2026-10-18 Phase 2: prediction.hip4_mispricing (Wave 2 동결 해제 후 =====
+    # 첫 신규 유료 엔드포인트. architecture-roadmap.md Phase 2 "internal_mispricing"
+    # (상호 배타적/종속적 마켓 간 확률 괴리 정량 추출) 구현. pending-backlog-
+    # 2026-09-10.md 8번이 요구한 "정산조건 동일성 체크"는, HIP-4 priceBinary
+    # 마켓이 전부 README에 문서화된 대로 "above $X" 동일 프레이밍이라는 전제
+    # 아래 (expiry, period) 튜플이 완전히 같은 rung끼리만 비교하는 것으로
+    # 만족시킴 - 임의 두 마켓을 비교하는 게 아니라 get_hip4_price_ladder()가
+    # 이미 같은 underlying으로 모아둔 사다리 안에서, 만기/기간까지 똑같은
+    # rung들만 strike 순으로 비교한다. "above $X" 마켓은 strike가 높을수록
+    # yes_price가 낮거나 같아야 하는 수학적 단조성(monotonicity)이 있으므로,
+    # 역전이 보이면 그 자체로 논리적 비일관성(=차익거래 신호)이다. 신규
+    # 업스트림 호출 없음 - get_hip4_price_ladder()와 같은 캐시 재사용.
+    PRICE_HIP4_MISPRICING_USDC: float = float(os.getenv("PRICE_HIP4_MISPRICING_USDC", "0.02"))
 
     # ===== x402 공식 결제 레이어 (Coinbase CDP Facilitator) =====
     # Coinbase Developer Platform(https://portal.cdp.coinbase.com)에서 발급받는 API 키.

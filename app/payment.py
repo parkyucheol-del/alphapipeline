@@ -107,6 +107,7 @@ from app.schemas import (
     FUNDING_RATE_EXAMPLE,
     FUNDING_RATE_VALUE_EXAMPLE,
     HIP4_ALERTS_SUBSCRIBE_EXAMPLE,
+    HIP4_MISPRICING_EXAMPLE,
     HIP4_PRICE_EXAMPLE,
     HIP4_PRICE_LADDER_EXAMPLE,
     HIP4_SNAPSHOT_EXAMPLE,
@@ -131,6 +132,7 @@ from app.schemas import (
     FundingRateValueResponse,
     Hip4AlertsSubscribeResponse,
     Hip4PriceResponse,
+    PredictionHip4MispricingResponse,
     KimchiAlertResponse,
     MacroDdayResponse,
     MarkdownResponse,
@@ -424,6 +426,7 @@ def build_routes(
     funding_rate_value_option = _payment_option(settings.PRICE_FUNDING_RATE_VALUE_USDC)
     oracle_gap_bp_option = _payment_option(settings.PRICE_ORACLE_GAP_BP_USDC)
     hip4_price_option = _payment_option(settings.PRICE_HIP4_PRICE_USDC)
+    hip4_mispricing_option = _payment_option(settings.PRICE_HIP4_MISPRICING_USDC)
 
     macro_dday_option = _payment_option(settings.PRICE_MACRO_DDAY_USDC)
     routes: dict[str, RouteConfig] = {
@@ -1163,6 +1166,41 @@ def build_routes(
             ),
             service_name="AlphaPipeline HIP-4 Price",
             tags=["prediction-market", "hyperliquid", "hip4", "low-cost", "chain-lookup"],
+        ),
+        # 2026-10-18 Phase 2 (architecture-roadmap.md "internal_mispricing", Wave 2
+        # 동결 해제 후 첫 신규 유료 엔드포인트): hip4-price-ladder의 캐시를 재사용해
+        # 같은 (expiry, period) 안에서 strike-yes_price 단조성 역전을 찾는다. 신규
+        # 업스트림 호출 없음 - app/logic.py의 get_hip4_mispricing() 참고.
+        "GET /v1/prediction/hip4-mispricing": _make_route_config(
+            accepts=[hip4_mispricing_option],
+            mime_type="application/json",
+            description=(
+                "Finds monotonicity violations among Hyperliquid HIP-4 'above $X' "
+                "price-binary markets: within the same underlying/expiry/period, a "
+                "higher strike's Yes price should never exceed a lower strike's - any "
+                "reversal is a logical inconsistency (quantified as violation_bp and a "
+                "textbook max_riskless_profit_per_usd, before fees/slippage). Reuses "
+                "hip4-price-ladder's cache - no new upstream call. Required "
+                "`underlying`. Not investment advice. Paid in USDC on Base."
+            ),
+            resource=_resource_url("/v1/prediction/hip4-mispricing"),
+            extensions=_bazaar_extension(
+                input_example={"underlying": "BTC"},
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "underlying": {
+                            "type": "string",
+                            "description": "Asset symbol for crypto price-binary markets (e.g. 'BTC', 'ETH', 'SOL', 'HYPE').",
+                        },
+                    },
+                    "required": ["underlying"],
+                },
+                output_example=HIP4_MISPRICING_EXAMPLE,
+                output_schema=_inline_schema_defs(PredictionHip4MispricingResponse.model_json_schema()),
+            ),
+            service_name="AlphaPipeline HIP-4 Mispricing",
+            tags=["prediction-market", "hyperliquid", "hip4", "arbitrage", "pre-trade-signal"],
         ),
         # 2026-10-10: 원래 "과거 사이클 대비 도미넌스 괴리율" 아이디어는 무료
         # 데이터 소스가 없어서(app/logic.py의 get_btc_cycle_compare() 모듈 주석

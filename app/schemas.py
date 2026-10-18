@@ -1361,6 +1361,74 @@ HIP4_PRICE_EXAMPLE = {
 }
 
 
+# 2026-10-18 Phase 2: prediction.hip4_mispricing - architecture-roadmap.md's
+# "internal_mispricing". Reuses hip4_price_ladder's cache, no new upstream
+# call. See app/logic.py's get_hip4_mispricing for the settlement-condition-
+# equivalence design note (pending-backlog-2026-09-10.md item 8).
+class Hip4MispricingViolation(BaseModel):
+    expiry: str | None = None
+    period: str | None = None
+    lower_strike: float
+    lower_strike_yes_price: float
+    higher_strike: float
+    higher_strike_yes_price: float
+    violation_bp: float = Field(
+        description="(higher_strike_yes_price - lower_strike_yes_price) * 10000. Always positive "
+        "when present - a positive value is what makes this a violation."
+    )
+    max_riskless_profit_per_usd: float = Field(
+        description="Textbook upper bound (= the violation size itself) per $1 notional on the "
+        "smaller leg, before fees/slippage/execution risk. Not investment advice."
+    )
+
+
+class PredictionHip4MispricingResponse(BaseModel):
+    generated_at: TimestampPair
+    underlying: str
+    expiry_groups_checked: int = Field(
+        description="Number of distinct (expiry, period) rung groups actually compared."
+    )
+    total_rungs_checked: int
+    violation_count: int
+    violations: list[Hip4MispricingViolation]
+    settlement_condition_note: str
+    data_source: str
+    notice: str | None = None
+
+
+HIP4_MISPRICING_EXAMPLE = {
+    "generated_at": {"utc": "2026-10-18T12:00:00Z", "kst": "2026-10-18 21:00:00 KST"},
+    "underlying": "BTC",
+    "expiry_groups_checked": 3,
+    "total_rungs_checked": 7,
+    "violation_count": 1,
+    "violations": [
+        {
+            "expiry": "20261031-0600",
+            "period": "1d",
+            "lower_strike": 83000.0,
+            "lower_strike_yes_price": 0.40,
+            "higher_strike": 90000.0,
+            "higher_strike_yes_price": 0.45,
+            "violation_bp": 500.0,
+            "max_riskless_profit_per_usd": 0.05,
+        }
+    ],
+    "settlement_condition_note": (
+        "Rungs are grouped by (expiry, period) before comparing, so a violation only fires "
+        "between markets that settle on the same date under the same period framing - never "
+        "across markets with different settlement terms."
+    ),
+    "data_source": "hyperliquid_info_api",
+    "notice": (
+        "Pure monotonicity check within get_hip4_price_ladder's cache - no new upstream call. "
+        "'above $X' priceBinary markets must have yes_price non-increasing as strike rises; "
+        "any rung pair with a higher strike priced higher is a logical inconsistency. "
+        "max_riskless_profit_per_usd ignores fees/slippage/execution risk. Not investment advice."
+    ),
+}
+
+
 # ===== market.cycle_compare (2026-10-10) =====
 # Scoped down from the original "historical dominance comparison" idea - see
 # app/logic.py's get_btc_cycle_compare() module comment for why.

@@ -3022,6 +3022,78 @@ async def get_hip4_price(underlying: str, strike: float) -> dict:
     }
 
 
+_HIP4_MISPRICING_NOTICE = (
+    "Pure monotonicity check within get_hip4_price_ladder's cache - no new "
+    "upstream call. 'above $X' priceBinary markets must have yes_price "
+    "non-increasing as strike rises (a higher bar can never be more likely "
+    "than a lower one); any rung pair with a higher strike priced higher "
+    "is a logical inconsistency, not just noise. Only rungs sharing the "
+    "exact same (expiry, period) are compared - see settlement_condition_note. "
+    "max_riskless_profit_per_usd is a textbook upper bound (violation size "
+    "itself): it ignores trading fees, slippage, position limits, and the "
+    "risk that one leg fails to fill. This is not investment advice."
+)
+
+_HIP4_MISPRICING_SETTLEMENT_NOTE = (
+    "Rungs are grouped by (expiry, period) before comparing, so a violation "
+    "only fires between markets that settle on the same date under the same "
+    "period framing - never across markets with different settlement terms."
+)
+
+
+async def get_hip4_mispricing(underlying: str) -> dict:
+    """
+    GET /v1/prediction/hip4-mispricing가 사용. get_hip4_price_ladder()와 완전히
+    같은 캐시 데이터를 재사용해서(신규 업스트림 호출 없음), 같은 만기/기간을
+    공유하는 rung들 사이에서 strike-yes_price 단조성 역전을 찾는다.
+    architecture-roadmap.md Phase 2 "internal_mispricing" 구현체.
+    """
+    ladder = await get_hip4_price_ladder(underlying)
+    rungs = ladder.get("rungs") or []
+    underlying_norm = ladder.get("underlying")
+
+    groups: dict[tuple, list[dict]] = {}
+    for r in rungs:
+        if r.get("yes_price") is None:
+            continue
+        key = (r.get("expiry"), r.get("period"))
+        groups.setdefault(key, []).append(r)
+
+    violations = []
+    for (expiry, period), group_rungs in groups.items():
+        group_rungs = sorted(group_rungs, key=lambda r: r["strike"])
+        for lower, higher in zip(group_rungs, group_rungs[1:]):
+            if lower["strike"] == higher["strike"]:
+                continue
+            lower_yes = lower["yes_price"]
+            higher_yes = higher["yes_price"]
+            if higher_yes > lower_yes:
+                violations.append(
+                    {
+                        "expiry": expiry,
+                        "period": period,
+                        "lower_strike": lower["strike"],
+                        "lower_strike_yes_price": lower_yes,
+                        "higher_strike": higher["strike"],
+                        "higher_strike_yes_price": higher_yes,
+                        "violation_bp": round((higher_yes - lower_yes) * 10000, 2),
+                        "max_riskless_profit_per_usd": round(higher_yes - lower_yes, 6),
+                    }
+                )
+
+    return {
+        "generated_at": _timestamp_now(),
+        "underlying": underlying_norm,
+        "expiry_groups_checked": len(groups),
+        "total_rungs_checked": len(rungs),
+        "violation_count": len(violations),
+        "violations": violations,
+        "settlement_condition_note": _HIP4_MISPRICING_SETTLEMENT_NOTE,
+        "data_source": "hyperliquid_info_api",
+        "notice": _HIP4_MISPRICING_NOTICE,
+    }
+
+
 # ============================================================================
 # market.cycle_compare (2026-10-10) - scoped-down version of a pitched "BTC
 # halving-cycle dominance comparison" idea. True historical dominance needs
