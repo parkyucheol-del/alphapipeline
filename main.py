@@ -22,6 +22,9 @@ from app.logic import (
     get_dump_risk,
     get_exit_capacity_audit,
     get_order_split_guide,
+    get_bid_ask_spread_pct,
+    get_orderbook_imbalance_ratio,
+    get_liquidity_depth_after_haircut,
     get_funding_apr_matrix,
     get_funding_rate,
     get_funding_rate_value,
@@ -67,6 +70,9 @@ from app.schemas import (
     OracleGapResponse,
     PredictionExitCapacityAuditResponse,
     PredictionOrderSplitGuideResponse,
+    PredictionBidAskSpreadPctResponse,
+    PredictionOrderbookImbalanceRatioResponse,
+    PredictionLiquidityDepthAfterHaircutResponse,
     PredictionHip4PriceLadderResponse,
     PredictionHip4SnapshotResponse,
     PredictionNegRiskArbitrageResponse,
@@ -272,6 +278,9 @@ async def root(request: Request):
             "/v1/prediction/neg-risk-arbitrage": settings.PRICE_NEG_RISK_ARBITRAGE_USDC,
             "/v1/prediction/exit-capacity-audit": settings.PRICE_EXIT_CAPACITY_AUDIT_USDC,
             "/v1/prediction/order-split-guide": settings.PRICE_ORDER_SPLIT_GUIDE_USDC,
+            "/v1/prediction/bid-ask-spread-pct": settings.PRICE_BID_ASK_SPREAD_PCT_USDC,
+            "/v1/prediction/orderbook-imbalance-ratio": settings.PRICE_ORDERBOOK_IMBALANCE_RATIO_USDC,
+            "/v1/prediction/liquidity-depth-after-haircut": settings.PRICE_LIQUIDITY_DEPTH_AFTER_HAIRCUT_USDC,
             "/v1/prediction/hip4-snapshot": settings.PRICE_HIP4_SNAPSHOT_USDC,
             "/v1/prediction/hip4-price-ladder": settings.PRICE_HIP4_PRICE_LADDER_USDC,
             "/v1/prediction/hip4-price": settings.PRICE_HIP4_PRICE_USDC,
@@ -312,6 +321,9 @@ async def root(request: Request):
             "/v1/prediction/neg-risk-arbitrage",
             "/v1/prediction/exit-capacity-audit",
             "/v1/prediction/order-split-guide",
+            "/v1/prediction/bid-ask-spread-pct",
+            "/v1/prediction/orderbook-imbalance-ratio",
+            "/v1/prediction/liquidity-depth-after-haircut",
             "/v1/prediction/hip4-snapshot",
             "/v1/prediction/hip4-price-ladder",
             "/v1/prediction/hip4-price",
@@ -1142,6 +1154,143 @@ async def order_split_guide_endpoint(
         return JSONResponse(content=data)
     except Exception as e:
         logger.exception("order-split-guide 처리 실패")
+        return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
+
+
+@app.get(
+    "/v1/prediction/bid-ask-spread-pct",
+    tags=["market"],
+    summary="Live top-of-book bid/ask spread for a Polymarket outcome, cheap tier",
+    description=(
+        "Cheap tier - use this endpoint for a single Polymarket outcome's live "
+        "top-of-book bid/ask spread as a percentage of mid_price. Not a liquidity or "
+        "executability measure (use exit-capacity-audit/order-split-guide for that). "
+        "Input: either `token_id` (if already known) or `market_slug` (+ optional "
+        "`outcome`, default 'yes') to resolve it automatically."
+    ),
+    responses={
+        200: {"model": PredictionBidAskSpreadPctResponse, "description": "Bid/ask spread result"},
+        402: {"description": "x402 payment required"},
+        502: {"model": ErrorResponse, "description": "Upstream (Polymarket) error or input error"},
+    },
+)
+async def bid_ask_spread_pct_endpoint(
+    token_id: str | None = Query(None, description="The outcome's CLOB token_id / asset_id, if already known"),
+    market_slug: str | None = Query(
+        None, description="Exact Polymarket market slug, used to resolve token_id automatically"
+    ),
+    outcome: str = Query("yes", description="'yes' (default) or 'no' - which side to resolve when using market_slug"),
+):
+    _t0 = time.monotonic()
+    try:
+        data = await get_bid_ask_spread_pct(
+            token_id=token_id,
+            market_slug=market_slug,
+            outcome=outcome,
+        )
+        data["latency_ms"] = round((time.monotonic() - _t0) * 1000)
+        return JSONResponse(content=data)
+    except Exception as e:
+        logger.exception("bid-ask-spread-pct 처리 실패")
+        return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
+
+
+@app.get(
+    "/v1/prediction/orderbook-imbalance-ratio",
+    tags=["market"],
+    summary="Bid-side vs ask-side order-book depth ratio for a Polymarket outcome",
+    description=(
+        "Use this endpoint for a single Polymarket outcome's bid-side vs ask-side "
+        "order-book depth ratio, summed within `depth_band_pct` (default 5.0%) of each "
+        "side's own best quote. 0.5 = balanced, closer to 1.0 = bid-side depth dominant, "
+        "closer to 0.0 = ask-side dominant. A descriptive statistic only - not a "
+        "prediction of price direction, no confidence or verdict field. Input: either "
+        "`token_id` (if already known) or `market_slug` (+ optional `outcome`, default "
+        "'yes') to resolve it automatically. Optional `depth_band_pct` (default 5.0)."
+    ),
+    responses={
+        200: {"model": PredictionOrderbookImbalanceRatioResponse, "description": "Orderbook imbalance ratio result"},
+        402: {"description": "x402 payment required"},
+        502: {"model": ErrorResponse, "description": "Upstream (Polymarket) error or input error"},
+    },
+)
+async def orderbook_imbalance_ratio_endpoint(
+    token_id: str | None = Query(None, description="The outcome's CLOB token_id / asset_id, if already known"),
+    market_slug: str | None = Query(
+        None, description="Exact Polymarket market slug, used to resolve token_id automatically"
+    ),
+    outcome: str = Query("yes", description="'yes' (default) or 'no' - which side to resolve when using market_slug"),
+    depth_band_pct: float = Query(
+        5.0, description="How far into the book, as a percent of each side's own best quote, to sum depth."
+    ),
+):
+    _t0 = time.monotonic()
+    try:
+        data = await get_orderbook_imbalance_ratio(
+            token_id=token_id,
+            market_slug=market_slug,
+            outcome=outcome,
+            depth_band_pct=depth_band_pct,
+        )
+        data["latency_ms"] = round((time.monotonic() - _t0) * 1000)
+        return JSONResponse(content=data)
+    except Exception as e:
+        logger.exception("orderbook-imbalance-ratio 처리 실패")
+        return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
+
+
+@app.get(
+    "/v1/prediction/liquidity-depth-after-haircut",
+    tags=["market"],
+    summary="Executable Polymarket depth before/after a top-of-book cancellation haircut",
+    description=(
+        "Use this endpoint for a single Polymarket outcome's executable depth within "
+        "`max_price_impact_pct` (default 5.0%) of the best quote, both before and after "
+        "discounting the top-of-book level's size by `haircut_pct` (default 10.0%) to "
+        "model the risk that the very best resting order gets cancelled before you can "
+        "trade against it. Does not detect or flag actual spoofing (out of scope). "
+        "Input: either `token_id` (if already known) or `market_slug` (+ optional "
+        "`outcome`, default 'yes') to resolve it automatically. Optional `side` ('sell' "
+        "default, or 'buy'), `haircut_pct` (default 10.0), `max_price_impact_pct` "
+        "(default 5.0)."
+    ),
+    responses={
+        200: {
+            "model": PredictionLiquidityDepthAfterHaircutResponse,
+            "description": "Liquidity depth before/after haircut result",
+        },
+        402: {"description": "x402 payment required"},
+        502: {"model": ErrorResponse, "description": "Upstream (Polymarket) error or input error"},
+    },
+)
+async def liquidity_depth_after_haircut_endpoint(
+    token_id: str | None = Query(None, description="The outcome's CLOB token_id / asset_id, if already known"),
+    market_slug: str | None = Query(
+        None, description="Exact Polymarket market slug, used to resolve token_id automatically"
+    ),
+    outcome: str = Query("yes", description="'yes' (default) or 'no' - which side to resolve when using market_slug"),
+    side: str = Query("sell", description="'sell' (default) or 'buy'"),
+    haircut_pct: float = Query(
+        10.0, description="Percent to discount the top-of-book level's size by, modeling cancellation risk."
+    ),
+    max_price_impact_pct: float = Query(
+        5.0, description="Price-impact bound (percent of best quote) within which depth is summed."
+    ),
+):
+    _t0 = time.monotonic()
+    try:
+        data = await get_liquidity_depth_after_haircut(
+            token_id=token_id,
+            market_slug=market_slug,
+            outcome=outcome,
+            side=side,
+            haircut_pct=haircut_pct,
+            max_price_impact_pct=max_price_impact_pct,
+        )
+        data["latency_ms"] = round((time.monotonic() - _t0) * 1000)
+        return JSONResponse(content=data)
+    except Exception as e:
+        logger.exception("liquidity-depth-after-haircut 처리 실패")
         return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
 
 

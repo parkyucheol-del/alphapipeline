@@ -2760,6 +2760,296 @@ async def get_order_split_guide(
 
 
 # ============================================================================
+# Phase 3 "Pre-Flight Quantitative Risk Metrics" (2026-10-18) - Wave 2 동결
+# 해제 후 세 번째 신규 유료 엔드포인트 묶음. architecture-roadmap.md: 정성적
+# 판정(`safe_to_execute`, 종합 스코어링) 배제, 순수 통계 지표만 제공.
+# 실시간 호가 조작(Spoofing) "감지"는 스코프 밖 - 아래 세 엔드포인트 중
+# 어느 것도 "이건 스푸핑이다"라고 판정하지 않는다. 전부 exit_capacity_audit과
+# 같은 오더북 조회/파싱 헬퍼(_parse_book_levels, _market_token_id_for_outcome,
+# _ms_epoch_to_timestamp_pair)를 재사용 - 신규 업스트림 호출 없음.
+# ============================================================================
+
+_BID_ASK_SPREAD_PCT_NOTICE = (
+    "Single-snapshot top-of-book spread - spread_pct is (best_ask - best_bid) "
+    "/ mid_price * 100. Not a liquidity or executability measure (use "
+    "exit_capacity_audit/order_split_guide for that) - a tight spread with a "
+    "thin book can still be expensive to trade in size."
+)
+
+
+async def get_bid_ask_spread_pct(
+    token_id: str | None = None,
+    market_slug: str | None = None,
+    outcome: str = "yes",
+) -> dict:
+    """
+    Polymarket 특정 outcome의 실시간 최우선 매수/매도 호가 스프레드를
+    mid_price 기준 퍼센트로 계산한다. exit_capacity_audit과 같은 오더북
+    조회 헬퍼를 재사용 - 신규 업스트림 호출 없음.
+    GET /v1/prediction/bid-ask-spread-pct가 사용한다 (main.py 참고).
+    """
+    if not token_id and not market_slug:
+        raise ValueError("token_id 또는 market_slug(정확한 Polymarket 마켓 slug) 중 하나는 필요합니다")
+
+    resolved_token_id = str(token_id).strip() if token_id else None
+    if not resolved_token_id:
+        market = await ds.get_polymarket_market(market_slug.strip())
+        tid = _market_token_id_for_outcome(market, outcome)
+        if not tid:
+            raise ValueError(f"마켓 slug '{market_slug}'에서 '{outcome}' 토큰을 찾지 못했습니다")
+        resolved_token_id = tid
+
+    book = await ds.get_polymarket_order_book(resolved_token_id)
+    bids = _parse_book_levels(book.get("bids") or [], reverse=True)
+    asks = _parse_book_levels(book.get("asks") or [], reverse=False)
+
+    try:
+        book_snapshot_time = _ms_epoch_to_timestamp_pair(int(book.get("timestamp")))
+    except (TypeError, ValueError):
+        book_snapshot_time = None
+
+    best_bid = bids[0]["price"] if bids else None
+    best_ask = asks[0]["price"] if asks else None
+
+    mid_price = None
+    spread_abs = None
+    spread_pct = None
+    notice = _BID_ASK_SPREAD_PCT_NOTICE
+    if best_bid is not None and best_ask is not None:
+        mid_price = (best_bid + best_ask) / 2
+        spread_abs = best_ask - best_bid
+        spread_pct = (spread_abs / mid_price * 100) if mid_price > 0 else None
+    else:
+        notice += " One side of the book is empty right now - spread cannot be computed."
+
+    return {
+        "generated_at": _timestamp_now(),
+        "token_id": resolved_token_id,
+        "market_slug": market_slug,
+        "best_bid": round(best_bid, 4) if best_bid is not None else None,
+        "best_ask": round(best_ask, 4) if best_ask is not None else None,
+        "mid_price": round(mid_price, 4) if mid_price is not None else None,
+        "spread_abs": round(spread_abs, 4) if spread_abs is not None else None,
+        "spread_pct": round(spread_pct, 3) if spread_pct is not None else None,
+        "book_snapshot_time": book_snapshot_time,
+        "data_source": "polymarket-clob",
+        "notice": notice,
+    }
+
+
+_ORDERBOOK_IMBALANCE_RATIO_NOTICE = (
+    "Depth is summed within depth_band_pct of each side's own best quote (bids "
+    "within depth_band_pct below best_bid, asks within depth_band_pct above "
+    "best_ask) - not a fixed number of levels, so depth_band_pct controls how "
+    "far into the book this looks. imbalance_ratio is a descriptive statistic "
+    "only (bid_depth_shares / total depth, 0.5 = balanced) - it is not a "
+    "prediction of price direction and no confidence or verdict field is "
+    "returned."
+)
+
+
+async def get_orderbook_imbalance_ratio(
+    token_id: str | None = None,
+    market_slug: str | None = None,
+    outcome: str = "yes",
+    depth_band_pct: float = 5.0,
+) -> dict:
+    """
+    Polymarket 특정 outcome의 매수/매도 양쪽 호가 잔량을 각자의 best price
+    기준 depth_band_pct% 범위 내에서 합산해 비율을 계산한다 (0.5 = 균형,
+    1.0에 가까울수록 매수 쪽 유동성 우세, 0.0에 가까울수록 매도 쪽 우세).
+    exit_capacity_audit과 같은 오더북 조회 헬퍼를 재사용 - 신규 업스트림
+    호출 없음. GET /v1/prediction/orderbook-imbalance-ratio가 사용한다
+    (main.py 참고).
+    """
+    if depth_band_pct is None or depth_band_pct <= 0:
+        raise ValueError("depth_band_pct는 0보다 커야 합니다")
+    if not token_id and not market_slug:
+        raise ValueError("token_id 또는 market_slug(정확한 Polymarket 마켓 slug) 중 하나는 필요합니다")
+
+    resolved_token_id = str(token_id).strip() if token_id else None
+    if not resolved_token_id:
+        market = await ds.get_polymarket_market(market_slug.strip())
+        tid = _market_token_id_for_outcome(market, outcome)
+        if not tid:
+            raise ValueError(f"마켓 slug '{market_slug}'에서 '{outcome}' 토큰을 찾지 못했습니다")
+        resolved_token_id = tid
+
+    book = await ds.get_polymarket_order_book(resolved_token_id)
+    bids = _parse_book_levels(book.get("bids") or [], reverse=True)
+    asks = _parse_book_levels(book.get("asks") or [], reverse=False)
+
+    try:
+        book_snapshot_time = _ms_epoch_to_timestamp_pair(int(book.get("timestamp")))
+    except (TypeError, ValueError):
+        book_snapshot_time = None
+
+    best_bid = bids[0]["price"] if bids else None
+    best_ask = asks[0]["price"] if asks else None
+
+    bid_depth_shares = 0.0
+    if best_bid is not None:
+        cutoff = best_bid * (1 - depth_band_pct / 100)
+        bid_depth_shares = sum(l["size"] for l in bids if l["price"] >= cutoff)
+
+    ask_depth_shares = 0.0
+    if best_ask is not None:
+        cutoff = best_ask * (1 + depth_band_pct / 100)
+        ask_depth_shares = sum(l["size"] for l in asks if l["price"] <= cutoff)
+
+    total_depth = bid_depth_shares + ask_depth_shares
+    imbalance_ratio = (bid_depth_shares / total_depth) if total_depth > 0 else None
+
+    notice = _ORDERBOOK_IMBALANCE_RATIO_NOTICE
+    if not bids or not asks:
+        notice += " One side of the book is empty right now - ratio reflects only the side with depth."
+
+    return {
+        "generated_at": _timestamp_now(),
+        "token_id": resolved_token_id,
+        "market_slug": market_slug,
+        "depth_band_pct": depth_band_pct,
+        "best_bid": round(best_bid, 4) if best_bid is not None else None,
+        "best_ask": round(best_ask, 4) if best_ask is not None else None,
+        "bid_depth_shares": round(bid_depth_shares, 4),
+        "ask_depth_shares": round(ask_depth_shares, 4),
+        "imbalance_ratio": round(imbalance_ratio, 4) if imbalance_ratio is not None else None,
+        "book_snapshot_time": book_snapshot_time,
+        "data_source": "polymarket-clob",
+        "notice": notice,
+    }
+
+
+_LIQUIDITY_DEPTH_AFTER_HAIRCUT_NOTICE = (
+    "Single-snapshot order-book calculation. The haircut models the risk that "
+    "a resting order at the very best price gets cancelled before you can "
+    "trade against it - it discounts only the top-of-book level's size by "
+    "haircut_pct, it does not detect or flag actual spoofing (out of scope, "
+    "see architecture-roadmap.md Phase 3). depth_shares_after_haircut is the "
+    "total size executable within max_price_impact_pct of the (un-haircut) "
+    "best quote, walked against the haircut-adjusted book. Not investment "
+    "advice - no confidence or go/no-go field is returned, only the raw "
+    "numbers."
+)
+
+
+def _cumulative_shares_within_avg_price(
+    levels: list[dict], target_avg_price: float, side: str
+) -> tuple[float, float]:
+    """
+    order_split_guide()와 동일한 선형보간 교차점 계산 - levels를 누적 체결하며
+    평균 체결가가 target_avg_price를 넘지 않는 한도 내 체결 가능 수량/notional을
+    정확히 구한다. get_liquidity_depth_after_haircut() 전용 헬퍼로 분리 -
+    이미 검증/배포된 order_split_guide()의 인라인 루프는 그대로 둔다.
+    """
+    cum_shares = 0.0
+    cum_notional = 0.0
+    for level in levels:
+        price, size = level["price"], level["size"]
+        new_cum_shares = cum_shares + size
+        new_cum_notional = cum_notional + size * price
+        new_avg = new_cum_notional / new_cum_shares
+        within = new_avg >= target_avg_price if side == "sell" else new_avg <= target_avg_price
+        if within:
+            cum_shares, cum_notional = new_cum_shares, new_cum_notional
+            continue
+        denom = target_avg_price - price
+        x = 0.0 if denom == 0 else (cum_notional - target_avg_price * cum_shares) / denom
+        x = max(0.0, min(x, size))
+        cum_shares += x
+        cum_notional += x * price
+        break
+    return cum_shares, cum_notional
+
+
+async def get_liquidity_depth_after_haircut(
+    token_id: str | None = None,
+    market_slug: str | None = None,
+    outcome: str = "yes",
+    side: str = "sell",
+    haircut_pct: float = 10.0,
+    max_price_impact_pct: float = 5.0,
+) -> dict:
+    """
+    Polymarket 오더북의 최상단 호가(best quote)가 체결 직전 취소될 위험을
+    감안해, 최상단 레벨의 수량만 haircut_pct% 할인한 뒤, best_quote 기준
+    max_price_impact_pct% 가격충격 한도 내에서 실제 체결 가능한 유동성이
+    할인 전/후로 각각 얼마인지 계산한다. exit_capacity_audit/
+    order_split_guide와 같은 오더북 조회 헬퍼를 재사용 - 신규 업스트림
+    호출 없음. GET /v1/prediction/liquidity-depth-after-haircut가 사용한다
+    (main.py 참고).
+    """
+    if haircut_pct is None or not (0 <= haircut_pct <= 100):
+        raise ValueError("haircut_pct는 0 이상 100 이하여야 합니다")
+    if max_price_impact_pct is None or max_price_impact_pct <= 0:
+        raise ValueError("max_price_impact_pct는 0보다 커야 합니다")
+    if not token_id and not market_slug:
+        raise ValueError("token_id 또는 market_slug(정확한 Polymarket 마켓 slug) 중 하나는 필요합니다")
+
+    resolved_token_id = str(token_id).strip() if token_id else None
+    if not resolved_token_id:
+        market = await ds.get_polymarket_market(market_slug.strip())
+        tid = _market_token_id_for_outcome(market, outcome)
+        if not tid:
+            raise ValueError(f"마켓 slug '{market_slug}'에서 '{outcome}' 토큰을 찾지 못했습니다")
+        resolved_token_id = tid
+
+    book = await ds.get_polymarket_order_book(resolved_token_id)
+    levels_raw = (book.get("bids") if side == "sell" else book.get("asks")) or []
+    levels = _parse_book_levels(levels_raw, reverse=(side == "sell"))
+
+    try:
+        book_snapshot_time = _ms_epoch_to_timestamp_pair(int(book.get("timestamp")))
+    except (TypeError, ValueError):
+        book_snapshot_time = None
+
+    if not levels:
+        return {
+            "generated_at": _timestamp_now(),
+            "token_id": resolved_token_id,
+            "market_slug": market_slug,
+            "side": side,
+            "haircut_pct": haircut_pct,
+            "max_price_impact_pct": max_price_impact_pct,
+            "best_quote": None,
+            "depth_shares_before_haircut": 0.0,
+            "depth_shares_after_haircut": 0.0,
+            "book_snapshot_time": book_snapshot_time,
+            "data_source": "polymarket-clob",
+            "notice": _LIQUIDITY_DEPTH_AFTER_HAIRCUT_NOTICE
+            + f" No {'bids' if side == 'sell' else 'asks'} on the book right now.",
+        }
+
+    best_quote = levels[0]["price"]
+    target_avg_price = (
+        best_quote * (1 - max_price_impact_pct / 100)
+        if side == "sell"
+        else best_quote * (1 + max_price_impact_pct / 100)
+    )
+
+    depth_before, _ = _cumulative_shares_within_avg_price(levels, target_avg_price, side)
+
+    haircut_levels = [dict(l) for l in levels]
+    haircut_levels[0]["size"] = haircut_levels[0]["size"] * (1 - haircut_pct / 100)
+    depth_after, _ = _cumulative_shares_within_avg_price(haircut_levels, target_avg_price, side)
+
+    return {
+        "generated_at": _timestamp_now(),
+        "token_id": resolved_token_id,
+        "market_slug": market_slug,
+        "side": side,
+        "haircut_pct": haircut_pct,
+        "max_price_impact_pct": max_price_impact_pct,
+        "best_quote": round(best_quote, 4),
+        "depth_shares_before_haircut": round(depth_before, 4),
+        "depth_shares_after_haircut": round(depth_after, 4),
+        "book_snapshot_time": book_snapshot_time,
+        "data_source": "polymarket-clob",
+        "notice": _LIQUIDITY_DEPTH_AFTER_HAIRCUT_NOTICE,
+    }
+
+
+# ============================================================================
 # prediction.hip4_snapshot (2026-09-28) - 예측시장 확장 Wave 2. Hyperliquid
 # 공식 HIP-4(outcome/prediction market) 무료 info API만 쓴다(인증/지갑 불필요).
 # 상세 조사/데이터 검증 기록은 프로젝트 노트

@@ -104,6 +104,9 @@ from app.schemas import (
     DUMP_RISK_EXAMPLE,
     EXIT_CAPACITY_AUDIT_EXAMPLE,
     ORDER_SPLIT_GUIDE_EXAMPLE,
+    BID_ASK_SPREAD_PCT_EXAMPLE,
+    ORDERBOOK_IMBALANCE_RATIO_EXAMPLE,
+    LIQUIDITY_DEPTH_AFTER_HAIRCUT_EXAMPLE,
     FUNDING_APR_EXAMPLE,
     FUNDING_RATE_EXAMPLE,
     FUNDING_RATE_VALUE_EXAMPLE,
@@ -141,6 +144,9 @@ from app.schemas import (
     OracleGapResponse,
     PredictionExitCapacityAuditResponse,
     PredictionOrderSplitGuideResponse,
+    PredictionBidAskSpreadPctResponse,
+    PredictionOrderbookImbalanceRatioResponse,
+    PredictionLiquidityDepthAfterHaircutResponse,
     PredictionHip4PriceLadderResponse,
     PredictionHip4SnapshotResponse,
     PredictionNegRiskArbitrageResponse,
@@ -419,6 +425,11 @@ def build_routes(
     neg_risk_arbitrage_option = _payment_option(settings.PRICE_NEG_RISK_ARBITRAGE_USDC)
     exit_capacity_audit_option = _payment_option(settings.PRICE_EXIT_CAPACITY_AUDIT_USDC)
     order_split_guide_option = _payment_option(settings.PRICE_ORDER_SPLIT_GUIDE_USDC)
+    bid_ask_spread_pct_option = _payment_option(settings.PRICE_BID_ASK_SPREAD_PCT_USDC)
+    orderbook_imbalance_ratio_option = _payment_option(settings.PRICE_ORDERBOOK_IMBALANCE_RATIO_USDC)
+    liquidity_depth_after_haircut_option = _payment_option(
+        settings.PRICE_LIQUIDITY_DEPTH_AFTER_HAIRCUT_USDC
+    )
     hip4_snapshot_option = _payment_option(settings.PRICE_HIP4_SNAPSHOT_USDC)
     hip4_price_ladder_option = _payment_option(settings.PRICE_HIP4_PRICE_LADDER_USDC)
     hip4_events_subscribe_option = _payment_option(settings.PRICE_HIP4_EVENTS_SUBSCRIBE_USDC)
@@ -1107,6 +1118,164 @@ def build_routes(
                 output_schema=_inline_schema_defs(PredictionOrderSplitGuideResponse.model_json_schema()),
             ),
             service_name="AlphaPipeline Order Split Guide",
+            tags=["prediction-market", "polymarket", "liquidity", "pre-trade-signal"],
+        ),
+        # 2026-10-18 Phase 3 "Pre-Flight Quantitative Risk Metrics" (3종), Wave 2
+        # 동결 해제 후 세 번째 신규 유료 엔드포인트 묶음. 전부 exit-capacity-audit
+        # 과 같은 오더북 조회/파싱 헬퍼 재사용 - 신규 업스트림 호출 없음. 정성적
+        # 판정 필드 없음 - architecture-roadmap.md 원칙 1과 일치. 실시간 호가
+        # 조작(Spoofing) "감지"는 스코프 밖.
+        "GET /v1/prediction/bid-ask-spread-pct": _make_route_config(
+            accepts=[bid_ask_spread_pct_option],
+            mime_type="application/json",
+            description=(
+                "Cheap tier - a single Polymarket outcome's live top-of-book bid/ask "
+                "spread as a percentage of mid_price. Not a liquidity or "
+                "executability measure (use exit_capacity_audit/order_split_guide "
+                "for that). Accepts either a raw token_id or a market_slug "
+                "(+ outcome). Paid in USDC on Base."
+            ),
+            resource=_resource_url("/v1/prediction/bid-ask-spread-pct"),
+            extensions=_bazaar_extension(
+                input_example={
+                    "market_slug": "will-btc-hit-150k-by-2028",
+                    "outcome": "yes",
+                },
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "token_id": {
+                            "type": "string",
+                            "description": "The outcome's CLOB token_id / asset_id, if already known.",
+                        },
+                        "market_slug": {
+                            "type": "string",
+                            "description": (
+                                "Exact Polymarket market slug, used to resolve token_id "
+                                "automatically when not already known."
+                            ),
+                        },
+                        "outcome": {
+                            "type": "string",
+                            "description": "\"yes\" (default) or \"no\" - which side to resolve when using market_slug.",
+                        },
+                    },
+                    "required": [],
+                },
+                output_example=BID_ASK_SPREAD_PCT_EXAMPLE,
+                output_schema=_inline_schema_defs(PredictionBidAskSpreadPctResponse.model_json_schema()),
+            ),
+            service_name="AlphaPipeline Bid/Ask Spread",
+            tags=["prediction-market", "polymarket", "liquidity", "pre-trade-signal"],
+        ),
+        "GET /v1/prediction/orderbook-imbalance-ratio": _make_route_config(
+            accepts=[orderbook_imbalance_ratio_option],
+            mime_type="application/json",
+            description=(
+                "A single Polymarket outcome's bid-side vs ask-side order-book depth "
+                "ratio, summed within `depth_band_pct` (default 5.0%) of each side's "
+                "own best quote. 0.5 = balanced, closer to 1.0 = bid-side depth "
+                "dominant, closer to 0.0 = ask-side dominant. A descriptive statistic "
+                "only - not a prediction of price direction. Accepts either a raw "
+                "token_id or a market_slug (+ outcome). Paid in USDC on Base."
+            ),
+            resource=_resource_url("/v1/prediction/orderbook-imbalance-ratio"),
+            extensions=_bazaar_extension(
+                input_example={
+                    "market_slug": "will-btc-hit-150k-by-2028",
+                    "outcome": "yes",
+                    "depth_band_pct": 5.0,
+                },
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "token_id": {
+                            "type": "string",
+                            "description": "The outcome's CLOB token_id / asset_id, if already known.",
+                        },
+                        "market_slug": {
+                            "type": "string",
+                            "description": (
+                                "Exact Polymarket market slug, used to resolve token_id "
+                                "automatically when not already known."
+                            ),
+                        },
+                        "outcome": {
+                            "type": "string",
+                            "description": "\"yes\" (default) or \"no\" - which side to resolve when using market_slug.",
+                        },
+                        "depth_band_pct": {
+                            "type": "number",
+                            "description": "How far into the book, as a percent of each side's own best quote, to sum depth. Defaults to 5.0.",
+                        },
+                    },
+                    "required": [],
+                },
+                output_example=ORDERBOOK_IMBALANCE_RATIO_EXAMPLE,
+                output_schema=_inline_schema_defs(PredictionOrderbookImbalanceRatioResponse.model_json_schema()),
+            ),
+            service_name="AlphaPipeline Orderbook Imbalance Ratio",
+            tags=["prediction-market", "polymarket", "liquidity", "pre-trade-signal"],
+        ),
+        "GET /v1/prediction/liquidity-depth-after-haircut": _make_route_config(
+            accepts=[liquidity_depth_after_haircut_option],
+            mime_type="application/json",
+            description=(
+                "A single Polymarket outcome's executable depth within "
+                "`max_price_impact_pct` (default 5.0%) of the best quote, both before "
+                "and after discounting the top-of-book level's size by `haircut_pct` "
+                "(default 10.0%) to model best-quote cancellation risk. Does not "
+                "detect or flag spoofing. Accepts either a raw token_id or a "
+                "market_slug (+ outcome). Paid in USDC on Base."
+            ),
+            resource=_resource_url("/v1/prediction/liquidity-depth-after-haircut"),
+            extensions=_bazaar_extension(
+                input_example={
+                    "market_slug": "will-btc-hit-150k-by-2028",
+                    "outcome": "yes",
+                    "side": "sell",
+                    "haircut_pct": 10.0,
+                    "max_price_impact_pct": 5.0,
+                },
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "token_id": {
+                            "type": "string",
+                            "description": "The outcome's CLOB token_id / asset_id, if already known.",
+                        },
+                        "market_slug": {
+                            "type": "string",
+                            "description": (
+                                "Exact Polymarket market slug, used to resolve token_id "
+                                "automatically when not already known."
+                            ),
+                        },
+                        "outcome": {
+                            "type": "string",
+                            "description": "\"yes\" (default) or \"no\" - which side to resolve when using market_slug.",
+                        },
+                        "side": {
+                            "type": "string",
+                            "description": "\"sell\" (default) or \"buy\".",
+                        },
+                        "haircut_pct": {
+                            "type": "number",
+                            "description": "Percent to discount the top-of-book level's size by, modeling cancellation risk. Defaults to 10.0.",
+                        },
+                        "max_price_impact_pct": {
+                            "type": "number",
+                            "description": "Price-impact bound (percent of best quote) within which depth is summed. Defaults to 5.0.",
+                        },
+                    },
+                    "required": [],
+                },
+                output_example=LIQUIDITY_DEPTH_AFTER_HAIRCUT_EXAMPLE,
+                output_schema=_inline_schema_defs(
+                    PredictionLiquidityDepthAfterHaircutResponse.model_json_schema()
+                ),
+            ),
+            service_name="AlphaPipeline Liquidity Depth After Haircut",
             tags=["prediction-market", "polymarket", "liquidity", "pre-trade-signal"],
         ),
         "GET /v1/prediction/hip4-snapshot": _make_route_config(

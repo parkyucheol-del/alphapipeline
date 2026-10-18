@@ -7,7 +7,7 @@ Also the exact server Glama's automated Docker build test introspects for
 this listing's "Server" score, so its tool count should track app/mcp_server.py
 (the paid remote server) 1:1 even though calls here bypass payment entirely.
 
-23 tools provided (same coverage as the paid remote /mcp server, just called
+26 tools provided (same coverage as the paid remote /mcp server, just called
 directly against app/logic.py instead of going through x402 payment):
   1.  convert_to_markdown(url)                              -> app/markdown_tool.py: url_to_markdown
   2.  get_token_dump_risk(symbol)                            -> app/logic.py: get_symbol_dump_risk
@@ -32,6 +32,9 @@ directly against app/logic.py instead of going through x402 payment):
   21. get_hip4_price(underlying, strike)                       -> app/logic.py: get_hip4_price
   22. get_hip4_mispricing(underlying)                           -> app/logic.py: get_hip4_mispricing
   23. get_order_split_guide(position_size_shares, ...)            -> app/logic.py: get_order_split_guide
+  24. get_bid_ask_spread_pct(token_id, ...)                        -> app/logic.py: get_bid_ask_spread_pct
+  25. get_orderbook_imbalance_ratio(token_id, ...)                 -> app/logic.py: get_orderbook_imbalance_ratio
+  26. get_liquidity_depth_after_haircut(token_id, ...)             -> app/logic.py: get_liquidity_depth_after_haircut
 
 Note (important, stated honestly):
   - This MCP server is a separate "distribution build" from the paid x402 HTTP
@@ -76,8 +79,11 @@ from app.logic import (
     get_kimchi_alert as _logic_kimchi_alert,
     get_macro_calendar_dday as _logic_macro_calendar_dday,
     get_neg_risk_arbitrage as _logic_neg_risk_arbitrage,
+    get_bid_ask_spread_pct as _logic_bid_ask_spread_pct,
+    get_liquidity_depth_after_haircut as _logic_liquidity_depth_after_haircut,
     get_oracle_gap as _logic_oracle_gap,
     get_oracle_gap_bp as _logic_oracle_gap_bp,
+    get_orderbook_imbalance_ratio as _logic_orderbook_imbalance_ratio,
     get_order_split_guide as _logic_order_split_guide,
     get_symbol_dump_risk,
     get_token_diagnostic as _logic_token_diagnostic,
@@ -860,6 +866,133 @@ async def get_order_split_guide(
             outcome=outcome,
             side=side,
             max_price_impact_pct_per_slice=max_price_impact_pct_per_slice,
+        ),
+    )
+
+
+@mcp.tool(name="prediction.bid_ask_spread_pct")
+async def get_bid_ask_spread_pct(
+    token_id: str | None = None,
+    market_slug: str | None = None,
+    outcome: str = "yes",
+) -> dict:
+    """
+    Cheap tier - a single Polymarket outcome's live top-of-book bid/ask spread
+    as a percentage of mid_price. Not a liquidity or executability measure
+    (use prediction.exit_capacity_audit/order_split_guide for that). Reuses
+    the same order-book fetch as those tools - no new upstream call.
+
+    Args:
+        token_id: The outcome's CLOB token_id / asset_id, if already known.
+            Provide either this OR market_slug.
+        market_slug: Exact Polymarket market slug, used to resolve token_id
+            automatically when not already known.
+        outcome: "yes" (default) or "no" - which side to resolve when using
+            market_slug. Ignored if token_id is given directly.
+
+    Returns:
+        On success: {"success": true, "best_bid", "best_ask", "mid_price",
+            "spread_abs", "spread_pct", ...}
+        On failure: {"success": false, "error": {"type", "message"}}
+    """
+    return await _safe_call(
+        "get_bid_ask_spread_pct",
+        _logic_bid_ask_spread_pct(
+            token_id=token_id,
+            market_slug=market_slug,
+            outcome=outcome,
+        ),
+    )
+
+
+@mcp.tool(name="prediction.orderbook_imbalance_ratio")
+async def get_orderbook_imbalance_ratio(
+    token_id: str | None = None,
+    market_slug: str | None = None,
+    outcome: str = "yes",
+    depth_band_pct: float = 5.0,
+) -> dict:
+    """
+    A single Polymarket outcome's bid-side vs ask-side order-book depth
+    ratio, summed within depth_band_pct (default 5.0%) of each side's own
+    best quote. 0.5 = balanced, closer to 1.0 = bid-side depth dominant,
+    closer to 0.0 = ask-side dominant. A descriptive statistic only - not a
+    prediction of price direction, no confidence or verdict field. Reuses
+    the same order-book fetch as prediction.exit_capacity_audit - no new
+    upstream call.
+
+    Args:
+        token_id: The outcome's CLOB token_id / asset_id, if already known.
+            Provide either this OR market_slug.
+        market_slug: Exact Polymarket market slug, used to resolve token_id
+            automatically when not already known.
+        outcome: "yes" (default) or "no" - which side to resolve when using
+            market_slug. Ignored if token_id is given directly.
+        depth_band_pct: How far into the book, as a percent of each side's
+            own best quote, to sum depth. Defaults to 5.0.
+
+    Returns:
+        On success: {"success": true, "bid_depth_shares", "ask_depth_shares",
+            "imbalance_ratio", ...}
+        On failure: {"success": false, "error": {"type", "message"}}
+    """
+    return await _safe_call(
+        "get_orderbook_imbalance_ratio",
+        _logic_orderbook_imbalance_ratio(
+            token_id=token_id,
+            market_slug=market_slug,
+            outcome=outcome,
+            depth_band_pct=depth_band_pct,
+        ),
+    )
+
+
+@mcp.tool(name="prediction.liquidity_depth_after_haircut")
+async def get_liquidity_depth_after_haircut(
+    token_id: str | None = None,
+    market_slug: str | None = None,
+    outcome: str = "yes",
+    side: str = "sell",
+    haircut_pct: float = 10.0,
+    max_price_impact_pct: float = 5.0,
+) -> dict:
+    """
+    A single Polymarket outcome's executable depth within
+    max_price_impact_pct (default 5.0%) of the best quote, both before and
+    after discounting the top-of-book level's size by haircut_pct (default
+    10.0%) to model the risk that the very best resting order gets cancelled
+    before you can trade against it. Does not detect or flag actual spoofing
+    (out of scope - see architecture-roadmap.md Phase 3). Reuses the same
+    order-book fetch as prediction.exit_capacity_audit/order_split_guide -
+    no new upstream call.
+
+    Args:
+        token_id: The outcome's CLOB token_id / asset_id, if already known.
+            Provide either this OR market_slug.
+        market_slug: Exact Polymarket market slug, used to resolve token_id
+            automatically when not already known.
+        outcome: "yes" (default) or "no" - which side to resolve when using
+            market_slug. Ignored if token_id is given directly.
+        side: "sell" (default) or "buy".
+        haircut_pct: Percent to discount the top-of-book level's size by,
+            modeling cancellation risk. Defaults to 10.0.
+        max_price_impact_pct: Price-impact bound (percent of best quote)
+            within which depth is summed. Defaults to 5.0.
+
+    Returns:
+        On success: {"success": true, "best_quote",
+            "depth_shares_before_haircut", "depth_shares_after_haircut", ...}
+        On failure: {"success": false, "error": {"type", "message"}}
+    """
+    return await _safe_call(
+        "get_liquidity_depth_after_haircut",
+        _logic_liquidity_depth_after_haircut(
+            token_id=token_id,
+            market_slug=market_slug,
+            outcome=outcome,
+            side=side,
+            haircut_pct=haircut_pct,
+            max_price_impact_pct=max_price_impact_pct,
         ),
     )
 

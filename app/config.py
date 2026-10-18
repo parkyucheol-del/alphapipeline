@@ -195,6 +195,21 @@ class Settings:
     # 가격도 exit_capacity_audit과 동일 티어로 맞춤.
     PRICE_ORDER_SPLIT_GUIDE_USDC: float = float(os.getenv("PRICE_ORDER_SPLIT_GUIDE_USDC", "0.02"))
 
+    # ===== 2026-10-18 Phase 3: Pre-Flight Quantitative Risk Metrics (3종) =====
+    # architecture-roadmap.md Phase 3. 전부 exit_capacity_audit과 같은
+    # Polymarket 오더북 호출/파싱 헬퍼를 재사용 - 신규 업스트림 호출 없음.
+    # 계산 복잡도에 따라 티어 차등: spread_pct는 top-of-book 산술만이라
+    # 저가 티어, imbalance_ratio는 양쪽 depth band 합산이라 표준 티어,
+    # liquidity_depth_after_haircut은 order_split_guide급 보간 계산이라
+    # 분석 티어.
+    PRICE_BID_ASK_SPREAD_PCT_USDC: float = float(os.getenv("PRICE_BID_ASK_SPREAD_PCT_USDC", "0.001"))
+    PRICE_ORDERBOOK_IMBALANCE_RATIO_USDC: float = float(
+        os.getenv("PRICE_ORDERBOOK_IMBALANCE_RATIO_USDC", "0.01")
+    )
+    PRICE_LIQUIDITY_DEPTH_AFTER_HAIRCUT_USDC: float = float(
+        os.getenv("PRICE_LIQUIDITY_DEPTH_AFTER_HAIRCUT_USDC", "0.02")
+    )
+
     # ===== x402 공식 결제 레이어 (Coinbase CDP Facilitator) =====
     # Coinbase Developer Platform(https://portal.cdp.coinbase.com)에서 발급받는 API 키.
     # 둘 다 채워지면 CDP Facilitator(메인넷 실결제 검증/정산)를 쓰고,

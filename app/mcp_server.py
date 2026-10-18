@@ -605,6 +605,76 @@ ORDER_SPLIT_GUIDE_OUTPUT_SCHEMA = {
     ],
 }
 
+# 2026-10-18 Phase 3 "Pre-Flight Quantitative Risk Metrics" (3종) -
+# 전부 EXIT_CAPACITY_AUDIT_OUTPUT_SCHEMA와 같은 오더북 데이터를 재사용.
+BID_ASK_SPREAD_PCT_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "generated_at": _TIMESTAMP_PAIR_SCHEMA,
+        "token_id": {"type": "string"},
+        "market_slug": {"type": ["string", "null"]},
+        "best_bid": {"type": ["number", "null"]},
+        "best_ask": {"type": ["number", "null"]},
+        "mid_price": {"type": ["number", "null"]},
+        "spread_abs": {"type": ["number", "null"]},
+        "spread_pct": {"type": ["number", "null"]},
+        "book_snapshot_time": {
+            "anyOf": [_TIMESTAMP_PAIR_SCHEMA, {"type": "null"}],
+        },
+        "data_source": {"type": "string"},
+        "notice": {"type": ["string", "null"]},
+    },
+    "required": ["generated_at", "token_id", "data_source"],
+}
+
+ORDERBOOK_IMBALANCE_RATIO_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "generated_at": _TIMESTAMP_PAIR_SCHEMA,
+        "token_id": {"type": "string"},
+        "market_slug": {"type": ["string", "null"]},
+        "depth_band_pct": {"type": "number"},
+        "best_bid": {"type": ["number", "null"]},
+        "best_ask": {"type": ["number", "null"]},
+        "bid_depth_shares": {"type": "number"},
+        "ask_depth_shares": {"type": "number"},
+        "imbalance_ratio": {"type": ["number", "null"]},
+        "book_snapshot_time": {
+            "anyOf": [_TIMESTAMP_PAIR_SCHEMA, {"type": "null"}],
+        },
+        "data_source": {"type": "string"},
+        "notice": {"type": ["string", "null"]},
+    },
+    "required": [
+        "generated_at", "token_id", "depth_band_pct", "bid_depth_shares",
+        "ask_depth_shares", "data_source",
+    ],
+}
+
+LIQUIDITY_DEPTH_AFTER_HAIRCUT_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "generated_at": _TIMESTAMP_PAIR_SCHEMA,
+        "token_id": {"type": "string"},
+        "market_slug": {"type": ["string", "null"]},
+        "side": {"type": "string"},
+        "haircut_pct": {"type": "number"},
+        "max_price_impact_pct": {"type": "number"},
+        "best_quote": {"type": ["number", "null"]},
+        "depth_shares_before_haircut": {"type": "number"},
+        "depth_shares_after_haircut": {"type": "number"},
+        "book_snapshot_time": {
+            "anyOf": [_TIMESTAMP_PAIR_SCHEMA, {"type": "null"}],
+        },
+        "data_source": {"type": "string"},
+        "notice": {"type": ["string", "null"]},
+    },
+    "required": [
+        "generated_at", "token_id", "side", "haircut_pct", "max_price_impact_pct",
+        "depth_shares_before_haircut", "depth_shares_after_haircut", "data_source",
+    ],
+}
+
 _HIP4_SIDE_SCHEMA = {
     "type": "object",
     "properties": {
@@ -1523,6 +1593,124 @@ _TOOLS: list[dict] = [
             "required": ["position_size_shares"],
         },
         "output_schema": ORDER_SPLIT_GUIDE_OUTPUT_SCHEMA,
+        "annotations": _READ_ONLY_ANNOTATIONS,
+    },
+    {
+        "name": "prediction.bid_ask_spread_pct",
+        "path": "/v1/prediction/bid-ask-spread-pct",
+        "price_attr": "PRICE_BID_ASK_SPREAD_PCT_USDC",
+        "description": (
+            "Cheap tier - a single Polymarket outcome's live top-of-book bid/ask "
+            "spread as a percentage of mid_price. Not a liquidity or "
+            "executability measure (use prediction.exit_capacity_audit/"
+            "order_split_guide for that). Accepts either a raw token_id or a "
+            "market_slug (+ outcome) to resolve it automatically - exact slug "
+            "only, no fuzzy keyword search. Paid in USDC on Base."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "token_id": {
+                    "type": "string",
+                    "description": "The outcome's CLOB token_id / asset_id, if already known.",
+                },
+                "market_slug": {
+                    "type": "string",
+                    "description": "Exact Polymarket market slug, used to resolve token_id automatically.",
+                },
+                "outcome": {
+                    "type": "string",
+                    "description": "\"yes\" (default) or \"no\" - which side to resolve when using market_slug.",
+                },
+            },
+            "required": [],
+        },
+        "output_schema": BID_ASK_SPREAD_PCT_OUTPUT_SCHEMA,
+        "annotations": _READ_ONLY_ANNOTATIONS,
+    },
+    {
+        "name": "prediction.orderbook_imbalance_ratio",
+        "path": "/v1/prediction/orderbook-imbalance-ratio",
+        "price_attr": "PRICE_ORDERBOOK_IMBALANCE_RATIO_USDC",
+        "description": (
+            "A single Polymarket outcome's bid-side vs ask-side order-book depth "
+            "ratio, summed within depth_band_pct (default 5.0%) of each side's "
+            "own best quote. 0.5 = balanced, closer to 1.0 = bid-side depth "
+            "dominant, closer to 0.0 = ask-side dominant. A descriptive "
+            "statistic only - not a prediction of price direction. Accepts "
+            "either a raw token_id or a market_slug (+ outcome) to resolve it "
+            "automatically. Paid in USDC on Base."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "token_id": {
+                    "type": "string",
+                    "description": "The outcome's CLOB token_id / asset_id, if already known.",
+                },
+                "market_slug": {
+                    "type": "string",
+                    "description": "Exact Polymarket market slug, used to resolve token_id automatically.",
+                },
+                "outcome": {
+                    "type": "string",
+                    "description": "\"yes\" (default) or \"no\" - which side to resolve when using market_slug.",
+                },
+                "depth_band_pct": {
+                    "type": "number",
+                    "description": "How far into the book, as a percent of each side's own best quote, to sum depth. Defaults to 5.0.",
+                },
+            },
+            "required": [],
+        },
+        "output_schema": ORDERBOOK_IMBALANCE_RATIO_OUTPUT_SCHEMA,
+        "annotations": _READ_ONLY_ANNOTATIONS,
+    },
+    {
+        "name": "prediction.liquidity_depth_after_haircut",
+        "path": "/v1/prediction/liquidity-depth-after-haircut",
+        "price_attr": "PRICE_LIQUIDITY_DEPTH_AFTER_HAIRCUT_USDC",
+        "description": (
+            "A single Polymarket outcome's executable depth within "
+            "max_price_impact_pct (default 5.0%) of the best quote, both "
+            "before and after discounting the top-of-book level's size by "
+            "haircut_pct (default 10.0%) to model the risk that the very best "
+            "resting order gets cancelled before you can trade against it. "
+            "Does not detect or flag actual spoofing (out of scope). Accepts "
+            "either a raw token_id or a market_slug (+ outcome) to resolve it "
+            "automatically. Paid in USDC on Base."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "token_id": {
+                    "type": "string",
+                    "description": "The outcome's CLOB token_id / asset_id, if already known.",
+                },
+                "market_slug": {
+                    "type": "string",
+                    "description": "Exact Polymarket market slug, used to resolve token_id automatically.",
+                },
+                "outcome": {
+                    "type": "string",
+                    "description": "\"yes\" (default) or \"no\" - which side to resolve when using market_slug.",
+                },
+                "side": {
+                    "type": "string",
+                    "description": "\"sell\" (default) or \"buy\".",
+                },
+                "haircut_pct": {
+                    "type": "number",
+                    "description": "Percent to discount the top-of-book level's size by, modeling cancellation risk. Defaults to 10.0.",
+                },
+                "max_price_impact_pct": {
+                    "type": "number",
+                    "description": "Price-impact bound (percent of best quote) within which depth is summed. Defaults to 5.0.",
+                },
+            },
+            "required": [],
+        },
+        "output_schema": LIQUIDITY_DEPTH_AFTER_HAIRCUT_OUTPUT_SCHEMA,
         "annotations": _READ_ONLY_ANNOTATIONS,
     },
     {

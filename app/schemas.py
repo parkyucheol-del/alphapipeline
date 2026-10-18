@@ -1258,6 +1258,119 @@ ORDER_SPLIT_GUIDE_EXAMPLE = {
 }
 
 
+# 2026-10-18 Phase 3 "Pre-Flight Quantitative Risk Metrics" (3종) -
+# exit_capacity_audit와 같은 Polymarket 오더북 데이터를 재사용. 신규
+# 업스트림 의존성 없음. 전부 판정(verdict) 필드 없음 - architecture-roadmap.md
+# 원칙 1(Deterministic Metric Delivery)과 일치.
+class PredictionBidAskSpreadPctResponse(BaseModel):
+    generated_at: TimestampPair
+    token_id: str
+    market_slug: str | None = None
+    best_bid: float | None = None
+    best_ask: float | None = None
+    mid_price: float | None = None
+    spread_abs: float | None = None
+    spread_pct: float | None = Field(
+        default=None, description="(best_ask - best_bid) / mid_price * 100. Null if either side of the book is empty."
+    )
+    book_snapshot_time: TimestampPair | None = None
+    data_source: str
+    notice: str | None = None
+
+
+BID_ASK_SPREAD_PCT_EXAMPLE = {
+    "generated_at": {"utc": "2026-10-18T12:00:00Z", "kst": "2026-10-18 21:00:00 KST"},
+    "token_id": "78901234567890123456789012345678901234567890123456789012345678",
+    "market_slug": "will-btc-hit-150k-by-2028",
+    "best_bid": 0.47,
+    "best_ask": 0.49,
+    "mid_price": 0.48,
+    "spread_abs": 0.02,
+    "spread_pct": 4.167,
+    "book_snapshot_time": {"utc": "2026-10-18T11:59:59Z", "kst": "2026-10-18 20:59:59 KST"},
+    "data_source": "polymarket-clob",
+    "notice": (
+        "Single-snapshot top-of-book spread - not a liquidity or executability measure "
+        "(use exit_capacity_audit/order_split_guide for that)."
+    ),
+}
+
+
+class PredictionOrderbookImbalanceRatioResponse(BaseModel):
+    generated_at: TimestampPair
+    token_id: str
+    market_slug: str | None = None
+    depth_band_pct: float
+    best_bid: float | None = None
+    best_ask: float | None = None
+    bid_depth_shares: float
+    ask_depth_shares: float
+    imbalance_ratio: float | None = Field(
+        default=None,
+        description="bid_depth_shares / (bid_depth_shares + ask_depth_shares). 0.5 = balanced, closer to 1.0 = bid-side depth dominant, closer to 0.0 = ask-side dominant. Null if both sides are empty.",
+    )
+    book_snapshot_time: TimestampPair | None = None
+    data_source: str
+    notice: str | None = None
+
+
+ORDERBOOK_IMBALANCE_RATIO_EXAMPLE = {
+    "generated_at": {"utc": "2026-10-18T12:00:00Z", "kst": "2026-10-18 21:00:00 KST"},
+    "token_id": "78901234567890123456789012345678901234567890123456789012345678",
+    "market_slug": "will-btc-hit-150k-by-2028",
+    "depth_band_pct": 5.0,
+    "best_bid": 0.47,
+    "best_ask": 0.49,
+    "bid_depth_shares": 1200.0,
+    "ask_depth_shares": 800.0,
+    "imbalance_ratio": 0.6,
+    "book_snapshot_time": {"utc": "2026-10-18T11:59:59Z", "kst": "2026-10-18 20:59:59 KST"},
+    "data_source": "polymarket-clob",
+    "notice": (
+        "Depth is summed within depth_band_pct of each side's own best quote, not a fixed "
+        "number of levels. imbalance_ratio is a descriptive statistic only - not a "
+        "prediction of price direction."
+    ),
+}
+
+
+class PredictionLiquidityDepthAfterHaircutResponse(BaseModel):
+    generated_at: TimestampPair
+    token_id: str
+    market_slug: str | None = None
+    side: str
+    haircut_pct: float
+    max_price_impact_pct: float
+    best_quote: float | None = None
+    depth_shares_before_haircut: float
+    depth_shares_after_haircut: float = Field(
+        description="Same calculation as depth_shares_before_haircut, but with the top-of-book level's size discounted by haircut_pct first."
+    )
+    book_snapshot_time: TimestampPair | None = None
+    data_source: str
+    notice: str | None = None
+
+
+LIQUIDITY_DEPTH_AFTER_HAIRCUT_EXAMPLE = {
+    "generated_at": {"utc": "2026-10-18T12:00:00Z", "kst": "2026-10-18 21:00:00 KST"},
+    "token_id": "78901234567890123456789012345678901234567890123456789012345678",
+    "market_slug": "will-btc-hit-150k-by-2028",
+    "side": "sell",
+    "haircut_pct": 10.0,
+    "max_price_impact_pct": 5.0,
+    "best_quote": 0.47,
+    "depth_shares_before_haircut": 2200.0,
+    "depth_shares_after_haircut": 1980.0,
+    "book_snapshot_time": {"utc": "2026-10-18T11:59:59Z", "kst": "2026-10-18 20:59:59 KST"},
+    "data_source": "polymarket-clob",
+    "notice": (
+        "The haircut models the risk that a resting order at the very best price gets "
+        "cancelled before you can trade against it - it does not detect or flag actual "
+        "spoofing. Not investment advice."
+    ),
+}
+
+
 class Hip4Side(BaseModel):
     name: str = Field(description="Side label - usually 'Yes'/'No', sometimes a competitor's short name.")
     price: float | None = Field(
