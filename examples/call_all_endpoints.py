@@ -4,7 +4,7 @@ AlphaPipeline의 모든 REST 엔드포인트를 한 번씩 순서대로 호출�
 
 목적: 엔드포인트를 새로 추가/수정한 뒤 "다 한 번씩 불러서 살아있는지" 빠르게
 확인하는 용도. 각 호출은 실제 x402 결제가 나가는 라이브 호출이므로(총
-합산 약 $0.22~0.27 수준(2026-10-18 저가 티어 3개+hip4-mispricing 추가로 소폭 증가) -
+합산 약 $0.24~0.29 수준(2026-10-18 저가 티어 3개+hip4-mispricing+order-split-guide 추가로 소폭 증가) -
 무료 엔드포인트 3개 제외하고 나머지 단가 합),
 실행 전에 그 점을 인지할 것.
 
@@ -182,6 +182,19 @@ ENDPOINTS: list[EndpointCall] = [
         },
         note="market_slug가 오래됐으면 404/빈 응답 가능 - 최신 슬러그로 교체 필요",
     ),
+    EndpointCall(
+        "prediction.order_split_guide",
+        "GET",
+        "/v1/prediction/order-split-guide",
+        {
+            "position_size_shares": 500,
+            "market_slug": "how-many-fed-rate-cuts-in-2026",
+            "outcome": "yes",
+            "side": "sell",
+            "max_price_impact_pct_per_slice": 1.0,
+        },
+        note="market_slug가 오래됐으면 404/빈 응답 가능 - 최신 슬러그로 교체 필요 (exit_capacity_audit와 동일 슬러그 재사용)",
+    ),
     # --- 예측시장 (Hyperliquid HIP-4) ---
     EndpointCall(
         "prediction.hip4_snapshot", "GET", "/v1/prediction/hip4-snapshot", {"limit": 20}
@@ -215,7 +228,12 @@ ENDPOINTS: list[EndpointCall] = [
 # - prediction.exit_capacity_audit: 테스트 스크립트의 event_slug/market_slug 기본값이
 #   같은 문자열을 재사용해서 생기는 레벨 불일치 - 서버 버그 아님
 #   (claude/session-log-2026-10-01-call-all-endpoints-smoke-test.md 참고).
-KNOWN_EXPECTED_FAILURES: set[str] = {"prediction.exit_capacity_audit"}
+# - prediction.order_split_guide: exit_capacity_audit와 동일한 market_slug를
+#   재사용하므로 같은 이유로 실패 가능 - 서버 버그 아님.
+KNOWN_EXPECTED_FAILURES: set[str] = {
+    "prediction.exit_capacity_audit",
+    "prediction.order_split_guide",
+}
 
 HIP4_SUBSCRIBE_ENDPOINT = EndpointCall(
     "prediction.hip4_alerts_subscribe",

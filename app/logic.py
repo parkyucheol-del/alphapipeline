@@ -2579,6 +2579,187 @@ async def get_exit_capacity_audit(
 
 
 # ============================================================================
+# prediction.order_split_guide (2026-10-18) - Phase 2 두 번째 항목(TWAP/VWAP
+# 분할 가이드), Wave 2 동결 해제 후 두 번째 신규 유료 엔드포인트.
+# architecture-roadmap.md: "대형 포지션 진입 시 예상되는 호가 충격 분산용
+# 통계 파라미터(추천 분할 단위 수치) 제공. 순수 읽기 전용, 정성적 판단 없음."
+#
+# exit_capacity_audit()와 완전히 같은 오더북 호출/파싱 헬퍼(_parse_book_levels,
+# _market_token_id_for_outcome)를 재사용한다 - 신규 업스트림 연동 없음. 차이는
+# "이 수량이 지금 체결 가능한가"가 아니라 "한 클립당 가격충격을 임계값 이하로
+# 유지하려면 몇 클립으로 쪼개야 하는가"를 묻는 것.
+#
+# 중요한 정직성 caveat: 이건 단일 스냅샷 오더북 계산이라, 클립 사이에 호가창이
+# 다시 채워질지는 전혀 모른다(시계열 폴러 인프라가 없다는 이 프로젝트의 기존
+# 원칙과 동일한 이유로 측정하지 않음). max_single_clip_shares는 "지금 이
+# 스냅샷을 그대로 다시 본다면" 기준의 상한선일 뿐, 실제 체결 시점에는 호가가
+# 바뀌어 있을 수 있다 - notice에 항상 명시한다.
+# ============================================================================
+
+_ORDER_SPLIT_GUIDE_NOTICE = (
+    "Single-snapshot order-book calculation - it has no idea whether the book "
+    "refills between clips in real trading, so max_single_clip_shares and the "
+    "recommended slice count are only valid 'if you replayed this exact "
+    "snapshot repeatedly', not a guarantee about live execution. executable_now "
+    "mirrors exit_capacity_audit's definition for the full position_size_shares "
+    "on this same book. Not investment advice - no confidence or go/no-go field "
+    "is returned, only the raw numbers."
+)
+
+
+async def get_order_split_guide(
+    position_size_shares: float,
+    token_id: str | None = None,
+    market_slug: str | None = None,
+    outcome: str = "yes",
+    side: str = "sell",
+    max_price_impact_pct_per_slice: float = 1.0,
+) -> dict:
+    """
+    Polymarket 오더북을 걸어서, 지정한 포지션을 한 클립당 가격충격
+    max_price_impact_pct_per_slice % 이하로 유지하며 체결하려면 몇 클립으로
+    나눠야 하는지 계산한다. exit_capacity_audit()와 같은 오더북 조회/해석
+    헬퍼를 재사용 - 신규 업스트림 호출 없음. GET /v1/prediction/order-split-guide
+    가 사용한다 (main.py 참고).
+    """
+    if position_size_shares is None or position_size_shares <= 0:
+        raise ValueError("position_size_shares는 0보다 큰 값이어야 합니다")
+    if max_price_impact_pct_per_slice is None or max_price_impact_pct_per_slice <= 0:
+        raise ValueError("max_price_impact_pct_per_slice는 0보다 큰 값이어야 합니다")
+    if not token_id and not market_slug:
+        raise ValueError("token_id 또는 market_slug(정확한 Polymarket 마켓 slug) 중 하나는 필요합니다")
+
+    resolved_token_id = str(token_id).strip() if token_id else None
+    if not resolved_token_id:
+        market = await ds.get_polymarket_market(market_slug.strip())
+        tid = _market_token_id_for_outcome(market, outcome)
+        if not tid:
+            raise ValueError(f"마켓 slug '{market_slug}'에서 '{outcome}' 토큰을 찾지 못했습니다")
+        resolved_token_id = tid
+
+    book = await ds.get_polymarket_order_book(resolved_token_id)
+    levels_raw = (book.get("bids") if side == "sell" else book.get("asks")) or []
+    levels = _parse_book_levels(levels_raw, reverse=(side == "sell"))
+
+    try:
+        book_snapshot_time = _ms_epoch_to_timestamp_pair(int(book.get("timestamp")))
+    except (TypeError, ValueError):
+        book_snapshot_time = None
+
+    if not levels:
+        return {
+            "generated_at": _timestamp_now(),
+            "token_id": resolved_token_id,
+            "market_slug": market_slug,
+            "side": side,
+            "position_size_shares": position_size_shares,
+            "max_price_impact_pct_per_slice": max_price_impact_pct_per_slice,
+            "executable_now": False,
+            "full_size_price_impact_pct": None,
+            "max_single_clip_shares": 0.0,
+            "recommended_slice_count": None,
+            "recommended_slice_size_shares": None,
+            "book_snapshot_time": book_snapshot_time,
+            "data_source": "polymarket-clob",
+            "notice": _ORDER_SPLIT_GUIDE_NOTICE
+            + f" No {'bids' if side == 'sell' else 'asks'} on the book right now - position is currently stuck.",
+        }
+
+    best_quote = levels[0]["price"]
+    target_avg_price = (
+        best_quote * (1 - max_price_impact_pct_per_slice / 100)
+        if side == "sell"
+        else best_quote * (1 + max_price_impact_pct_per_slice / 100)
+    )
+
+    cum_shares = 0.0
+    cum_notional = 0.0
+    clip_shares = 0.0
+    crossed = False
+    for level in levels:
+        price, size = level["price"], level["size"]
+        new_cum_shares = cum_shares + size
+        new_cum_notional = cum_notional + size * price
+        new_avg = new_cum_notional / new_cum_shares
+        # sell: avg should stay >= target_avg_price; buy: avg should stay <= target_avg_price.
+        within_threshold = new_avg >= target_avg_price if side == "sell" else new_avg <= target_avg_price
+        if within_threshold:
+            cum_shares, cum_notional = new_cum_shares, new_cum_notional
+            continue
+        # Threshold crosses inside this level - solve for the exact share count x
+        # (cum_notional + x*price) / (cum_shares + x) = target_avg_price
+        denom = target_avg_price - price
+        if denom == 0:
+            x = 0.0
+        else:
+            x = (cum_notional - target_avg_price * cum_shares) / denom
+        x = max(0.0, min(x, size))
+        cum_shares += x
+        cum_notional += x * price
+        crossed = True
+        break
+
+    max_single_clip_shares = min(cum_shares, position_size_shares)
+
+    # Full-size fill on this same book, for the "why split at all" baseline -
+    # same walk-and-average logic as exit_capacity_audit().
+    remaining = position_size_shares
+    full_filled_notional = 0.0
+    full_filled_shares = 0.0
+    for level in levels:
+        if remaining <= 0:
+            break
+        take = min(remaining, level["size"])
+        full_filled_notional += take * level["price"]
+        full_filled_shares += take
+        remaining -= take
+    executable_now = remaining <= 0
+    full_avg_price = (full_filled_notional / full_filled_shares) if full_filled_shares > 0 else None
+    full_impact_pct = (
+        ((best_quote - full_avg_price) / best_quote * 100) if side == "sell" and full_avg_price is not None
+        else ((full_avg_price - best_quote) / best_quote * 100) if full_avg_price is not None
+        else None
+    )
+
+    if max_single_clip_shares <= 0:
+        recommended_slice_count = None
+        recommended_slice_size_shares = None
+    elif max_single_clip_shares >= position_size_shares:
+        recommended_slice_count = 1
+        recommended_slice_size_shares = round(position_size_shares, 4)
+    else:
+        import math
+
+        recommended_slice_count = math.ceil(position_size_shares / max_single_clip_shares)
+        recommended_slice_size_shares = round(position_size_shares / recommended_slice_count, 4)
+
+    notice = _ORDER_SPLIT_GUIDE_NOTICE
+    if not crossed and max_single_clip_shares < position_size_shares:
+        notice += (
+            " The visible book doesn't have enough depth to ever cross the impact "
+            "threshold - max_single_clip_shares is capped by total visible depth, "
+            "not by the threshold itself."
+        )
+
+    return {
+        "generated_at": _timestamp_now(),
+        "token_id": resolved_token_id,
+        "market_slug": market_slug,
+        "side": side,
+        "position_size_shares": position_size_shares,
+        "max_price_impact_pct_per_slice": max_price_impact_pct_per_slice,
+        "executable_now": executable_now,
+        "full_size_price_impact_pct": round(full_impact_pct, 3) if full_impact_pct is not None else None,
+        "max_single_clip_shares": round(max_single_clip_shares, 4),
+        "recommended_slice_count": recommended_slice_count,
+        "recommended_slice_size_shares": recommended_slice_size_shares,
+        "book_snapshot_time": book_snapshot_time,
+        "data_source": "polymarket-clob",
+        "notice": notice,
+    }
+
+
+# ============================================================================
 # prediction.hip4_snapshot (2026-09-28) - 예측시장 확장 Wave 2. Hyperliquid
 # 공식 HIP-4(outcome/prediction market) 무료 info API만 쓴다(인증/지갑 불필요).
 # 상세 조사/데이터 검증 기록은 프로젝트 노트

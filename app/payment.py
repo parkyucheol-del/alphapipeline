@@ -103,6 +103,7 @@ from app.schemas import (
     DEX_SLIPPAGE_EXAMPLE,
     DUMP_RISK_EXAMPLE,
     EXIT_CAPACITY_AUDIT_EXAMPLE,
+    ORDER_SPLIT_GUIDE_EXAMPLE,
     FUNDING_APR_EXAMPLE,
     FUNDING_RATE_EXAMPLE,
     FUNDING_RATE_VALUE_EXAMPLE,
@@ -139,6 +140,7 @@ from app.schemas import (
     OracleGapBpResponse,
     OracleGapResponse,
     PredictionExitCapacityAuditResponse,
+    PredictionOrderSplitGuideResponse,
     PredictionHip4PriceLadderResponse,
     PredictionHip4SnapshotResponse,
     PredictionNegRiskArbitrageResponse,
@@ -416,6 +418,7 @@ def build_routes(
     token_diagnostic_option = _payment_option(settings.PRICE_TOKEN_DIAGNOSTIC_USDC)
     neg_risk_arbitrage_option = _payment_option(settings.PRICE_NEG_RISK_ARBITRAGE_USDC)
     exit_capacity_audit_option = _payment_option(settings.PRICE_EXIT_CAPACITY_AUDIT_USDC)
+    order_split_guide_option = _payment_option(settings.PRICE_ORDER_SPLIT_GUIDE_USDC)
     hip4_snapshot_option = _payment_option(settings.PRICE_HIP4_SNAPSHOT_USDC)
     hip4_price_ladder_option = _payment_option(settings.PRICE_HIP4_PRICE_LADDER_USDC)
     hip4_events_subscribe_option = _payment_option(settings.PRICE_HIP4_EVENTS_SUBSCRIBE_USDC)
@@ -1039,6 +1042,71 @@ def build_routes(
                 output_schema=_inline_schema_defs(PredictionExitCapacityAuditResponse.model_json_schema()),
             ),
             service_name="AlphaPipeline Exit Capacity Audit",
+            tags=["prediction-market", "polymarket", "liquidity", "pre-trade-signal"],
+        ),
+        # 2026-10-18 Phase 2 (architecture-roadmap.md "TWAP/VWAP Metrics"), Wave 2
+        # 동결 해제 후 두 번째 신규 유료 엔드포인트: exit-capacity-audit과 같은
+        # 오더북 조회/파싱 헬퍼를 재사용 - 신규 업스트림 호출 없음. 단일 스냅샷
+        # 계산이라 클립 간 호가창 리필 여부는 모른다는 caveat을 notice에 명시.
+        "GET /v1/prediction/order-split-guide": _make_route_config(
+            accepts=[order_split_guide_option],
+            mime_type="application/json",
+            description=(
+                "Walks a Polymarket outcome's live order book to recommend how many "
+                "clips to split a large position into, so each clip's own price "
+                "impact stays at or under `max_price_impact_pct_per_slice` (default "
+                "1.0%). Also returns `full_size_price_impact_pct` - the baseline "
+                "impact if filled in one shot right now, for comparison. "
+                "Single-snapshot calculation - does not know whether the book "
+                "refills between clips. Accepts either a raw token_id or a "
+                "market_slug (+ outcome). Paid in USDC on Base."
+            ),
+            resource=_resource_url("/v1/prediction/order-split-guide"),
+            extensions=_bazaar_extension(
+                input_example={
+                    "market_slug": "will-btc-hit-150k-by-2028",
+                    "outcome": "yes",
+                    "position_size_shares": 2000,
+                    "side": "sell",
+                    "max_price_impact_pct_per_slice": 1.0,
+                },
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "position_size_shares": {
+                            "type": "number",
+                            "description": "Total number of outcome shares to sell (or buy). Must be positive.",
+                        },
+                        "token_id": {
+                            "type": "string",
+                            "description": "The outcome's CLOB token_id / asset_id, if already known.",
+                        },
+                        "market_slug": {
+                            "type": "string",
+                            "description": (
+                                "Exact Polymarket market slug, used to resolve token_id "
+                                "automatically when not already known."
+                            ),
+                        },
+                        "outcome": {
+                            "type": "string",
+                            "description": "\"yes\" (default) or \"no\" - which side to resolve when using market_slug.",
+                        },
+                        "side": {
+                            "type": "string",
+                            "description": "\"sell\" (default) or \"buy\".",
+                        },
+                        "max_price_impact_pct_per_slice": {
+                            "type": "number",
+                            "description": "Target ceiling on each clip's own price impact, in percent. Defaults to 1.0.",
+                        },
+                    },
+                    "required": ["position_size_shares"],
+                },
+                output_example=ORDER_SPLIT_GUIDE_EXAMPLE,
+                output_schema=_inline_schema_defs(PredictionOrderSplitGuideResponse.model_json_schema()),
+            ),
+            service_name="AlphaPipeline Order Split Guide",
             tags=["prediction-market", "polymarket", "liquidity", "pre-trade-signal"],
         ),
         "GET /v1/prediction/hip4-snapshot": _make_route_config(

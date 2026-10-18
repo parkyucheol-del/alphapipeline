@@ -7,7 +7,7 @@ Also the exact server Glama's automated Docker build test introspects for
 this listing's "Server" score, so its tool count should track app/mcp_server.py
 (the paid remote server) 1:1 even though calls here bypass payment entirely.
 
-22 tools provided (same coverage as the paid remote /mcp server, just called
+23 tools provided (same coverage as the paid remote /mcp server, just called
 directly against app/logic.py instead of going through x402 payment):
   1.  convert_to_markdown(url)                              -> app/markdown_tool.py: url_to_markdown
   2.  get_token_dump_risk(symbol)                            -> app/logic.py: get_symbol_dump_risk
@@ -31,6 +31,7 @@ directly against app/logic.py instead of going through x402 payment):
   20. get_oracle_gap_bp(coin)                                  -> app/logic.py: get_oracle_gap_bp
   21. get_hip4_price(underlying, strike)                       -> app/logic.py: get_hip4_price
   22. get_hip4_mispricing(underlying)                           -> app/logic.py: get_hip4_mispricing
+  23. get_order_split_guide(position_size_shares, ...)            -> app/logic.py: get_order_split_guide
 
 Note (important, stated honestly):
   - This MCP server is a separate "distribution build" from the paid x402 HTTP
@@ -77,6 +78,7 @@ from app.logic import (
     get_neg_risk_arbitrage as _logic_neg_risk_arbitrage,
     get_oracle_gap as _logic_oracle_gap,
     get_oracle_gap_bp as _logic_oracle_gap_bp,
+    get_order_split_guide as _logic_order_split_guide,
     get_symbol_dump_risk,
     get_token_diagnostic as _logic_token_diagnostic,
     get_token_risk as _logic_token_risk,
@@ -803,6 +805,62 @@ async def get_hip4_mispricing(underlying: str) -> dict:
     return await _safe_call(
         "get_hip4_mispricing",
         _logic_hip4_mispricing(underlying=underlying),
+    )
+
+
+@mcp.tool(name="prediction.order_split_guide")
+async def get_order_split_guide(
+    position_size_shares: float,
+    token_id: str | None = None,
+    market_slug: str | None = None,
+    outcome: str = "yes",
+    side: str = "sell",
+    max_price_impact_pct_per_slice: float = 1.0,
+) -> dict:
+    """
+    Walks a Polymarket outcome's live order book to recommend how many clips
+    to split a large position into, so each clip's own price impact stays at
+    or under max_price_impact_pct_per_slice (default 1.0%). Also returns
+    full_size_price_impact_pct - the baseline impact if filled in one shot
+    right now, for comparison. Single-snapshot calculation - it has no idea
+    whether the book refills between clips in real trading, so treat the
+    recommended slice count as "if this exact snapshot repeated", not a
+    guarantee about live execution. Not investment advice - no confidence or
+    go/no-go field is returned, only the raw numbers.
+
+    Reuses the same order-book walking helpers as
+    prediction.exit_capacity_audit - no new upstream call. market_slug only
+    resolves an EXACT Polymarket market slug - no fuzzy keyword search.
+
+    Args:
+        position_size_shares: Total number of outcome shares to sell (or
+            buy). Must be positive.
+        token_id: The outcome's CLOB token_id / asset_id, if already known.
+            Provide either this OR market_slug.
+        market_slug: Exact Polymarket market slug, used to resolve token_id
+            automatically when not already known.
+        outcome: "yes" (default) or "no" - which side to resolve when using
+            market_slug. Ignored if token_id is given directly.
+        side: "sell" (default) or "buy".
+        max_price_impact_pct_per_slice: Target ceiling on each clip's own
+            price impact, in percent. Defaults to 1.0.
+
+    Returns:
+        On success: {"success": true, "executable_now",
+            "full_size_price_impact_pct", "max_single_clip_shares",
+            "recommended_slice_count", "recommended_slice_size_shares", ...}
+        On failure: {"success": false, "error": {"type", "message"}}
+    """
+    return await _safe_call(
+        "get_order_split_guide",
+        _logic_order_split_guide(
+            position_size_shares=position_size_shares,
+            token_id=token_id,
+            market_slug=market_slug,
+            outcome=outcome,
+            side=side,
+            max_price_impact_pct_per_slice=max_price_impact_pct_per_slice,
+        ),
     )
 
 

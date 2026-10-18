@@ -1204,6 +1204,60 @@ EXIT_CAPACITY_AUDIT_EXAMPLE = {
 }
 
 
+# 2026-10-18 Phase 2 두 번째 항목 (architecture-roadmap.md "TWAP/VWAP Metrics")
+# - exit_capacity_audit와 같은 Polymarket 오더북 데이터를 재사용. 신규
+# 업스트림 의존성 없음. app/logic.py의 get_order_split_guide 참고.
+class PredictionOrderSplitGuideResponse(BaseModel):
+    generated_at: TimestampPair
+    token_id: str
+    market_slug: str | None = None
+    side: str
+    position_size_shares: float
+    max_price_impact_pct_per_slice: float
+    executable_now: bool = Field(
+        description="Whether the FULL position_size_shares fills on this same book right now, same definition as exit_capacity_audit's `executable`."
+    )
+    full_size_price_impact_pct: float | None = Field(
+        default=None,
+        description="Price impact if the whole position were filled in one shot on this book right now - the baseline that splitting is meant to improve on.",
+    )
+    max_single_clip_shares: float = Field(
+        description="The largest single clip, from this snapshot's best price, that keeps price impact at or under max_price_impact_pct_per_slice."
+    )
+    recommended_slice_count: int | None = Field(
+        default=None, description="ceil(position_size_shares / max_single_clip_shares). Null if the book has no depth at all."
+    )
+    recommended_slice_size_shares: float | None = Field(
+        default=None, description="position_size_shares / recommended_slice_count, i.e. an even split."
+    )
+    book_snapshot_time: TimestampPair | None = None
+    data_source: str
+    notice: str | None = None
+
+
+ORDER_SPLIT_GUIDE_EXAMPLE = {
+    "generated_at": {"utc": "2026-10-18T12:00:00Z", "kst": "2026-10-18 21:00:00 KST"},
+    "token_id": "78901234567890123456789012345678901234567890123456789012345678",
+    "market_slug": "will-btc-hit-150k-by-2028",
+    "side": "sell",
+    "position_size_shares": 2000.0,
+    "max_price_impact_pct_per_slice": 1.0,
+    "executable_now": True,
+    "full_size_price_impact_pct": 4.1,
+    "max_single_clip_shares": 500.0,
+    "recommended_slice_count": 4,
+    "recommended_slice_size_shares": 500.0,
+    "book_snapshot_time": {"utc": "2026-10-18T11:59:59Z", "kst": "2026-10-18 20:59:59 KST"},
+    "data_source": "polymarket-clob",
+    "notice": (
+        "Single-snapshot order-book calculation - it has no idea whether the book refills "
+        "between clips in real trading, so max_single_clip_shares and the recommended slice "
+        "count are only valid 'if you replayed this exact snapshot repeatedly', not a "
+        "guarantee about live execution. Not investment advice."
+    ),
+}
+
+
 class Hip4Side(BaseModel):
     name: str = Field(description="Side label - usually 'Yes'/'No', sometimes a competitor's short name.")
     price: float | None = Field(

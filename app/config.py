@@ -189,6 +189,12 @@ class Settings:
     # 업스트림 호출 없음 - get_hip4_price_ladder()와 같은 캐시 재사용.
     PRICE_HIP4_MISPRICING_USDC: float = float(os.getenv("PRICE_HIP4_MISPRICING_USDC", "0.02"))
 
+    # ===== 2026-10-18 Phase 2 두 번째 항목: prediction.order_split_guide =====
+    # "주문 분할 정량 가이드 (TWAP/VWAP Metrics)". exit_capacity_audit와 같은
+    # Polymarket 오더북 호출/파싱 헬퍼를 재사용 - 신규 업스트림 호출 없음.
+    # 가격도 exit_capacity_audit과 동일 티어로 맞춤.
+    PRICE_ORDER_SPLIT_GUIDE_USDC: float = float(os.getenv("PRICE_ORDER_SPLIT_GUIDE_USDC", "0.02"))
+
     # ===== x402 공식 결제 레이어 (Coinbase CDP Facilitator) =====
     # Coinbase Developer Platform(https://portal.cdp.coinbase.com)에서 발급받는 API 키.
     # 둘 다 채워지면 CDP Facilitator(메인넷 실결제 검증/정산)를 쓰고,

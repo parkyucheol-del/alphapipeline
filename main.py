@@ -21,6 +21,7 @@ from app.logic import (
     get_dex_liquidity_slippage,
     get_dump_risk,
     get_exit_capacity_audit,
+    get_order_split_guide,
     get_funding_apr_matrix,
     get_funding_rate,
     get_funding_rate_value,
@@ -65,6 +66,7 @@ from app.schemas import (
     OracleGapBpResponse,
     OracleGapResponse,
     PredictionExitCapacityAuditResponse,
+    PredictionOrderSplitGuideResponse,
     PredictionHip4PriceLadderResponse,
     PredictionHip4SnapshotResponse,
     PredictionNegRiskArbitrageResponse,
@@ -269,6 +271,7 @@ async def root(request: Request):
             "/v1/arb/spread-matrix": settings.PRICE_ARB_SPREAD_USDC,
             "/v1/prediction/neg-risk-arbitrage": settings.PRICE_NEG_RISK_ARBITRAGE_USDC,
             "/v1/prediction/exit-capacity-audit": settings.PRICE_EXIT_CAPACITY_AUDIT_USDC,
+            "/v1/prediction/order-split-guide": settings.PRICE_ORDER_SPLIT_GUIDE_USDC,
             "/v1/prediction/hip4-snapshot": settings.PRICE_HIP4_SNAPSHOT_USDC,
             "/v1/prediction/hip4-price-ladder": settings.PRICE_HIP4_PRICE_LADDER_USDC,
             "/v1/prediction/hip4-price": settings.PRICE_HIP4_PRICE_USDC,
@@ -308,6 +311,7 @@ async def root(request: Request):
             "/v1/arb/spread-matrix",
             "/v1/prediction/neg-risk-arbitrage",
             "/v1/prediction/exit-capacity-audit",
+            "/v1/prediction/order-split-guide",
             "/v1/prediction/hip4-snapshot",
             "/v1/prediction/hip4-price-ladder",
             "/v1/prediction/hip4-price",
@@ -1087,6 +1091,57 @@ async def exit_capacity_audit_endpoint(
         return JSONResponse(content=data)
     except Exception as e:
         logger.exception("exit-capacity-audit 처리 실패")
+        return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
+
+
+@app.get(
+    "/v1/prediction/order-split-guide",
+    tags=["market"],
+    summary="How many clips to split a large Polymarket position into",
+    description=(
+        "Use this endpoint to walk a Polymarket outcome's live order book and recommend "
+        "how many clips to split a large position into, so each clip's own price impact "
+        "stays at or under `max_price_impact_pct_per_slice` (default 1.0%). Also returns "
+        "`full_size_price_impact_pct` - the impact if the whole position were filled in "
+        "one shot right now, as a baseline for why splitting helps. This is a "
+        "single-snapshot calculation: it has no idea whether the book refills between "
+        "clips in real trading, so treat `max_single_clip_shares` and "
+        "`recommended_slice_count` as 'if you replayed this exact snapshot repeatedly', "
+        "not a guarantee about live execution. Input: required `position_size_shares`, "
+        "and either `token_id` (if already known) or `market_slug` (+ optional "
+        "`outcome`, default 'yes') to resolve it automatically. Optional `side` ('sell' "
+        "default, or 'buy') and `max_price_impact_pct_per_slice` (default 1.0)."
+    ),
+    responses={
+        200: {"model": PredictionOrderSplitGuideResponse, "description": "Order-splitting guide result"},
+        402: {"description": "x402 payment required"},
+        502: {"model": ErrorResponse, "description": "Upstream (Polymarket) error or input error"},
+    },
+)
+async def order_split_guide_endpoint(
+    position_size_shares: float = Query(..., description="Total number of outcome shares to sell (or buy). Must be positive."),
+    token_id: str | None = Query(None, description="The outcome's CLOB token_id / asset_id, if already known"),
+    market_slug: str | None = Query(
+        None, description="Exact Polymarket market slug, used to resolve token_id automatically"
+    ),
+    outcome: str = Query("yes", description="'yes' (default) or 'no' - which side to resolve when using market_slug"),
+    side: str = Query("sell", description="'sell' (default) or 'buy'"),
+    max_price_impact_pct_per_slice: float = Query(1.0, description="Target ceiling on each clip's own price impact, in percent."),
+):
+    _t0 = time.monotonic()
+    try:
+        data = await get_order_split_guide(
+            position_size_shares=position_size_shares,
+            token_id=token_id,
+            market_slug=market_slug,
+            outcome=outcome,
+            side=side,
+            max_price_impact_pct_per_slice=max_price_impact_pct_per_slice,
+        )
+        data["latency_ms"] = round((time.monotonic() - _t0) * 1000)
+        return JSONResponse(content=data)
+    except Exception as e:
+        logger.exception("order-split-guide 처리 실패")
         return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
 
 

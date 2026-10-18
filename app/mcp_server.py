@@ -576,6 +576,35 @@ EXIT_CAPACITY_AUDIT_OUTPUT_SCHEMA = {
     ],
 }
 
+# 2026-10-18 Phase 2 (architecture-roadmap.md "TWAP/VWAP Metrics") -
+# EXIT_CAPACITY_AUDIT_OUTPUT_SCHEMA와 같은 오더북 데이터를 재사용.
+ORDER_SPLIT_GUIDE_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "generated_at": _TIMESTAMP_PAIR_SCHEMA,
+        "token_id": {"type": "string"},
+        "market_slug": {"type": ["string", "null"]},
+        "side": {"type": "string"},
+        "position_size_shares": {"type": "number"},
+        "max_price_impact_pct_per_slice": {"type": "number"},
+        "executable_now": {"type": "boolean"},
+        "full_size_price_impact_pct": {"type": ["number", "null"]},
+        "max_single_clip_shares": {"type": "number"},
+        "recommended_slice_count": {"type": ["integer", "null"]},
+        "recommended_slice_size_shares": {"type": ["number", "null"]},
+        "book_snapshot_time": {
+            "anyOf": [_TIMESTAMP_PAIR_SCHEMA, {"type": "null"}],
+        },
+        "data_source": {"type": "string"},
+        "notice": {"type": ["string", "null"]},
+    },
+    "required": [
+        "generated_at", "token_id", "side", "position_size_shares",
+        "max_price_impact_pct_per_slice", "executable_now", "max_single_clip_shares",
+        "data_source",
+    ],
+}
+
 _HIP4_SIDE_SCHEMA = {
     "type": "object",
     "properties": {
@@ -1446,6 +1475,54 @@ _TOOLS: list[dict] = [
             "required": ["position_size_shares"],
         },
         "output_schema": EXIT_CAPACITY_AUDIT_OUTPUT_SCHEMA,
+        "annotations": _READ_ONLY_ANNOTATIONS,
+    },
+    {
+        "name": "prediction.order_split_guide",
+        "path": "/v1/prediction/order-split-guide",
+        "price_attr": "PRICE_ORDER_SPLIT_GUIDE_USDC",
+        "description": (
+            "Walks a Polymarket outcome's live order book to recommend how many "
+            "clips to split a large position into, so each clip's own price "
+            "impact stays at or under max_price_impact_pct_per_slice (default "
+            "1.0%). Also returns full_size_price_impact_pct - the baseline "
+            "impact if filled in one shot right now, for comparison. "
+            "Single-snapshot calculation - it has no idea whether the book "
+            "refills between clips in real trading. Accepts either a raw "
+            "token_id or a market_slug (+ outcome) to resolve it automatically "
+            "- exact slug only, no fuzzy keyword search. Paid in USDC on Base."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "position_size_shares": {
+                    "type": "number",
+                    "description": "Total number of outcome shares to sell (or buy). Must be positive.",
+                },
+                "token_id": {
+                    "type": "string",
+                    "description": "The outcome's CLOB token_id / asset_id, if already known.",
+                },
+                "market_slug": {
+                    "type": "string",
+                    "description": "Exact Polymarket market slug, used to resolve token_id automatically.",
+                },
+                "outcome": {
+                    "type": "string",
+                    "description": "\"yes\" (default) or \"no\" - which side to resolve when using market_slug.",
+                },
+                "side": {
+                    "type": "string",
+                    "description": "\"sell\" (default) or \"buy\".",
+                },
+                "max_price_impact_pct_per_slice": {
+                    "type": "number",
+                    "description": "Target ceiling on each clip's own price impact, in percent. Defaults to 1.0.",
+                },
+            },
+            "required": ["position_size_shares"],
+        },
+        "output_schema": ORDER_SPLIT_GUIDE_OUTPUT_SCHEMA,
         "annotations": _READ_ONLY_ANNOTATIONS,
     },
     {
