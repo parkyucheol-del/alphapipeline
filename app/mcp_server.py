@@ -350,6 +350,39 @@ ORACLE_GAP_OUTPUT_SCHEMA = {
     "required": ["generated_at", "coin", "elevated", "alert_threshold_bp", "data_source"],
 }
 
+# 2026-10-18 저가 티어 - 기존 FUNDING_RATE_OUTPUT_SCHEMA/ORACLE_GAP_OUTPUT_SCHEMA의
+# 얇은 wrapper 스키마.
+FUNDING_RATE_VALUE_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "generated_at": _TIMESTAMP_PAIR_SCHEMA,
+        "symbol": {"type": "string"},
+        "funding_rate": {"type": ["number", "null"]},
+        "funding_rate_percentage": {"type": ["number", "null"]},
+        "data_source": {"type": "string"},
+        "notice": {"type": ["string", "null"]},
+    },
+    "required": ["generated_at", "symbol", "data_source"],
+}
+
+ORACLE_GAP_BP_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "generated_at": _TIMESTAMP_PAIR_SCHEMA,
+        "coin": {"type": "string"},
+        "mid_oracle_gap_bp": {"type": ["number", "null"]},
+        "mark_oracle_gap_bp": {"type": ["number", "null"]},
+        "elevated": {
+            "type": "boolean",
+            "description": "True when abs(mid_oracle_gap_bp) >= alert_threshold_bp. A fixed-threshold boolean, not a manipulation determination.",
+        },
+        "alert_threshold_bp": {"type": "number"},
+        "data_source": {"type": "string"},
+        "notice": {"type": ["string", "null"]},
+    },
+    "required": ["generated_at", "coin", "elevated", "alert_threshold_bp", "data_source"],
+}
+
 FUNDING_APR_OUTPUT_SCHEMA = {
     "type": "object",
     "properties": {
@@ -634,6 +667,26 @@ HIP4_PRICE_LADDER_OUTPUT_SCHEMA = {
         "notice": {"type": ["string", "null"]},
     },
     "required": ["generated_at", "underlying", "rung_count", "skipped_unparsable_count", "rungs", "data_source"],
+}
+
+# 2026-10-18 저가 티어 - HIP4_PRICE_LADDER_OUTPUT_SCHEMA의 얇은 wrapper
+# (전체 사다리 대신 요청한 strike에 가장 가까운 rung 하나).
+HIP4_PRICE_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "generated_at": _TIMESTAMP_PAIR_SCHEMA,
+        "underlying": {"type": "string"},
+        "requested_strike": {"type": "number"},
+        "matched_strike": {
+            "type": ["number", "null"],
+            "description": "The closest available rung's strike - NOT guaranteed to equal requested_strike.",
+        },
+        "yes_price": {"type": ["number", "null"]},
+        "expiry": {"type": ["string", "null"]},
+        "data_source": {"type": "string"},
+        "notice": {"type": ["string", "null"]},
+    },
+    "required": ["generated_at", "underlying", "requested_strike", "data_source"],
 }
 
 _CYCLE_COIN_METRICS_SCHEMA = {
@@ -1062,6 +1115,29 @@ _TOOLS: list[dict] = [
         "annotations": _READ_ONLY_ANNOTATIONS,
     },
     {
+        "name": "derivatives.funding_rate_value",
+        "path": "/v1/derivatives/funding-rate-value",
+        "price_attr": "PRICE_FUNDING_RATE_VALUE_USDC",
+        "description": (
+            "Cheapest-tier thin wrapper around derivatives.funding_rate - use this when "
+            "you only need the funding rate number itself (decimal and percentage), not "
+            "mark_price/index_price/open_interest_usd. Same Bybit-primary/Binance-"
+            "fallback data. Paid in USDC on Base."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": {
+                    "type": "string",
+                    "description": "Ticker symbol, e.g. BTC, ETH, or BTCUSDT.",
+                }
+            },
+            "required": ["symbol"],
+        },
+        "output_schema": FUNDING_RATE_VALUE_OUTPUT_SCHEMA,
+        "annotations": _READ_ONLY_ANNOTATIONS,
+    },
+    {
         "name": "derivatives.funding_apr_matrix",
         "path": "/v1/derivatives/funding-apr-matrix",
         "price_attr": "PRICE_FUNDING_APR_USDC",
@@ -1393,6 +1469,35 @@ _TOOLS: list[dict] = [
         "annotations": _READ_ONLY_ANNOTATIONS,
     },
     {
+        "name": "prediction.hip4_price",
+        "path": "/v1/prediction/hip4-price",
+        "price_attr": "PRICE_HIP4_PRICE_USDC",
+        "description": (
+            "Cheapest-tier thin wrapper around prediction.hip4_price_ladder - use this "
+            "when you only need one strike's Yes probability, not the full ladder. "
+            "Returns the single rung closest to the requested strike - check "
+            "matched_strike against your requested strike before relying on yes_price; "
+            "a large gap means no rung exists near your target (use "
+            "hip4_price_ladder to see what's actually available). Paid in USDC on Base."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "underlying": {
+                    "type": "string",
+                    "description": "Asset symbol for crypto price-binary markets (e.g. 'BTC', 'ETH', 'SOL', 'HYPE').",
+                },
+                "strike": {
+                    "type": "number",
+                    "description": "Target price to look up - the closest available rung is returned.",
+                },
+            },
+            "required": ["underlying", "strike"],
+        },
+        "output_schema": HIP4_PRICE_OUTPUT_SCHEMA,
+        "annotations": _READ_ONLY_ANNOTATIONS,
+    },
+    {
         "name": "market.cycle_compare",
         "path": "/v1/market/cycle-compare",
         "price_attr": "PRICE_CYCLE_COMPARE_USDC",
@@ -1428,6 +1533,26 @@ _TOOLS: list[dict] = [
             "required": ["coin"],
         },
         "output_schema": ORACLE_GAP_OUTPUT_SCHEMA,
+        "annotations": _READ_ONLY_ANNOTATIONS,
+    },
+    {
+        "name": "market.oracle_gap_bp",
+        "path": "/v1/market/oracle-gap-bp",
+        "price_attr": "PRICE_ORACLE_GAP_BP_USDC",
+        "description": (
+            "Cheapest-tier thin wrapper around market.oracle_gap - use this when you "
+            "only need mid_oracle_gap_bp/mark_oracle_gap_bp and the elevated flag, not "
+            "the absolute mid/mark/oracle prices. Same Hyperliquid data. Paid in USDC "
+            "on Base."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "coin": {"type": "string", "description": "Hyperliquid perpetual ticker, e.g. ETH or BTC."}
+            },
+            "required": ["coin"],
+        },
+        "output_schema": ORACLE_GAP_BP_OUTPUT_SCHEMA,
         "annotations": _READ_ONLY_ANNOTATIONS,
     },
     {

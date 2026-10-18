@@ -23,12 +23,15 @@ from app.logic import (
     get_exit_capacity_audit,
     get_funding_apr_matrix,
     get_funding_rate,
+    get_funding_rate_value,
+    get_hip4_price,
     get_hip4_price_ladder,
     get_hip4_snapshot,
     get_kimchi_alert,
     get_macro_calendar_dday,
     get_neg_risk_arbitrage,
     get_oracle_gap,
+    get_oracle_gap_bp,
     get_token_authenticity,
     get_token_diagnostic,
     get_token_prescreen,
@@ -49,12 +52,15 @@ from app.schemas import (
     ErrorResponse,
     FundingAprMatrixResponse,
     FundingRateResponse,
+    FundingRateValueResponse,
     Hip4AlertsSubscribeResponse,
     Hip4AlertsUnsubscribeRequest,
     Hip4AlertsUnsubscribeResponse,
+    Hip4PriceResponse,
     KimchiAlertResponse,
     MacroDdayResponse,
     MarkdownResponse,
+    OracleGapBpResponse,
     OracleGapResponse,
     PredictionExitCapacityAuditResponse,
     PredictionHip4PriceLadderResponse,
@@ -256,14 +262,17 @@ async def root(request: Request):
             "/v1/dex/liquidity-slippage": settings.PRICE_DEX_SLIPPAGE_USDC,
             "/v1/derivatives/whale-position-audit": settings.PRICE_WHALE_AUDIT_USDC,
             "/v1/derivatives/funding-rate": settings.PRICE_FUNDING_RATE_USDC,
+            "/v1/derivatives/funding-rate-value": settings.PRICE_FUNDING_RATE_VALUE_USDC,
             "/v1/derivatives/funding-apr-matrix": settings.PRICE_FUNDING_APR_USDC,
             "/v1/arb/spread-matrix": settings.PRICE_ARB_SPREAD_USDC,
             "/v1/prediction/neg-risk-arbitrage": settings.PRICE_NEG_RISK_ARBITRAGE_USDC,
             "/v1/prediction/exit-capacity-audit": settings.PRICE_EXIT_CAPACITY_AUDIT_USDC,
             "/v1/prediction/hip4-snapshot": settings.PRICE_HIP4_SNAPSHOT_USDC,
             "/v1/prediction/hip4-price-ladder": settings.PRICE_HIP4_PRICE_LADDER_USDC,
+            "/v1/prediction/hip4-price": settings.PRICE_HIP4_PRICE_USDC,
             "/v1/market/cycle-compare": settings.PRICE_CYCLE_COMPARE_USDC,
             "/v1/market/oracle-gap": settings.PRICE_ORACLE_GAP_USDC,
+            "/v1/market/oracle-gap-bp": settings.PRICE_ORACLE_GAP_BP_USDC,
             "/v1/calendar/macro-dday": settings.PRICE_MACRO_DDAY_USDC,
             "/v1/tools/ai-markdown": settings.PRICE_AI_MARKDOWN_USDC,
             # KIMCHI_ALERT_ENABLED/DUMP_RISK_ENABLED가 실제 과금 여부를 결정하는 것과
@@ -291,14 +300,17 @@ async def root(request: Request):
             "/v1/dex/liquidity-slippage",
             "/v1/derivatives/whale-position-audit",
             "/v1/derivatives/funding-rate",
+            "/v1/derivatives/funding-rate-value",
             "/v1/derivatives/funding-apr-matrix",
             "/v1/arb/spread-matrix",
             "/v1/prediction/neg-risk-arbitrage",
             "/v1/prediction/exit-capacity-audit",
             "/v1/prediction/hip4-snapshot",
             "/v1/prediction/hip4-price-ladder",
+            "/v1/prediction/hip4-price",
             "/v1/market/cycle-compare",
             "/v1/market/oracle-gap",
+            "/v1/market/oracle-gap-bp",
             "/v1/calendar/macro-dday",
             "/v1/tools/ai-markdown",
             "/v1/market/kimchi-alert",
@@ -705,6 +717,33 @@ async def funding_rate_endpoint(symbol: str = Query(..., description="e.g. BTC, 
 
 
 @app.get(
+    "/v1/derivatives/funding-rate-value",
+    tags=["market"],
+    summary="Cheapest-tier: just the funding rate number (no mark/index price)",
+    description=(
+        "Thin, cheapest-tier wrapper around derivatives.funding-rate - use this when you "
+        "only need the funding rate number itself (decimal and percentage), not "
+        "mark_price/index_price/open_interest_usd. Same Bybit-primary/Binance-fallback "
+        "data, same `symbol` input - see funding-rate for the fuller response and the "
+        "predicted_rate caveat (neither exchange exposes a separate forecast field). "
+        "Input: required `symbol` query parameter (e.g. BTC, ETH, or BTCUSDT)."
+    ),
+    responses={
+        200: {"model": FundingRateValueResponse, "description": "Funding rate number only"},
+        402: {"description": "x402 payment required"},
+        502: {"model": ErrorResponse, "description": "Upstream (Bybit/Binance) error"},
+    },
+)
+async def funding_rate_value_endpoint(symbol: str = Query(..., description="e.g. BTC, ETH, or BTCUSDT")):
+    try:
+        data = await get_funding_rate_value(symbol)
+        return JSONResponse(content=data)
+    except Exception as e:
+        logger.exception("funding-rate-value 처리 실패")
+        return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
+
+
+@app.get(
     "/v1/market/oracle-gap",
     tags=["market"],
     summary="Hyperliquid perpetual mid price's gap from its oracle/mark price (bp)",
@@ -739,6 +778,35 @@ async def oracle_gap_endpoint(coin: str = Query(..., description="Hyperliquid pe
         return JSONResponse(status_code=400, content={"error": "bad_request", "message": str(e)})
     except Exception as e:
         logger.exception("oracle-gap 처리 실패")
+        return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
+
+
+@app.get(
+    "/v1/market/oracle-gap-bp",
+    tags=["market"],
+    summary="Cheapest-tier: just the mid/mark-vs-oracle bp gap (no absolute prices)",
+    description=(
+        "Thin, cheapest-tier wrapper around market.oracle-gap - use this when you only "
+        "need mid_oracle_gap_bp/mark_oracle_gap_bp and the elevated flag, not the "
+        "absolute mid/mark/oracle prices. Same Hyperliquid data, same `coin` input - see "
+        "oracle-gap for the fuller response and why elevated is a fixed-threshold flag, "
+        "not a manipulation determination. Input: required `coin` query parameter "
+        "(Hyperliquid perpetual ticker, e.g. ETH or BTC)."
+    ),
+    responses={
+        200: {"model": OracleGapBpResponse, "description": "Mid/mark vs oracle bp gap only"},
+        402: {"description": "x402 payment required"},
+        502: {"model": ErrorResponse, "description": "Upstream (Hyperliquid) error"},
+    },
+)
+async def oracle_gap_bp_endpoint(coin: str = Query(..., description="Hyperliquid perpetual ticker, e.g. ETH or BTC")):
+    try:
+        data = await get_oracle_gap_bp(coin)
+        return JSONResponse(content=data)
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"error": "bad_request", "message": str(e)})
+    except Exception as e:
+        logger.exception("oracle-gap-bp 처리 실패")
         return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
 
 
@@ -1097,6 +1165,37 @@ async def hip4_price_ladder_endpoint(
         return JSONResponse(content=data)
     except Exception as e:
         logger.exception("hip4-price-ladder 처리 실패")
+        return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
+
+
+@app.get(
+    "/v1/prediction/hip4-price",
+    tags=["market"],
+    summary="Cheapest-tier: a single HIP-4 strike's Yes probability (no full ladder)",
+    description=(
+        "Thin, cheapest-tier wrapper around hip4-price-ladder - use this when you only "
+        "need one strike's Yes probability, not the full ladder. Returns the single rung "
+        "closest to the requested `strike` - check `matched_strike` against your "
+        "requested value before relying on `yes_price`; a large gap means no rung exists "
+        "near your target (use hip4-price-ladder to see what's actually available). "
+        "Input: required `underlying` (e.g. 'BTC', 'ETH', 'SOL', 'HYPE') and `strike` "
+        "(target price)."
+    ),
+    responses={
+        200: {"model": Hip4PriceResponse, "description": "Single HIP-4 rung's Yes probability"},
+        402: {"description": "x402 payment required"},
+        502: {"model": ErrorResponse, "description": "Upstream (Hyperliquid) error"},
+    },
+)
+async def hip4_price_endpoint(
+    underlying: str = Query(..., description="Asset symbol for crypto price-binary markets (e.g. 'BTC', 'ETH', 'SOL', 'HYPE')."),
+    strike: float = Query(..., description="Target price to look up - the closest available rung is returned."),
+):
+    try:
+        data = await get_hip4_price(underlying=underlying, strike=strike)
+        return JSONResponse(content=data)
+    except Exception as e:
+        logger.exception("hip4-price 처리 실패")
         return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
 
 

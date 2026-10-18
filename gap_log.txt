@@ -1,0 +1,240 @@
+19:34:41 ETH mid=2499.35 mark=2499.2 oracle=2500.3 mid-oracle=-3.8bp
+19:34:41 BTC mid=83349.5 mark=83349.0 oracle=83390.0 mid-oracle=-4.9bp
+19:34:46 ETH mid=2498.75 mark=2498.7 oracle=2499.7 mid-oracle=-3.8bp
+19:34:46 BTC mid=83366.5 mark=83350.0 oracle=83390.0 mid-oracle=-2.8bp
+19:34:51 ETH mid=2498.95 mark=2498.9 oracle=2499.94 mid-oracle=-4.0bp
+19:34:51 BTC mid=83371.5 mark=83372.0 oracle=83410.1 mid-oracle=-4.6bp
+19:34:56 ETH mid=2498.95 mark=2498.9 oracle=2499.9 mid-oracle=-3.8bp
+19:34:56 BTC mid=83371.5 mark=83372.0 oracle=83410.1 mid-oracle=-4.6bp
+19:35:01 ETH mid=2498.95 mark=2498.9 oracle=2499.9 mid-oracle=-3.8bp
+19:35:01 BTC mid=83368.5 mark=83372.0 oracle=83410.1 mid-oracle=-5.0bp
+19:35:06 ETH mid=2498.95 mark=2498.9 oracle=2499.9 mid-oracle=-3.8bp
+19:35:06 BTC mid=83358.5 mark=83364.0 oracle=83404.1 mid-oracle=-5.5bp  <-- ALERT
+19:35:11 ETH mid=2499.05 mark=2498.99 oracle=2500.04 mid-oracle=-4.0bp
+19:35:11 BTC mid=83358.5 mark=83363.0 oracle=83404.0 mid-oracle=-5.5bp  <-- ALERT
+19:35:17 ETH mid=2497.85 mark=2499.1 oracle=2500.1 mid-oracle=-9.0bp  <-- ALERT
+19:35:17 BTC mid=83350.5 mark=83363.0 oracle=83404.0 mid-oracle=-6.4bp  <-- ALERT
+19:35:22 ETH mid=2498.25 mark=2497.9 oracle=2499.2 mid-oracle=-3.8bp
+19:35:22 BTC mid=83349.5 mark=83352.0 oracle=83394.0 mid-oracle=-5.3bp  <-- ALERT
+19:35:27 ETH mid=2497.75 mark=2498.2 oracle=2499.24 mid-oracle=-6.0bp  <-- ALERT
+19:35:27 BTC mid=83345.5 mark=83352.0 oracle=83394.0 mid-oracle=-5.8bp  <-- ALERT
+19:35:32 ETH mid=2497.75 mark=2498.1 oracle=2499.1 mid-oracle=-5.4bp  <-- ALERT
+19:35:32 BTC mid=83333.5 mark=83346.0 oracle=83388.0 mid-oracle=-6.5bp  <-- ALERT
+19:35:37 ETH mid=2498.35 mark=2497.8 oracle=2498.9 mid-oracle=-2.2bp
+19:35:37 BTC mid=83339.5 mark=83343.0 oracle=83385.0 mid-oracle=-5.5bp  <-- ALERT
+19:35:43 ETH mid=2498.35 mark=2498.4 oracle=2499.4 mid-oracle=-4.2bp
+19:35:43 BTC mid=83339.5 mark=83347.0 oracle=83389.6 mid-oracle=-6.0bp  <-- ALERT
+19:35:48 ETH mid=2499.15 mark=2498.32 oracle=2499.6 mid-oracle=-1.8bp
+19:35:48 BTC mid=83368.5 mark=83361.0 oracle=83404.0 mid-oracle=-4.3bp
+19:35:53 ETH mid=2498.85 mark=2499.1 oracle=2500.14 mid-oracle=-5.2bp  <-- ALERT
+19:35:53 BTC mid=83368.5 mark=83369.0 oracle=83410.4 mid-oracle=-5.0bp  <-- ALERT
+19:35:58 ETH mid=2498.95 mark=2498.8 oracle=2499.84 mid-oracle=-3.6bp
+19:35:58 BTC mid=83368.5 mark=83370.0 oracle=83412.0 mid-oracle=-5.2bp  <-- ALERT
+19:36:03 ETH mid=2498.95 mark=2498.9 oracle=2499.98 mid-oracle=-4.1bp
+19:36:03 BTC mid=83368.5 mark=83369.0 oracle=83412.0 mid-oracle=-5.2bp  <-- ALERT
+19:36:08 ETH mid=2499.15 mark=2499.0 oracle=2500.1 mid-oracle=-3.8bp
+19:36:08 BTC mid=83368.5 mark=83369.0 oracle=83412.0 mid-oracle=-5.2bp  <-- ALERT
+19:36:13 ETH mid=2499.15 mark=2499.2 oracle=2500.4 mid-oracle=-5.0bp
+19:36:13 BTC mid=83368.5 mark=83369.0 oracle=83412.0 mid-oracle=-5.2bp  <-- ALERT
+19:36:18 ETH mid=2499.55 mark=2499.5 oracle=2500.54 mid-oracle=-4.0bp
+19:36:18 BTC mid=83376.5 mark=83373.0 oracle=83412.1 mid-oracle=-4.3bp
+19:36:24 ETH mid=2499.95 mark=2499.6 oracle=2501.0 mid-oracle=-4.2bp
+19:36:24 BTC mid=83381.5 mark=83377.0 oracle=83419.0 mid-oracle=-4.5bp
+19:36:29 ETH mid=2499.55 mark=2499.5 oracle=2500.54 mid-oracle=-4.0bp
+19:36:29 BTC mid=83369.5 mark=83370.0 oracle=83412.0 mid-oracle=-5.1bp  <-- ALERT
+19:36:34 ETH mid=2497.95 mark=2498.3 oracle=2499.2 mid-oracle=-5.0bp  <-- ALERT
+19:36:34 BTC mid=83343.5 mark=83349.0 oracle=83392.0 mid-oracle=-5.8bp  <-- ALERT
+19:36:39 ETH mid=2497.45 mark=2497.85 oracle=2499.0 mid-oracle=-6.2bp  <-- ALERT
+19:36:39 BTC mid=83335.5 mark=83345.0 oracle=83388.0 mid-oracle=-6.3bp  <-- ALERT
+19:36:44 ETH mid=2497.85 mark=2497.8 oracle=2498.95 mid-oracle=-4.4bp
+19:36:44 BTC mid=83337.5 mark=83341.0 oracle=83384.0 mid-oracle=-5.6bp  <-- ALERT
+19:36:49 ETH mid=2496.95 mark=2497.0 oracle=2498.0 mid-oracle=-4.2bp
+19:36:49 BTC mid=83320.5 mark=83327.0 oracle=83370.0 mid-oracle=-5.9bp  <-- ALERT
+19:36:54 ETH mid=2496.45 mark=2496.9 oracle=2498.0 mid-oracle=-6.2bp  <-- ALERT
+19:36:54 BTC mid=83312.5 mark=83327.0 oracle=83370.0 mid-oracle=-6.9bp  <-- ALERT
+19:36:59 ETH mid=2496.05 mark=2496.0 oracle=2497.3 mid-oracle=-5.0bp  <-- ALERT
+19:36:59 BTC mid=83308.5 mark=83309.0 oracle=83353.0 mid-oracle=-5.3bp  <-- ALERT
+19:37:05 ETH mid=2496.05 mark=2496.0 oracle=2497.39 mid-oracle=-5.4bp  <-- ALERT
+19:37:05 BTC mid=83308.5 mark=83309.0 oracle=83352.9 mid-oracle=-5.3bp  <-- ALERT
+19:37:10 ETH mid=2496.65 mark=2496.5 oracle=2497.66 mid-oracle=-4.0bp
+19:37:10 BTC mid=83312.5 mark=83311.0 oracle=83355.0 mid-oracle=-5.1bp  <-- ALERT
+19:37:15 ETH mid=2496.55 mark=2496.54 oracle=2497.61 mid-oracle=-4.2bp
+19:37:15 BTC mid=83312.5 mark=83313.0 oracle=83354.5 mid-oracle=-5.0bp  <-- ALERT
+19:37:20 ETH mid=2496.15 mark=2496.3 oracle=2497.4 mid-oracle=-5.0bp  <-- ALERT
+19:37:20 BTC mid=83302.5 mark=83307.0 oracle=83350.0 mid-oracle=-5.7bp  <-- ALERT
+19:37:25 ETH mid=2496.15 mark=2495.7 oracle=2496.8 mid-oracle=-2.6bp
+19:37:25 BTC mid=83299.5 mark=83289.0 oracle=83333.0 mid-oracle=-4.0bp
+19:37:30 ETH mid=2496.15 mark=2496.1 oracle=2497.47 mid-oracle=-5.3bp  <-- ALERT
+19:37:30 BTC mid=83299.5 mark=83299.0 oracle=83342.6 mid-oracle=-5.2bp  <-- ALERT
+19:37:35 ETH mid=2496.15 mark=2496.1 oracle=2497.34 mid-oracle=-4.8bp
+19:37:35 BTC mid=83299.5 mark=83299.0 oracle=83342.6 mid-oracle=-5.2bp  <-- ALERT
+19:37:40 ETH mid=2495.55 mark=2495.8 oracle=2496.9 mid-oracle=-5.4bp  <-- ALERT
+19:37:40 BTC mid=83277.5 mark=83299.0 oracle=83337.0 mid-oracle=-7.1bp  <-- ALERT
+19:37:46 ETH mid=2495.55 mark=2495.5 oracle=2496.7 mid-oracle=-4.6bp
+19:37:46 BTC mid=83277.5 mark=83288.0 oracle=83331.9 mid-oracle=-6.5bp  <-- ALERT
+19:37:51 ETH mid=2495.95 mark=2495.9 oracle=2496.97 mid-oracle=-4.1bp
+19:37:51 BTC mid=83280.5 mark=83286.6 oracle=83329.8 mid-oracle=-5.9bp  <-- ALERT
+19:37:56 ETH mid=2496.55 mark=2495.9 oracle=2497.23 mid-oracle=-2.7bp
+19:37:56 BTC mid=83292.5 mark=83288.0 oracle=83333.0 mid-oracle=-4.9bp
+19:38:01 ETH mid=2496.05 mark=2496.5 oracle=2497.78 mid-oracle=-6.9bp  <-- ALERT
+19:38:01 BTC mid=83296.5 mark=83297.0 oracle=83339.6 mid-oracle=-5.2bp  <-- ALERT
+19:38:06 ETH mid=2495.35 mark=2495.4 oracle=2496.38 mid-oracle=-4.1bp
+19:38:06 BTC mid=83280.5 mark=83288.0 oracle=83332.0 mid-oracle=-6.2bp  <-- ALERT
+19:38:11 ETH mid=2494.95 mark=2495.25 oracle=2496.34 mid-oracle=-5.6bp  <-- ALERT
+19:38:11 BTC mid=83280.5 mark=83287.0 oracle=83331.1 mid-oracle=-6.1bp  <-- ALERT
+19:38:16 ETH mid=2494.95 mark=2495.0 oracle=2496.08 mid-oracle=-4.5bp
+19:38:16 BTC mid=83286.5 mark=83286.0 oracle=83328.8 mid-oracle=-5.1bp  <-- ALERT
+19:38:21 ETH mid=2495.55 mark=2495.2 oracle=2496.3 mid-oracle=-3.0bp
+19:38:21 BTC mid=83304.5 mark=83298.0 oracle=83337.0 mid-oracle=-3.9bp
+19:38:26 ETH mid=2495.75 mark=2495.7 oracle=2496.82 mid-oracle=-4.3bp
+19:38:26 BTC mid=83304.5 mark=83305.0 oracle=83346.8 mid-oracle=-5.1bp  <-- ALERT
+19:38:32 ETH mid=2495.95 mark=2495.9 oracle=2496.98 mid-oracle=-4.1bp
+19:38:32 BTC mid=83313.5 mark=83313.0 oracle=83352.0 mid-oracle=-4.6bp
+19:38:37 ETH mid=2495.95 mark=2496.0 oracle=2497.1 mid-oracle=-4.6bp
+19:38:37 BTC mid=83313.5 mark=83313.0 oracle=83354.0 mid-oracle=-4.9bp
+19:38:42 ETH mid=2495.95 mark=2495.9 oracle=2497.1 mid-oracle=-4.6bp
+19:38:42 BTC mid=83317.5 mark=83313.6 oracle=83356.0 mid-oracle=-4.6bp
+19:38:47 ETH mid=2496.95 mark=2496.2 oracle=2497.4 mid-oracle=-1.8bp
+19:38:47 BTC mid=83343.5 mark=83318.0 oracle=83362.0 mid-oracle=-2.2bp
+19:38:52 ETH mid=2496.65 mark=2496.9 oracle=2498.0 mid-oracle=-5.4bp  <-- ALERT
+19:38:52 BTC mid=83324.5 mark=83330.0 oracle=83373.0 mid-oracle=-5.8bp  <-- ALERT
+19:38:57 ETH mid=2496.65 mark=2496.7 oracle=2497.9 mid-oracle=-5.0bp  <-- ALERT
+19:38:57 BTC mid=83324.5 mark=83325.0 oracle=83367.4 mid-oracle=-5.1bp  <-- ALERT
+19:39:02 ETH mid=2496.65 mark=2496.64 oracle=2497.9 mid-oracle=-5.0bp  <-- ALERT
+19:39:02 BTC mid=83329.5 mark=83325.0 oracle=83368.0 mid-oracle=-4.6bp
+19:39:07 ETH mid=2496.65 mark=2496.82 oracle=2498.0 mid-oracle=-5.4bp  <-- ALERT
+19:39:07 BTC mid=83329.5 mark=83329.0 oracle=83371.1 mid-oracle=-5.0bp
+19:39:13 ETH mid=2496.65 mark=2496.9 oracle=2498.0 mid-oracle=-5.4bp  <-- ALERT
+19:39:13 BTC mid=83329.5 mark=83330.0 oracle=83371.1 mid-oracle=-5.0bp
+19:39:18 ETH mid=2496.75 mark=2496.9 oracle=2498.0 mid-oracle=-5.0bp  <-- ALERT
+19:39:18 BTC mid=83329.5 mark=83329.0 oracle=83371.1 mid-oracle=-5.0bp
+19:39:23 ETH mid=2496.75 mark=2497.1 oracle=2498.3 mid-oracle=-6.2bp  <-- ALERT
+19:39:23 BTC mid=83330.5 mark=83333.0 oracle=83376.0 mid-oracle=-5.5bp  <-- ALERT
+19:39:28 ETH mid=2496.75 mark=2496.9 oracle=2498.1 mid-oracle=-5.4bp  <-- ALERT
+19:39:28 BTC mid=83330.5 mark=83332.0 oracle=83375.0 mid-oracle=-5.3bp  <-- ALERT
+19:39:33 ETH mid=2496.75 mark=2496.8 oracle=2498.1 mid-oracle=-5.4bp  <-- ALERT
+19:39:33 BTC mid=83330.5 mark=83332.0 oracle=83375.0 mid-oracle=-5.3bp  <-- ALERT
+19:39:38 ETH mid=2496.75 mark=2496.96 oracle=2498.1 mid-oracle=-5.4bp  <-- ALERT
+19:39:38 BTC mid=83335.5 mark=83341.0 oracle=83382.0 mid-oracle=-5.6bp  <-- ALERT
+19:39:43 ETH mid=2496.75 mark=2496.8 oracle=2497.98 mid-oracle=-4.9bp
+19:39:43 BTC mid=83330.5 mark=83334.0 oracle=83377.0 mid-oracle=-5.6bp  <-- ALERT
+19:39:48 ETH mid=2496.75 mark=2496.8 oracle=2497.98 mid-oracle=-4.9bp
+19:39:48 BTC mid=83330.5 mark=83334.6 oracle=83377.1 mid-oracle=-5.6bp  <-- ALERT
+19:39:54 ETH mid=2496.75 mark=2496.8 oracle=2498.0 mid-oracle=-5.0bp  <-- ALERT
+19:39:54 BTC mid=83330.5 mark=83334.0 oracle=83378.0 mid-oracle=-5.7bp  <-- ALERT
+19:39:59 ETH mid=2495.75 mark=2496.7 oracle=2497.62 mid-oracle=-7.5bp  <-- ALERT
+19:39:59 BTC mid=83310.5 mark=83331.0 oracle=83367.0 mid-oracle=-6.8bp  <-- ALERT
+19:40:04 ETH mid=2495.75 mark=2495.8 oracle=2496.98 mid-oracle=-4.9bp
+19:40:04 BTC mid=83308.5 mark=83312.0 oracle=83356.0 mid-oracle=-5.7bp  <-- ALERT
+19:40:09 ETH mid=2495.65 mark=2495.7 oracle=2496.82 mid-oracle=-4.7bp
+19:40:09 BTC mid=83305.5 mark=83306.0 oracle=83348.8 mid-oracle=-5.2bp  <-- ALERT
+19:40:15 ETH mid=2495.65 mark=2495.7 oracle=2496.82 mid-oracle=-4.7bp
+19:40:15 BTC mid=83315.5 mark=83315.0 oracle=83356.0 mid-oracle=-4.9bp
+19:40:20 ETH mid=2495.75 mark=2495.7 oracle=2497.07 mid-oracle=-5.3bp  <-- ALERT
+19:40:20 BTC mid=83315.5 mark=83315.0 oracle=83357.8 mid-oracle=-5.1bp  <-- ALERT
+19:40:25 ETH mid=2496.75 mark=2496.7 oracle=2497.83 mid-oracle=-4.3bp
+19:40:25 BTC mid=83330.5 mark=83330.0 oracle=83370.0 mid-oracle=-4.7bp
+19:40:30 ETH mid=2496.75 mark=2496.7 oracle=2497.9 mid-oracle=-4.6bp
+19:40:30 BTC mid=83356.5 mark=83331.0 oracle=83374.0 mid-oracle=-2.1bp
+19:40:35 ETH mid=2497.75 mark=2497.7 oracle=2498.98 mid-oracle=-4.9bp
+19:40:35 BTC mid=83362.5 mark=83362.0 oracle=83402.0 mid-oracle=-4.7bp
+19:40:40 ETH mid=2498.05 mark=2497.8 oracle=2498.98 mid-oracle=-3.7bp
+19:40:40 BTC mid=83370.5 mark=83364.0 oracle=83402.4 mid-oracle=-3.8bp
+19:40:45 ETH mid=2498.05 mark=2498.1 oracle=2499.36 mid-oracle=-5.2bp  <-- ALERT
+19:40:45 BTC mid=83366.5 mark=83374.0 oracle=83412.0 mid-oracle=-5.5bp  <-- ALERT
+19:40:50 ETH mid=2497.45 mark=2497.7 oracle=2498.9 mid-oracle=-5.8bp  <-- ALERT
+19:40:50 BTC mid=83361.5 mark=83365.0 oracle=83408.0 mid-oracle=-5.6bp  <-- ALERT
+19:40:56 ETH mid=2497.45 mark=2497.5 oracle=2498.8 mid-oracle=-5.4bp  <-- ALERT
+19:40:56 BTC mid=83358.5 mark=83364.0 oracle=83407.0 mid-oracle=-5.8bp  <-- ALERT
+19:41:01 ETH mid=2497.45 mark=2497.5 oracle=2498.79 mid-oracle=-5.4bp  <-- ALERT
+19:41:01 BTC mid=83358.5 mark=83363.0 oracle=83406.0 mid-oracle=-5.7bp  <-- ALERT
+19:41:06 ETH mid=2497.45 mark=2497.5 oracle=2498.76 mid-oracle=-5.2bp  <-- ALERT
+19:41:06 BTC mid=83358.5 mark=83363.0 oracle=83406.0 mid-oracle=-5.7bp  <-- ALERT
+19:41:11 ETH mid=2496.85 mark=2497.0 oracle=2498.28 mid-oracle=-5.7bp  <-- ALERT
+19:41:11 BTC mid=83349.5 mark=83352.0 oracle=83395.0 mid-oracle=-5.5bp  <-- ALERT
+19:41:16 ETH mid=2496.95 mark=2497.02 oracle=2498.28 mid-oracle=-5.3bp  <-- ALERT
+19:41:16 BTC mid=83348.5 mark=83352.0 oracle=83395.0 mid-oracle=-5.6bp  <-- ALERT
+19:41:21 ETH mid=2497.45 mark=2497.1 oracle=2498.3 mid-oracle=-3.4bp
+19:41:21 BTC mid=83348.5 mark=83351.0 oracle=83395.0 mid-oracle=-5.6bp  <-- ALERT
+19:41:26 ETH mid=2497.45 mark=2497.5 oracle=2498.86 mid-oracle=-5.6bp  <-- ALERT
+19:41:26 BTC mid=83348.5 mark=83351.0 oracle=83395.0 mid-oracle=-5.6bp  <-- ALERT
+19:41:31 ETH mid=2495.95 mark=2496.8 oracle=2497.8 mid-oracle=-7.4bp  <-- ALERT
+19:41:31 BTC mid=83327.5 mark=83333.0 oracle=83375.9 mid-oracle=-5.8bp  <-- ALERT
+19:41:36 ETH mid=2495.95 mark=2496.0 oracle=2497.15 mid-oracle=-4.8bp
+19:41:36 BTC mid=83317.5 mark=83321.0 oracle=83362.0 mid-oracle=-5.3bp  <-- ALERT
+19:41:42 ETH mid=2495.95 mark=2496.0 oracle=2497.15 mid-oracle=-4.8bp
+19:41:42 BTC mid=83314.5 mark=83318.0 oracle=83361.9 mid-oracle=-5.7bp  <-- ALERT
+19:41:47 ETH mid=2495.95 mark=2496.0 oracle=2497.15 mid-oracle=-4.8bp
+19:41:47 BTC mid=83314.5 mark=83315.5 oracle=83358.4 mid-oracle=-5.3bp  <-- ALERT
+19:41:52 ETH mid=2496.75 mark=2496.7 oracle=2497.85 mid-oracle=-4.4bp
+19:41:52 BTC mid=83331.5 mark=83327.0 oracle=83370.0 mid-oracle=-4.6bp
+19:41:57 ETH mid=2496.75 mark=2496.88 oracle=2498.18 mid-oracle=-5.7bp  <-- ALERT
+19:41:57 BTC mid=83335.5 mark=83336.0 oracle=83376.0 mid-oracle=-4.9bp
+19:42:02 ETH mid=2496.75 mark=2496.96 oracle=2498.16 mid-oracle=-5.6bp  <-- ALERT
+19:42:02 BTC mid=83339.5 mark=83339.0 oracle=83380.0 mid-oracle=-4.9bp
+19:42:07 ETH mid=2496.95 mark=2497.0 oracle=2498.3 mid-oracle=-5.4bp  <-- ALERT
+19:42:07 BTC mid=83339.5 mark=83344.9 oracle=83387.7 mid-oracle=-5.8bp  <-- ALERT
+19:42:12 ETH mid=2496.95 mark=2497.0 oracle=2498.4 mid-oracle=-5.8bp  <-- ALERT
+19:42:12 BTC mid=83339.5 mark=83344.0 oracle=83387.7 mid-oracle=-5.8bp  <-- ALERT
+19:42:17 ETH mid=2496.65 mark=2496.7 oracle=2497.9 mid-oracle=-5.0bp  <-- ALERT
+19:42:17 BTC mid=83338.5 mark=83340.0 oracle=83384.0 mid-oracle=-5.5bp  <-- ALERT
+19:42:22 ETH mid=2495.75 mark=2495.8 oracle=2497.1 mid-oracle=-5.4bp  <-- ALERT
+19:42:22 BTC mid=83319.5 mark=83331.0 oracle=83367.0 mid-oracle=-5.7bp  <-- ALERT
+19:42:28 ETH mid=2495.05 mark=2495.7 oracle=2497.0 mid-oracle=-7.8bp  <-- ALERT
+19:42:28 BTC mid=83314.5 mark=83323.0 oracle=83367.0 mid-oracle=-6.3bp  <-- ALERT
+19:42:33 ETH mid=2495.45 mark=2495.42 oracle=2496.6 mid-oracle=-4.6bp
+19:42:33 BTC mid=83314.5 mark=83314.0 oracle=83355.1 mid-oracle=-4.9bp
+19:42:38 ETH mid=2495.55 mark=2495.6 oracle=2496.89 mid-oracle=-5.4bp  <-- ALERT
+19:42:38 BTC mid=83314.5 mark=83315.0 oracle=83357.4 mid-oracle=-5.1bp  <-- ALERT
+19:42:43 ETH mid=2494.15 mark=2494.2 oracle=2495.37 mid-oracle=-4.9bp
+19:42:43 BTC mid=83300.5 mark=83304.0 oracle=83344.0 mid-oracle=-5.2bp  <-- ALERT
+19:42:48 ETH mid=2494.75 mark=2494.5 oracle=2495.87 mid-oracle=-4.5bp
+19:42:48 BTC mid=83300.5 mark=83300.4 oracle=83342.0 mid-oracle=-5.0bp
+19:42:53 ETH mid=2494.25 mark=2494.3 oracle=2495.7 mid-oracle=-5.8bp  <-- ALERT
+19:42:53 BTC mid=83296.5 mark=83296.0 oracle=83339.0 mid-oracle=-5.1bp  <-- ALERT
+19:42:58 ETH mid=2494.15 mark=2494.1 oracle=2495.4 mid-oracle=-5.0bp  <-- ALERT
+19:42:58 BTC mid=83296.5 mark=83297.0 oracle=83334.0 mid-oracle=-4.5bp
+19:43:03 ETH mid=2493.95 mark=2494.1 oracle=2495.28 mid-oracle=-5.3bp  <-- ALERT
+19:43:03 BTC mid=83285.5 mark=83296.0 oracle=83333.4 mid-oracle=-5.7bp  <-- ALERT
+19:43:08 ETH mid=2493.65 mark=2493.6 oracle=2494.94 mid-oracle=-5.2bp  <-- ALERT
+19:43:08 BTC mid=83283.5 mark=83285.8 oracle=83328.7 mid-oracle=-5.4bp  <-- ALERT
+19:43:14 ETH mid=2493.65 mark=2493.6 oracle=2494.88 mid-oracle=-4.9bp
+19:43:14 BTC mid=83283.5 mark=83285.0 oracle=83328.0 mid-oracle=-5.3bp  <-- ALERT
+19:43:19 ETH mid=2493.05 mark=2493.5 oracle=2494.6 mid-oracle=-6.2bp  <-- ALERT
+19:43:19 BTC mid=83280.5 mark=83281.0 oracle=83325.0 mid-oracle=-5.3bp  <-- ALERT
+19:43:24 ETH mid=2491.75 mark=2492.3 oracle=2493.3 mid-oracle=-6.2bp  <-- ALERT
+19:43:24 BTC mid=83250.5 mark=83269.0 oracle=83313.0 mid-oracle=-7.5bp  <-- ALERT
+19:43:29 ETH mid=2492.65 mark=2492.4 oracle=2493.58 mid-oracle=-3.7bp
+19:43:29 BTC mid=83258.5 mark=83262.6 oracle=83305.7 mid-oracle=-5.7bp  <-- ALERT
+19:43:34 ETH mid=2492.65 mark=2492.62 oracle=2493.91 mid-oracle=-5.1bp  <-- ALERT
+19:43:34 BTC mid=83261.5 mark=83266.8 oracle=83309.9 mid-oracle=-5.8bp  <-- ALERT
+19:43:39 ETH mid=2493.45 mark=2492.8 oracle=2494.1 mid-oracle=-2.6bp
+19:43:39 BTC mid=83264.5 mark=83263.8 oracle=83307.1 mid-oracle=-5.1bp  <-- ALERT
+19:43:44 ETH mid=2493.45 mark=2493.4 oracle=2494.6 mid-oracle=-4.6bp
+19:43:44 BTC mid=83258.5 mark=83267.0 oracle=83311.0 mid-oracle=-6.3bp  <-- ALERT
+19:43:49 ETH mid=2491.75 mark=2493.4 oracle=2494.1 mid-oracle=-9.4bp  <-- ALERT
+19:43:49 BTC mid=83241.5 mark=83251.0 oracle=83293.0 mid-oracle=-6.2bp  <-- ALERT
+19:43:55 ETH mid=2491.65 mark=2491.7 oracle=2492.88 mid-oracle=-4.9bp
+19:43:55 BTC mid=83210.5 mark=83214.0 oracle=83259.0 mid-oracle=-5.8bp  <-- ALERT
+19:44:00 ETH mid=2491.05 mark=2491.1 oracle=2492.31 mid-oracle=-5.1bp  <-- ALERT
+19:44:00 BTC mid=83203.5 mark=83210.0 oracle=83253.9 mid-oracle=-6.1bp  <-- ALERT
+19:44:05 ETH mid=2491.45 mark=2491.1 oracle=2492.29 mid-oracle=-3.4bp
+19:44:05 BTC mid=83203.5 mark=83209.0 oracle=83253.9 mid-oracle=-6.1bp  <-- ALERT
+19:44:10 ETH mid=2492.35 mark=2492.3 oracle=2493.49 mid-oracle=-4.6bp
+19:44:10 BTC mid=83233.5 mark=83230.9 oracle=83276.0 mid-oracle=-5.1bp  <-- ALERT
+19:44:15 ETH mid=2491.95 mark=2492.1 oracle=2493.0 mid-oracle=-4.2bp
+19:44:15 BTC mid=83221.5 mark=83233.0 oracle=83265.0 mid-oracle=-5.2bp  <-- ALERT
+19:44:20 ETH mid=2492.35 mark=2492.3 oracle=2493.49 mid-oracle=-4.6bp
+19:44:20 BTC mid=83229.5 mark=83228.0 oracle=83272.7 mid-oracle=-5.2bp  <-- ALERT
+19:44:25 ETH mid=2491.85 mark=2491.9 oracle=2493.13 mid-oracle=-5.1bp  <-- ALERT
+19:44:25 BTC mid=83216.5 mark=83219.0 oracle=83263.0 mid-oracle=-5.6bp  <-- ALERT
+19:44:30 ETH mid=2491.85 mark=2491.9 oracle=2493.2 mid-oracle=-5.4bp  <-- ALERT
+19:44:30 BTC mid=83206.0 mark=83218.0 oracle=83262.8 mid-oracle=-6.8bp  <-- ALERT
+19:44:36 ETH mid=2491.85 mark=2491.9 oracle=2493.17 mid-oracle=-5.3bp  <-- ALERT
+19:44:36 BTC mid=83206.5 mark=83216.6 oracle=83260.4 mid-oracle=-6.5bp  <-- ALERT
+19:44:41 ETH mid=2491.95 mark=2491.9 oracle=2493.17 mid-oracle=-4.9bp
+19:44:41 BTC mid=83219.5 mark=83216.4 oracle=83260.4 mid-oracle=-4.9bp
+19:44:46 ETH mid=2491.95 mark=2492.1 oracle=2493.36 mid-oracle=-5.7bp  <-- ALERT
+19:44:46 BTC mid=83219.5 mark=83219.0 oracle=83261.0 mid-oracle=-5.0bp
+19:44:51 ETH mid=2492.35 mark=2492.3 oracle=2493.6 mid-oracle=-5.0bp  <-- ALERT
+19:44:51 BTC mid=83222.5 mark=83222.0 oracle=83266.0 mid-oracle=-5.2bp  <-- ALERT

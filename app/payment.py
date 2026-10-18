@@ -105,13 +105,16 @@ from app.schemas import (
     EXIT_CAPACITY_AUDIT_EXAMPLE,
     FUNDING_APR_EXAMPLE,
     FUNDING_RATE_EXAMPLE,
+    FUNDING_RATE_VALUE_EXAMPLE,
     HIP4_ALERTS_SUBSCRIBE_EXAMPLE,
+    HIP4_PRICE_EXAMPLE,
     HIP4_PRICE_LADDER_EXAMPLE,
     HIP4_SNAPSHOT_EXAMPLE,
     KIMCHI_ALERT_EXAMPLE,
     MACRO_DDAY_EXAMPLE,
     MARKDOWN_EXAMPLE,
     NEG_RISK_ARBITRAGE_EXAMPLE,
+    ORACLE_GAP_BP_EXAMPLE,
     ORACLE_GAP_EXAMPLE,
     TOKEN_AUTHENTICITY_EXAMPLE,
     TOKEN_DIAGNOSTIC_EXAMPLE,
@@ -125,10 +128,13 @@ from app.schemas import (
     DumpRiskResponse,
     FundingAprMatrixResponse,
     FundingRateResponse,
+    FundingRateValueResponse,
     Hip4AlertsSubscribeResponse,
+    Hip4PriceResponse,
     KimchiAlertResponse,
     MacroDdayResponse,
     MarkdownResponse,
+    OracleGapBpResponse,
     OracleGapResponse,
     PredictionExitCapacityAuditResponse,
     PredictionHip4PriceLadderResponse,
@@ -414,6 +420,11 @@ def build_routes(
     cycle_compare_option = _payment_option(settings.PRICE_CYCLE_COMPARE_USDC)
     oracle_gap_option = _payment_option(settings.PRICE_ORACLE_GAP_USDC)
 
+    # 2026-10-18 저가 티어 실험 - app/config.py의 "2026-10-18 저가 티어" 섹션 참고.
+    funding_rate_value_option = _payment_option(settings.PRICE_FUNDING_RATE_VALUE_USDC)
+    oracle_gap_bp_option = _payment_option(settings.PRICE_ORACLE_GAP_BP_USDC)
+    hip4_price_option = _payment_option(settings.PRICE_HIP4_PRICE_USDC)
+
     macro_dday_option = _payment_option(settings.PRICE_MACRO_DDAY_USDC)
     routes: dict[str, RouteConfig] = {
         "GET /v1/calendar/macro-dday": _make_route_config(
@@ -673,6 +684,33 @@ def build_routes(
             service_name="AlphaPipeline Funding Rate",
             tags=["crypto", "derivatives", "funding-rate"],
         ),
+        "GET /v1/derivatives/funding-rate-value": _make_route_config(
+            accepts=[funding_rate_value_option],
+            mime_type="application/json",
+            description=(
+                "Cheapest-tier thin wrapper around funding-rate - just the funding rate "
+                "number (decimal and percentage), no mark/index price or open interest. "
+                "Paid in USDC on Base."
+            ),
+            resource=_resource_url("/v1/derivatives/funding-rate-value"),
+            extensions=_bazaar_extension(
+                input_example={"symbol": "BTC"},
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "symbol": {
+                            "type": "string",
+                            "description": "Ticker symbol, e.g. BTC, ETH, or BTCUSDT.",
+                        }
+                    },
+                    "required": ["symbol"],
+                },
+                output_example=FUNDING_RATE_VALUE_EXAMPLE,
+                output_schema=_inline_schema_defs(FundingRateValueResponse.model_json_schema()),
+            ),
+            service_name="AlphaPipeline Funding Rate Value",
+            tags=["crypto", "derivatives", "funding-rate", "low-cost", "chain-lookup"],
+        ),
         "GET /v1/market/oracle-gap": _make_route_config(
             accepts=[oracle_gap_option],
             mime_type="application/json",
@@ -701,6 +739,33 @@ def build_routes(
             ),
             service_name="AlphaPipeline Oracle Gap",
             tags=["crypto", "derivatives", "hyperliquid", "manipulation-risk", "low-cost"],
+        ),
+        "GET /v1/market/oracle-gap-bp": _make_route_config(
+            accepts=[oracle_gap_bp_option],
+            mime_type="application/json",
+            description=(
+                "Cheapest-tier thin wrapper around oracle-gap - just the mid/mark vs "
+                "oracle bp gap numbers and the elevated flag, no absolute prices. Paid "
+                "in USDC on Base."
+            ),
+            resource=_resource_url("/v1/market/oracle-gap-bp"),
+            extensions=_bazaar_extension(
+                input_example={"coin": "ETH"},
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "coin": {
+                            "type": "string",
+                            "description": "Hyperliquid perpetual ticker, e.g. ETH or BTC.",
+                        }
+                    },
+                    "required": ["coin"],
+                },
+                output_example=ORACLE_GAP_BP_EXAMPLE,
+                output_schema=_inline_schema_defs(OracleGapBpResponse.model_json_schema()),
+            ),
+            service_name="AlphaPipeline Oracle Gap (bp only)",
+            tags=["crypto", "derivatives", "hyperliquid", "low-cost", "chain-lookup"],
         ),
         "GET /v1/derivatives/funding-apr-matrix": _make_route_config(
             accepts=[funding_apr_option],
@@ -1067,6 +1132,37 @@ def build_routes(
             ),
             service_name="AlphaPipeline HIP-4 Price Ladder",
             tags=["prediction-market", "hyperliquid", "hip4", "pre-trade-signal"],
+        ),
+        "GET /v1/prediction/hip4-price": _make_route_config(
+            accepts=[hip4_price_option],
+            mime_type="application/json",
+            description=(
+                "Cheapest-tier thin wrapper around hip4-price-ladder - a single rung's "
+                "Yes probability (the closest strike to the one requested), not the full "
+                "ladder. Required `underlying` and `strike`. Paid in USDC on Base."
+            ),
+            resource=_resource_url("/v1/prediction/hip4-price"),
+            extensions=_bazaar_extension(
+                input_example={"underlying": "BTC", "strike": 85000},
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "underlying": {
+                            "type": "string",
+                            "description": "Asset symbol for crypto price-binary markets (e.g. 'BTC', 'ETH', 'SOL', 'HYPE').",
+                        },
+                        "strike": {
+                            "type": "number",
+                            "description": "Target price to look up - the closest available rung is returned (see matched_strike).",
+                        },
+                    },
+                    "required": ["underlying", "strike"],
+                },
+                output_example=HIP4_PRICE_EXAMPLE,
+                output_schema=_inline_schema_defs(Hip4PriceResponse.model_json_schema()),
+            ),
+            service_name="AlphaPipeline HIP-4 Price",
+            tags=["prediction-market", "hyperliquid", "hip4", "low-cost", "chain-lookup"],
         ),
         # 2026-10-10: 원래 "과거 사이클 대비 도미넌스 괴리율" 아이디어는 무료
         # 데이터 소스가 없어서(app/logic.py의 get_btc_cycle_compare() 모듈 주석

@@ -144,6 +144,12 @@ ENDPOINTS: list[EndpointCall] = [
         "derivatives.funding_rate", "GET", "/v1/derivatives/funding-rate", {"symbol": "BTC"}
     ),
     EndpointCall(
+        "derivatives.funding_rate_value",
+        "GET",
+        "/v1/derivatives/funding-rate-value",
+        {"symbol": "BTC"},
+    ),
+    EndpointCall(
         "derivatives.funding_apr_matrix",
         "GET",
         "/v1/derivatives/funding-apr-matrix",
@@ -151,6 +157,9 @@ ENDPOINTS: list[EndpointCall] = [
     ),
     EndpointCall(
         "market.oracle_gap", "GET", "/v1/market/oracle-gap", {"coin": "ETH"}
+    ),
+    EndpointCall(
+        "market.oracle_gap_bp", "GET", "/v1/market/oracle-gap-bp", {"coin": "ETH"}
     ),
     # --- 예측시장 (폴리마켓) - event_slug/market_slug는 만료될 수 있음, 상단 docstring 참고 ---
     EndpointCall(
@@ -181,6 +190,12 @@ ENDPOINTS: list[EndpointCall] = [
         "GET",
         "/v1/prediction/hip4-price-ladder",
         {"underlying": "BTC"},
+    ),
+    EndpointCall(
+        "prediction.hip4_price",
+        "GET",
+        "/v1/prediction/hip4-price",
+        {"underlying": "BTC", "strike": 150000},
     ),
     # --- 도구 ---
     EndpointCall(

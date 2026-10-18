@@ -7,7 +7,7 @@ Also the exact server Glama's automated Docker build test introspects for
 this listing's "Server" score, so its tool count should track app/mcp_server.py
 (the paid remote server) 1:1 even though calls here bypass payment entirely.
 
-18 tools provided (same coverage as the paid remote /mcp server, just called
+21 tools provided (same coverage as the paid remote /mcp server, just called
 directly against app/logic.py instead of going through x402 payment):
   1.  convert_to_markdown(url)                              -> app/markdown_tool.py: url_to_markdown
   2.  get_token_dump_risk(symbol)                            -> app/logic.py: get_symbol_dump_risk
@@ -27,6 +27,9 @@ directly against app/logic.py instead of going through x402 payment):
   16. get_hip4_price_ladder(underlying, limit)                -> app/logic.py: get_hip4_price_ladder
   17. get_btc_cycle_compare()                                 -> app/logic.py: get_btc_cycle_compare
   18. get_oracle_gap(coin)                                    -> app/logic.py: get_oracle_gap
+  19. get_funding_rate_value(symbol)                          -> app/logic.py: get_funding_rate_value
+  20. get_oracle_gap_bp(coin)                                  -> app/logic.py: get_oracle_gap_bp
+  21. get_hip4_price(underlying, strike)                       -> app/logic.py: get_hip4_price
 
 Note (important, stated honestly):
   - This MCP server is a separate "distribution build" from the paid x402 HTTP
@@ -63,12 +66,15 @@ from app.logic import (
     get_exit_capacity_audit as _logic_exit_capacity_audit,
     get_funding_apr_matrix as _logic_funding_apr_matrix,
     get_funding_rate as _logic_funding_rate,
+    get_funding_rate_value as _logic_funding_rate_value,
+    get_hip4_price as _logic_hip4_price,
     get_hip4_price_ladder as _logic_hip4_price_ladder,
     get_hip4_snapshot as _logic_hip4_snapshot,
     get_kimchi_alert as _logic_kimchi_alert,
     get_macro_calendar_dday as _logic_macro_calendar_dday,
     get_neg_risk_arbitrage as _logic_neg_risk_arbitrage,
     get_oracle_gap as _logic_oracle_gap,
+    get_oracle_gap_bp as _logic_oracle_gap_bp,
     get_symbol_dump_risk,
     get_token_diagnostic as _logic_token_diagnostic,
     get_token_risk as _logic_token_risk,
@@ -387,6 +393,27 @@ async def get_funding_rate(symbol: str) -> dict:
         On failure: {"success": false, "error": {"type", "message"}}
     """
     return await _safe_call("get_funding_rate", _logic_funding_rate(symbol))
+
+
+@mcp.tool(name="derivatives.funding_rate_value")
+async def get_funding_rate_value(symbol: str) -> dict:
+    """
+    Cheap-tier thin wrapper around derivatives.funding_rate: same call, same
+    cache, but trims the response to just the funding rate numbers (no
+    mark/index price, no open_interest_usd). No new upstream call. Use this
+    instead of get_funding_rate when all you need is the raw funding rate
+    value/percentage.
+
+    Args:
+        symbol: e.g. "BTC", "ETH", or "BTCUSDT" (non-USDT symbols are
+            normalized to USDT pairs).
+
+    Returns:
+        On success: {"success": true, "funding_rate", "funding_rate_percentage",
+            "data_source", ...}
+        On failure: {"success": false, "error": {"type", "message"}}
+    """
+    return await _safe_call("get_funding_rate_value", _logic_funding_rate_value(symbol))
 
 
 @mcp.tool(name="derivatives.funding_apr_matrix")
@@ -723,6 +750,32 @@ async def get_hip4_price_ladder(underlying: str, limit: int = 100) -> dict:
     )
 
 
+@mcp.tool(name="prediction.hip4_price")
+async def get_hip4_price(underlying: str, strike: float) -> dict:
+    """
+    Cheap-tier single-rung lookup: reuses prediction.hip4_price_ladder's
+    cached data and returns only the one rung whose strike is closest to
+    the requested strike (no new upstream call). Always check
+    matched_strike against your requested strike - a large gap means no
+    rung exists near your target, not an exact match. Use
+    prediction.hip4_price_ladder instead if you need the whole ladder.
+
+    Args:
+        underlying: Asset symbol for crypto price-binary markets (e.g. "BTC",
+            "ETH", "SOL", "HYPE").
+        strike: Target price level to find the closest HIP-4 rung for.
+
+    Returns:
+        On success: {"success": true, "underlying", "requested_strike",
+            "matched_strike", "yes_price", "expiry", ...}
+        On failure: {"success": false, "error": {"type", "message"}}
+    """
+    return await _safe_call(
+        "get_hip4_price",
+        _logic_hip4_price(underlying=underlying, strike=strike),
+    )
+
+
 @mcp.tool(name="market.cycle_compare")
 async def get_btc_cycle_compare() -> dict:
     """
@@ -770,6 +823,26 @@ async def get_oracle_gap(coin: str) -> dict:
         On failure: {"success": false, "error": {"type", "message"}}
     """
     return await _safe_call("get_oracle_gap", _logic_oracle_gap(coin))
+
+
+@mcp.tool(name="market.oracle_gap_bp")
+async def get_oracle_gap_bp(coin: str) -> dict:
+    """
+    Cheap-tier thin wrapper around market.oracle_gap: same call, same cache,
+    but trims the response to just the bp gap numbers and the elevated flag
+    (no absolute mid/mark/oracle prices). No new upstream call. Use this
+    instead of get_oracle_gap when all you need is the gap size for a
+    threshold check.
+
+    Args:
+        coin: Hyperliquid perpetual ticker, e.g. "ETH" or "BTC".
+
+    Returns:
+        On success: {"success": true, "coin", "mid_oracle_gap_bp",
+            "mark_oracle_gap_bp", "elevated", "alert_threshold_bp", ...}
+        On failure: {"success": false, "error": {"type", "message"}}
+    """
+    return await _safe_call("get_oracle_gap_bp", _logic_oracle_gap_bp(coin))
 
 
 if __name__ == "__main__":

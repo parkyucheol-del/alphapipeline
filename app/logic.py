@@ -2908,6 +2908,121 @@ async def get_hip4_price_ladder(underlying: str, limit: int = 100) -> dict:
 
 
 # ============================================================================
+# 2026-10-18 저가 티어 실험 (cheap single-number endpoints) - 데일리 알파
+# 10/15-10/16 카드 근거(Bazaar 30일 데이터: 지불자 10명+ 엔드포인트 420개가
+# 거의 전부 $0.001~0.005짜리 "숫자 하나" 조회형)로 추가. app/config.py의
+# 2026-10-18 섹션 주석에 전체 배경이 있다. 아래 3개는 전부 기존 함수가 이미
+# 캐시해둔 데이터를 그대로 재사용하는 얇은 wrapper - 신규 업스트림 호출이
+# 없다. 기존 리치 엔드포인트(funding_rate/oracle_gap/hip4_price_ladder)는
+# 그대로 둔다.
+# ============================================================================
+
+_FUNDING_RATE_VALUE_NOTICE = (
+    "Thin wrapper around derivatives.funding_rate - same underlying call, just "
+    "the rate number without mark/index price or open interest. See "
+    "funding-rate for the fuller response and the predicted_rate caveat "
+    "(neither Bybit nor Binance exposes a separate forecast field)."
+)
+
+
+async def get_funding_rate_value(symbol: str) -> dict:
+    """
+    GET /v1/derivatives/funding-rate-value가 사용하는 얇은 단일 숫자
+    엔드포인트. get_funding_rate()를 그대로 호출해서 funding_rate/
+    funding_rate_percentage만 남기고 mark/index price, open_interest_usd는
+    뺀다 - 신규 업스트림 호출 없음.
+    """
+    full = await get_funding_rate(symbol)
+    if full.get("data_source") == "none":
+        # 둘 다 실패한 경우 - get_funding_rate()가 이미 최소 필드(generated_at/
+        # symbol/data_source/notice=에러메시지)만 돌려주므로 그대로 반환한다.
+        return full
+    return {
+        "generated_at": full.get("generated_at"),
+        "symbol": full.get("symbol"),
+        "funding_rate": full.get("funding_rate"),
+        "funding_rate_percentage": full.get("funding_rate_percentage"),
+        "data_source": full.get("data_source"),
+        "notice": _FUNDING_RATE_VALUE_NOTICE,
+    }
+
+
+_ORACLE_GAP_BP_NOTICE = (
+    "Thin wrapper around market.oracle_gap - same underlying call, just the "
+    "two bp gap numbers and the elevated flag, without the absolute mid/mark/"
+    "oracle prices. See oracle-gap for the fuller response and why elevated "
+    "is a fixed-threshold flag, not a manipulation determination."
+)
+
+
+async def get_oracle_gap_bp(coin: str) -> dict:
+    """
+    GET /v1/market/oracle-gap-bp가 사용하는 얇은 단일 숫자 엔드포인트.
+    get_oracle_gap()을 그대로 호출해서 bp 괴리값/elevated만 남기고 절대가
+    (mid/mark/oracle_price)는 뺀다 - 신규 업스트림 호출 없음. 존재하지 않는
+    coin이면 get_oracle_gap()과 동일하게 ValueError를 낸다.
+    """
+    full = await get_oracle_gap(coin)
+    return {
+        "generated_at": full.get("generated_at"),
+        "coin": full.get("coin"),
+        "mid_oracle_gap_bp": full.get("mid_oracle_gap_bp"),
+        "mark_oracle_gap_bp": full.get("mark_oracle_gap_bp"),
+        "elevated": full.get("elevated"),
+        "alert_threshold_bp": full.get("alert_threshold_bp"),
+        "data_source": full.get("data_source"),
+        "notice": _ORACLE_GAP_BP_NOTICE,
+    }
+
+
+_HIP4_PRICE_NOTICE = (
+    "Thin wrapper around prediction.hip4_price_ladder - same cached data "
+    "(outcomeMeta + allMids), no separate upstream call. Returns the single "
+    "rung whose strike is closest to the requested strike, NOT an exact "
+    "match - compare matched_strike against your requested strike before "
+    "relying on yes_price; a large gap between the two means no rung exists "
+    "near your target. If you need the full ladder (all rungs for an "
+    "underlying), use hip4_price_ladder instead."
+)
+
+
+async def get_hip4_price(underlying: str, strike: float) -> dict:
+    """
+    GET /v1/prediction/hip4-price가 사용하는 얇은 단일 숫자 엔드포인트.
+    get_hip4_price_ladder()와 완전히 같은 캐시 데이터를 재사용해서, 요청한
+    strike에 가장 가까운 rung 하나만 골라 Yes 확률만 돌려준다 - 전체 사다리가
+    필요 없는 호출자를 위한 저가 실험.
+    """
+    ladder = await get_hip4_price_ladder(underlying)
+    rungs = ladder.get("rungs") or []
+    underlying_norm = ladder.get("underlying")
+
+    if not rungs:
+        return {
+            "generated_at": _timestamp_now(),
+            "underlying": underlying_norm,
+            "requested_strike": strike,
+            "matched_strike": None,
+            "yes_price": None,
+            "expiry": None,
+            "data_source": "hyperliquid_info_api",
+            "notice": f"No priceBinary rungs found for underlying={underlying_norm}.",
+        }
+
+    closest = min(rungs, key=lambda r: abs(r["strike"] - strike))
+    return {
+        "generated_at": _timestamp_now(),
+        "underlying": underlying_norm,
+        "requested_strike": strike,
+        "matched_strike": closest["strike"],
+        "yes_price": closest.get("yes_price"),
+        "expiry": closest.get("expiry"),
+        "data_source": "hyperliquid_info_api",
+        "notice": _HIP4_PRICE_NOTICE,
+    }
+
+
+# ============================================================================
 # market.cycle_compare (2026-10-10) - scoped-down version of a pitched "BTC
 # halving-cycle dominance comparison" idea. True historical dominance needs
 # paid data everywhere checked (see PRICE_CYCLE_COMPARE_USDC's comment in

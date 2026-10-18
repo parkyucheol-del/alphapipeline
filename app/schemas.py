@@ -702,6 +702,61 @@ ORACLE_GAP_EXAMPLE = {
 }
 
 
+# 2026-10-18 저가 티어 - 기존 FundingRateResponse/OracleGapResponse의 얇은
+# wrapper. app/logic.py의 get_funding_rate_value/get_oracle_gap_bp 참고.
+class FundingRateValueResponse(BaseModel):
+    generated_at: TimestampPair
+    symbol: str
+    funding_rate: float | None = None
+    funding_rate_percentage: float | None = None
+    data_source: str
+    notice: str | None = None
+
+
+FUNDING_RATE_VALUE_EXAMPLE = {
+    "generated_at": {"utc": "2026-10-18T12:00:00Z", "kst": "2026-10-18 21:00:00 KST"},
+    "symbol": "BTCUSDT",
+    "funding_rate": 0.0001,
+    "funding_rate_percentage": 0.01,
+    "data_source": "bybit",
+    "notice": (
+        "Thin wrapper around derivatives.funding_rate - same underlying call, just the "
+        "rate number without mark/index price or open interest."
+    ),
+}
+
+
+class OracleGapBpResponse(BaseModel):
+    generated_at: TimestampPair
+    coin: str
+    mid_oracle_gap_bp: float | None = None
+    mark_oracle_gap_bp: float | None = None
+    elevated: bool = Field(
+        description=(
+            "True when abs(mid_oracle_gap_bp) >= alert_threshold_bp. A fixed-threshold "
+            "boolean, not a manipulation determination."
+        ),
+    )
+    alert_threshold_bp: float
+    data_source: str
+    notice: str | None = None
+
+
+ORACLE_GAP_BP_EXAMPLE = {
+    "generated_at": {"utc": "2026-10-18T12:00:00Z", "kst": "2026-10-18 21:00:00 KST"},
+    "coin": "ETH",
+    "mid_oracle_gap_bp": 21.2,
+    "mark_oracle_gap_bp": 0.4,
+    "elevated": True,
+    "alert_threshold_bp": 15.0,
+    "data_source": "hyperliquid",
+    "notice": (
+        "Thin wrapper around market.oracle_gap - same underlying call, just the two bp "
+        "gap numbers and the elevated flag, without the absolute mid/mark/oracle prices."
+    ),
+}
+
+
 class FundingAprMatrixResponse(BaseModel):
     generated_at: TimestampPair
     symbol: str
@@ -1270,6 +1325,38 @@ HIP4_PRICE_LADDER_EXAMPLE = {
         "separate upstream call. Only standalone 'priceBinary' outcomes for the given "
         "underlying are included. Hyperliquid's public API does not expose per-outcome "
         "volume for HIP-4 markets, so this ladder has no volume field."
+    ),
+}
+
+
+# 2026-10-18 저가 티어 - hip4_price_ladder의 얇은 wrapper (전체 사다리 대신
+# 요청한 strike에 가장 가까운 rung 하나만). app/logic.py의 get_hip4_price 참고.
+class Hip4PriceResponse(BaseModel):
+    generated_at: TimestampPair
+    underlying: str
+    requested_strike: float
+    matched_strike: float | None = Field(
+        default=None,
+        description="The closest available rung's strike - NOT guaranteed to equal requested_strike.",
+    )
+    yes_price: float | None = None
+    expiry: str | None = None
+    data_source: str
+    notice: str | None = None
+
+
+HIP4_PRICE_EXAMPLE = {
+    "generated_at": {"utc": "2026-10-18T12:00:00Z", "kst": "2026-10-18 21:00:00 KST"},
+    "underlying": "BTC",
+    "requested_strike": 85000.0,
+    "matched_strike": 85000.0,
+    "yes_price": 0.42,
+    "expiry": "20261031-0600",
+    "data_source": "hyperliquid_info_api",
+    "notice": (
+        "Thin wrapper around hip4_price_ladder - matched_strike is the closest rung, not "
+        "necessarily an exact match. Compare it against requested_strike before relying "
+        "on yes_price."
     ),
 }
 

@@ -157,6 +157,21 @@ class Settings:
     ORACLE_GAP_ALERT_THRESHOLD_BP: float = float(os.getenv("ORACLE_GAP_ALERT_THRESHOLD_BP", "5.0"))
     PRICE_ORACLE_GAP_USDC: float = float(os.getenv("PRICE_ORACLE_GAP_USDC", "0.01"))
 
+    # ===== 2026-10-18 저가 티어 실험 (cheap single-number endpoints) =====
+    # 데일리 알파 10/15-10/16 카드 근거: Bazaar 30일 데이터에서 지불자 10명
+    # 이상인 엔드포인트 420개(전체 34,062개 중)가 거의 전부 $0.001~0.005짜리
+    # "숫자 하나" 체인/시장 조회형이었다. 지금 AlphaPipeline 유료 엔드포인트는
+    # 거의 전부 $0.01~0.03이라 이 가격대가 비어있었다(10/18 실측: 외부 지불자
+    # 12명/6주 - claude/session-log-2026-10-18-real-paying-wallets-found.md).
+    # 아래 3개는 기존 funding-rate/oracle-gap/hip4-price-ladder가 이미 캐시해둔
+    # 데이터를 그대로 재사용하는 얇은 wrapper - 신규 업스트림 호출이 없다
+    # (app/logic.py의 get_funding_rate_value/get_oracle_gap_bp/get_hip4_price
+    # 참고). 기존 리치 엔드포인트 가격은 그대로 둔다 - 이건 추가 상품이지 대체가
+    # 아니다.
+    PRICE_FUNDING_RATE_VALUE_USDC: float = float(os.getenv("PRICE_FUNDING_RATE_VALUE_USDC", "0.001"))
+    PRICE_ORACLE_GAP_BP_USDC: float = float(os.getenv("PRICE_ORACLE_GAP_BP_USDC", "0.001"))
+    PRICE_HIP4_PRICE_USDC: float = float(os.getenv("PRICE_HIP4_PRICE_USDC", "0.002"))
+
     # ===== x402 공식 결제 레이어 (Coinbase CDP Facilitator) =====
     # Coinbase Developer Platform(https://portal.cdp.coinbase.com)에서 발급받는 API 키.
     # 둘 다 채워지면 CDP Facilitator(메인넷 실결제 검증/정산)를 쓰고,
