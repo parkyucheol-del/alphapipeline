@@ -25,6 +25,8 @@ from app.logic import (
     get_bid_ask_spread_pct,
     get_orderbook_imbalance_ratio,
     get_liquidity_depth_after_haircut,
+    get_polymarket_fee_estimate,
+    get_polymarket_mispricing,
     get_funding_apr_matrix,
     get_funding_rate,
     get_funding_rate_value,
@@ -73,6 +75,8 @@ from app.schemas import (
     PredictionBidAskSpreadPctResponse,
     PredictionOrderbookImbalanceRatioResponse,
     PredictionLiquidityDepthAfterHaircutResponse,
+    PredictionPolymarketFeeEstimateResponse,
+    PredictionPolymarketMispricingResponse,
     PredictionHip4PriceLadderResponse,
     PredictionHip4SnapshotResponse,
     PredictionNegRiskArbitrageResponse,
@@ -281,6 +285,8 @@ async def root(request: Request):
             "/v1/prediction/bid-ask-spread-pct": settings.PRICE_BID_ASK_SPREAD_PCT_USDC,
             "/v1/prediction/orderbook-imbalance-ratio": settings.PRICE_ORDERBOOK_IMBALANCE_RATIO_USDC,
             "/v1/prediction/liquidity-depth-after-haircut": settings.PRICE_LIQUIDITY_DEPTH_AFTER_HAIRCUT_USDC,
+            "/v1/prediction/polymarket-fee-estimate": settings.PRICE_POLYMARKET_FEE_ESTIMATE_USDC,
+            "/v1/prediction/polymarket-mispricing": settings.PRICE_POLYMARKET_MISPRICING_USDC,
             "/v1/prediction/hip4-snapshot": settings.PRICE_HIP4_SNAPSHOT_USDC,
             "/v1/prediction/hip4-price-ladder": settings.PRICE_HIP4_PRICE_LADDER_USDC,
             "/v1/prediction/hip4-price": settings.PRICE_HIP4_PRICE_USDC,
@@ -324,6 +330,8 @@ async def root(request: Request):
             "/v1/prediction/bid-ask-spread-pct",
             "/v1/prediction/orderbook-imbalance-ratio",
             "/v1/prediction/liquidity-depth-after-haircut",
+            "/v1/prediction/polymarket-fee-estimate",
+            "/v1/prediction/polymarket-mispricing",
             "/v1/prediction/hip4-snapshot",
             "/v1/prediction/hip4-price-ladder",
             "/v1/prediction/hip4-price",
@@ -1291,6 +1299,110 @@ async def liquidity_depth_after_haircut_endpoint(
         return JSONResponse(content=data)
     except Exception as e:
         logger.exception("liquidity-depth-after-haircut 처리 실패")
+        return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
+
+
+@app.get(
+    "/v1/prediction/polymarket-fee-estimate",
+    tags=["market"],
+    summary="Polymarket's own taker fee for a hypothetical fill",
+    description=(
+        "Use this endpoint to estimate Polymarket's own taker fee (NOT including gas, "
+        "slippage, or AlphaPipeline's own charge for this call) for a hypothetical fill of "
+        "`shares` at `price`, using the official bell-curve formula "
+        "`shares * fee_rate * price * (1 - price)`. `fee_rate` is read live from "
+        "Polymarket's own `GET /fee-rate` for the exact `token_id` - never a hardcoded "
+        "category table, since per-category rates have changed before (see response "
+        "`notice`). Makers pay 0 across every category; this is the taker fee only. Omit "
+        "`price` to use the live best book quote for `side`. Input: either `token_id` (if "
+        "already known) or `market_slug` (+ optional `outcome`, default 'yes') to resolve "
+        "it automatically."
+    ),
+    responses={
+        200: {
+            "model": PredictionPolymarketFeeEstimateResponse,
+            "description": "Polymarket taker fee estimate",
+        },
+        402: {"description": "x402 payment required"},
+        502: {"model": ErrorResponse, "description": "Upstream (Polymarket) error or input error"},
+    },
+)
+async def polymarket_fee_estimate_endpoint(
+    shares: float = Query(..., description="Hypothetical fill size, in shares. Must be > 0."),
+    token_id: str | None = Query(None, description="The outcome's CLOB token_id / asset_id, if already known"),
+    market_slug: str | None = Query(
+        None, description="Exact Polymarket market slug, used to resolve token_id automatically"
+    ),
+    outcome: str = Query("yes", description="'yes' (default) or 'no' - which side to resolve when using market_slug"),
+    side: str = Query("sell", description="'sell' (default) or 'buy' - which side of the book to read price from when price is omitted"),
+    price: float | None = Query(
+        None, description="Hypothetical fill price (0-1 exclusive). Omit to use the live best book quote for `side`."
+    ),
+):
+    _t0 = time.monotonic()
+    try:
+        data = await get_polymarket_fee_estimate(
+            shares=shares,
+            token_id=token_id,
+            market_slug=market_slug,
+            outcome=outcome,
+            side=side,
+            price=price,
+        )
+        data["latency_ms"] = round((time.monotonic() - _t0) * 1000)
+        return JSONResponse(content=data)
+    except Exception as e:
+        logger.exception("polymarket-fee-estimate 처리 실패")
+        return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
+
+
+@app.get(
+    "/v1/prediction/polymarket-mispricing",
+    tags=["market"],
+    summary="Monotonicity violations across caller-asserted-equivalent Polymarket markets",
+    description=(
+        "Use this endpoint to find monotonicity violations (higher strike priced above a "
+        "lower strike) across a set of Polymarket markets that YOU have already confirmed "
+        "share the same underlying asset and expiry/resolution date. This endpoint does "
+        "NOT verify or infer that equivalence itself - Polymarket's API has no reliable "
+        "field for it (see response `notice`); passing unrelated markets produces a "
+        "meaningless or false arbitrage signal. Input: `strikes` (>=2) plus either "
+        "`token_ids` or `market_slugs` (+ optional `outcomes`, default all 'yes'), same "
+        "length and order as `strikes`. Not investment advice."
+    ),
+    responses={
+        200: {
+            "model": PredictionPolymarketMispricingResponse,
+            "description": "Polymarket monotonicity-violation report",
+        },
+        402: {"description": "x402 payment required"},
+        502: {"model": ErrorResponse, "description": "Upstream (Polymarket) error or input error"},
+    },
+)
+async def polymarket_mispricing_endpoint(
+    strikes: list[float] = Query(..., description="Strike for each rung, same order as token_ids/market_slugs. At least 2 required."),
+    token_ids: list[str] | None = Query(
+        None, description="CLOB token_id per rung, if already known. Mutually exclusive with market_slugs."
+    ),
+    market_slugs: list[str] | None = Query(
+        None, description="Polymarket market slug per rung, used to resolve token_ids automatically."
+    ),
+    outcomes: list[str] | None = Query(
+        None, description="'yes'/'no' per rung when using market_slugs (default: all 'yes')."
+    ),
+):
+    _t0 = time.monotonic()
+    try:
+        data = await get_polymarket_mispricing(
+            strikes=strikes,
+            token_ids=token_ids,
+            market_slugs=market_slugs,
+            outcomes=outcomes,
+        )
+        data["latency_ms"] = round((time.monotonic() - _t0) * 1000)
+        return JSONResponse(content=data)
+    except Exception as e:
+        logger.exception("polymarket-mispricing 처리 실패")
         return JSONResponse(status_code=502, content={"error": "upstream_error", "message": str(e)})
 
 

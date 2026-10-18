@@ -675,6 +675,73 @@ LIQUIDITY_DEPTH_AFTER_HAIRCUT_OUTPUT_SCHEMA = {
     ],
 }
 
+# 2026-10-18 Engineering Precision Backlog 3 "Polymarket 동적 수수료율".
+POLYMARKET_FEE_ESTIMATE_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "generated_at": _TIMESTAMP_PAIR_SCHEMA,
+        "token_id": {"type": "string"},
+        "market_slug": {"type": ["string", "null"]},
+        "shares": {"type": "number"},
+        "price": {"type": "number"},
+        "price_source": {"type": "string"},
+        "base_fee_bp": {"type": "number"},
+        "fee_rate": {"type": "number"},
+        "fee_usd": {"type": "number"},
+        "book_snapshot_time": {
+            "anyOf": [_TIMESTAMP_PAIR_SCHEMA, {"type": "null"}],
+        },
+        "data_source": {"type": "string"},
+        "notice": {"type": ["string", "null"]},
+    },
+    "required": [
+        "generated_at", "token_id", "shares", "price", "price_source",
+        "base_fee_bp", "fee_rate", "fee_usd", "data_source",
+    ],
+}
+
+# 2026-10-18 Engineering Precision Backlog 4 "Polymarket용 internal_mispricing
+# 확장" - 정산조건 동일성은 호출자가 보증(서버는 추론하지 않음).
+POLYMARKET_MISPRICING_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "generated_at": _TIMESTAMP_PAIR_SCHEMA,
+        "rungs_checked": {"type": "integer"},
+        "rungs_skipped_empty_book": {"type": "integer"},
+        "violation_count": {"type": "integer"},
+        "violations": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "lower_strike": {"type": "number"},
+                    "lower_token_id": {"type": "string"},
+                    "lower_strike_yes_price": {"type": "number"},
+                    "higher_strike": {"type": "number"},
+                    "higher_token_id": {"type": "string"},
+                    "higher_strike_yes_price": {"type": "number"},
+                    "violation_bp": {"type": "number"},
+                    "max_riskless_profit_per_usd": {"type": "number"},
+                },
+                "required": [
+                    "lower_strike", "lower_token_id", "lower_strike_yes_price",
+                    "higher_strike", "higher_token_id", "higher_strike_yes_price",
+                    "violation_bp", "max_riskless_profit_per_usd",
+                ],
+            },
+        },
+        "oldest_book_snapshot_time": {
+            "anyOf": [_TIMESTAMP_PAIR_SCHEMA, {"type": "null"}],
+        },
+        "data_source": {"type": "string"},
+        "notice": {"type": "string"},
+    },
+    "required": [
+        "generated_at", "rungs_checked", "rungs_skipped_empty_book",
+        "violation_count", "violations", "data_source", "notice",
+    ],
+}
+
 _HIP4_SIDE_SCHEMA = {
     "type": "object",
     "properties": {
@@ -1711,6 +1778,96 @@ _TOOLS: list[dict] = [
             "required": [],
         },
         "output_schema": LIQUIDITY_DEPTH_AFTER_HAIRCUT_OUTPUT_SCHEMA,
+        "annotations": _READ_ONLY_ANNOTATIONS,
+    },
+    {
+        "name": "prediction.polymarket_fee_estimate",
+        "path": "/v1/prediction/polymarket-fee-estimate",
+        "price_attr": "PRICE_POLYMARKET_FEE_ESTIMATE_USDC",
+        "description": (
+            "Polymarket's own taker fee (NOT gas, slippage, or AlphaPipeline's own charge) "
+            "for a hypothetical fill of `shares` at `price`, using the official bell-curve "
+            "formula shares * fee_rate * price * (1 - price). fee_rate is read live from "
+            "Polymarket's own GET /fee-rate for the exact token_id - never hardcoded, since "
+            "per-category rates have changed before. Makers pay 0 across every category - "
+            "this is the taker fee only. Omit price to use the live best book quote for "
+            "side. Accepts either a raw token_id or a market_slug (+ outcome) to resolve it "
+            "automatically. Paid in USDC on Base."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "shares": {
+                    "type": "number",
+                    "description": "Hypothetical fill size, in shares. Must be > 0.",
+                },
+                "token_id": {
+                    "type": "string",
+                    "description": "The outcome's CLOB token_id / asset_id, if already known.",
+                },
+                "market_slug": {
+                    "type": "string",
+                    "description": "Exact Polymarket market slug, used to resolve token_id automatically.",
+                },
+                "outcome": {
+                    "type": "string",
+                    "description": "\"yes\" (default) or \"no\" - which side to resolve when using market_slug.",
+                },
+                "side": {
+                    "type": "string",
+                    "description": "\"sell\" (default) or \"buy\" - which side of the book to read price from when price is omitted.",
+                },
+                "price": {
+                    "type": "number",
+                    "description": "Hypothetical fill price (0-1 exclusive). Omit to use the live best book quote for side.",
+                },
+            },
+            "required": ["shares"],
+        },
+        "output_schema": POLYMARKET_FEE_ESTIMATE_OUTPUT_SCHEMA,
+        "annotations": _READ_ONLY_ANNOTATIONS,
+    },
+    {
+        "name": "prediction.polymarket_mispricing",
+        "path": "/v1/prediction/polymarket-mispricing",
+        "price_attr": "PRICE_POLYMARKET_MISPRICING_USDC",
+        "description": (
+            "Monotonicity check (higher strike must not be priced above a lower strike) "
+            "across a set of Polymarket markets that YOU have already confirmed share the "
+            "same underlying asset and expiry/resolution date. Does NOT verify or infer "
+            "that settlement-condition equivalence itself - Polymarket's API has no "
+            "reliable field for it; passing unrelated markets produces a meaningless or "
+            "false arbitrage signal. Accepts token_ids or market_slugs (+ optional "
+            "outcomes, default all 'yes'), same length/order as strikes. Not investment "
+            "advice. Paid in USDC on Base."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "strikes": {
+                    "type": "array",
+                    "items": {"type": "number"},
+                    "description": "Strike for each rung, same order as token_ids/market_slugs. At least 2 required.",
+                },
+                "token_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "CLOB token_id per rung, if already known. Mutually exclusive with market_slugs.",
+                },
+                "market_slugs": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Polymarket market slug per rung, used to resolve token_ids automatically.",
+                },
+                "outcomes": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "\"yes\"/\"no\" per rung when using market_slugs (default: all \"yes\").",
+                },
+            },
+            "required": ["strikes"],
+        },
+        "output_schema": POLYMARKET_MISPRICING_OUTPUT_SCHEMA,
         "annotations": _READ_ONLY_ANNOTATIONS,
     },
     {

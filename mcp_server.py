@@ -7,7 +7,7 @@ Also the exact server Glama's automated Docker build test introspects for
 this listing's "Server" score, so its tool count should track app/mcp_server.py
 (the paid remote server) 1:1 even though calls here bypass payment entirely.
 
-26 tools provided (same coverage as the paid remote /mcp server, just called
+28 tools provided (same coverage as the paid remote /mcp server, just called
 directly against app/logic.py instead of going through x402 payment):
   1.  convert_to_markdown(url)                              -> app/markdown_tool.py: url_to_markdown
   2.  get_token_dump_risk(symbol)                            -> app/logic.py: get_symbol_dump_risk
@@ -35,6 +35,8 @@ directly against app/logic.py instead of going through x402 payment):
   24. get_bid_ask_spread_pct(token_id, ...)                        -> app/logic.py: get_bid_ask_spread_pct
   25. get_orderbook_imbalance_ratio(token_id, ...)                 -> app/logic.py: get_orderbook_imbalance_ratio
   26. get_liquidity_depth_after_haircut(token_id, ...)             -> app/logic.py: get_liquidity_depth_after_haircut
+  27. get_polymarket_fee_estimate(shares, ...)                       -> app/logic.py: get_polymarket_fee_estimate
+  28. get_polymarket_mispricing(strikes, ...)                        -> app/logic.py: get_polymarket_mispricing
 
 Note (important, stated honestly):
   - This MCP server is a separate "distribution build" from the paid x402 HTTP
@@ -81,6 +83,8 @@ from app.logic import (
     get_neg_risk_arbitrage as _logic_neg_risk_arbitrage,
     get_bid_ask_spread_pct as _logic_bid_ask_spread_pct,
     get_liquidity_depth_after_haircut as _logic_liquidity_depth_after_haircut,
+    get_polymarket_fee_estimate as _logic_polymarket_fee_estimate,
+    get_polymarket_mispricing as _logic_polymarket_mispricing,
     get_oracle_gap as _logic_oracle_gap,
     get_oracle_gap_bp as _logic_oracle_gap_bp,
     get_orderbook_imbalance_ratio as _logic_orderbook_imbalance_ratio,
@@ -993,6 +997,102 @@ async def get_liquidity_depth_after_haircut(
             side=side,
             haircut_pct=haircut_pct,
             max_price_impact_pct=max_price_impact_pct,
+        ),
+    )
+
+
+@mcp.tool(name="prediction.polymarket_fee_estimate")
+async def get_polymarket_fee_estimate(
+    shares: float,
+    token_id: str | None = None,
+    market_slug: str | None = None,
+    outcome: str = "yes",
+    side: str = "sell",
+    price: float | None = None,
+) -> dict:
+    """
+    Polymarket's own taker fee (NOT gas, slippage, or AlphaPipeline's own
+    charge for this call) for a hypothetical fill of `shares` at `price`,
+    using the official bell-curve formula shares * fee_rate * price *
+    (1 - price). fee_rate is read live from Polymarket's own GET /fee-rate
+    for the exact token_id - never a hardcoded category table, since
+    per-category rates have changed before (see architecture-roadmap.md
+    Engineering Precision Backlog item 3). Makers pay 0 across every
+    category - this is the taker fee only. Omit price to use the live best
+    book quote for side (reuses the same order-book fetch as
+    prediction.exit_capacity_audit/order_split_guide - no new upstream call
+    in that case).
+
+    Args:
+        shares: Hypothetical fill size, in shares. Must be > 0.
+        token_id: The outcome's CLOB token_id / asset_id, if already known.
+            Provide either this OR market_slug.
+        market_slug: Exact Polymarket market slug, used to resolve token_id
+            automatically when not already known.
+        outcome: "yes" (default) or "no" - which side to resolve when using
+            market_slug. Ignored if token_id is given directly.
+        side: "sell" (default) or "buy" - which side of the book to read
+            price from when price is omitted.
+        price: Hypothetical fill price (0-1 exclusive). Omit to use the
+            live best book quote for side.
+
+    Returns:
+        On success: {"success": true, "fee_rate", "fee_usd", "price",
+            "base_fee_bp", ...}
+        On failure: {"success": false, "error": {"type", "message"}}
+    """
+    return await _safe_call(
+        "get_polymarket_fee_estimate",
+        _logic_polymarket_fee_estimate(
+            shares=shares,
+            token_id=token_id,
+            market_slug=market_slug,
+            outcome=outcome,
+            side=side,
+            price=price,
+        ),
+    )
+
+
+@mcp.tool(name="prediction.polymarket_mispricing")
+async def get_polymarket_mispricing(
+    strikes: list[float],
+    token_ids: list[str] | None = None,
+    market_slugs: list[str] | None = None,
+    outcomes: list[str] | None = None,
+) -> dict:
+    """
+    Monotonicity check (higher strike must not be priced above a lower
+    strike) across a set of Polymarket markets that YOU have already
+    confirmed share the same underlying asset and expiry/resolution date.
+    Does NOT verify or infer that settlement-condition equivalence itself -
+    Polymarket's API has no reliable field for it (see
+    architecture-roadmap.md Engineering Precision Backlog item 4); passing
+    unrelated markets produces a meaningless or false arbitrage signal.
+    Provide either token_ids or market_slugs (+ optional outcomes, default
+    all "yes"), same length and order as strikes. Not investment advice.
+
+    Args:
+        strikes: Strike for each rung, same order as token_ids/market_slugs.
+            At least 2 required.
+        token_ids: CLOB token_id per rung, if already known. Mutually
+            exclusive with market_slugs.
+        market_slugs: Polymarket market slug per rung, used to resolve
+            token_ids automatically.
+        outcomes: "yes"/"no" per rung when using market_slugs (default: all
+            "yes").
+
+    Returns:
+        On success: {"success": true, "violation_count", "violations", ...}
+        On failure: {"success": false, "error": {"type", "message"}}
+    """
+    return await _safe_call(
+        "get_polymarket_mispricing",
+        _logic_polymarket_mispricing(
+            strikes=strikes,
+            token_ids=token_ids,
+            market_slugs=market_slugs,
+            outcomes=outcomes,
         ),
     )
 

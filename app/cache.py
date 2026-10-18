@@ -9,10 +9,54 @@ Facilitator로 결제 검증을 이전하면서 재생 공격 방지는 Facilita
 서명 체계가 대신 처리하게 되어 제거했다 - app/payment.py 참고.)
 """
 import functools
+import time
+from collections import OrderedDict
 from typing import Callable
 
 from cachetools import TTLCache
 from app.config import settings
+
+
+class VariableTTLCache:
+    """
+    2026-10-18 Engineering Precision Backlog 2 "가변형 TTL 캐시 엔진"용 경량 캐시.
+
+    cachetools.TTLCache는 인스턴스 전체에 고정된 ttl 하나만 지원한다(생성 시
+    박아넣은 값, 항목별로 다르게 줄 수 없음) - 그래서 "시장 변동성/호가 갱신
+    빈도에 따라 항목마다 TTL을 1~5초 사이에서 다르게" 주는 용도로는 못 쓴다.
+    이 클래스는 그 제약만 없앤 아주 단순한 대체재 - (값, 만료시각) 튜플을
+    그대로 들고 있다가 get() 시점에 만료 여부를 직접 비교한다.
+
+    ttl_cached()의 ttl_fn 파라미터와 함께 쓰는 용도로 설계됨 - 단독으로는
+    쓰지 않는다 (app/data_sources.py의 polymarket_book_cache 참고).
+
+    maxsize 초과 시 가장 먼저 삽입된 항목을 버리는 단순 근사 FIFO/LRU
+    (조회 시점에 순서를 갱신하지 않는 순수 FIFO - maxsize가 작고(256) TTL도
+    1~5초로 짧아서 완벽한 LRU일 필요가 없다고 판단, cachetools.TTLCache도
+    내부적으로 같은 수준의 근사를 쓴다).
+    """
+
+    def __init__(self, maxsize: int):
+        self.maxsize = maxsize
+        self._store: OrderedDict[str, tuple[object, float]] = OrderedDict()
+
+    def get(self, key: str):
+        entry = self._store.get(key)
+        if entry is None:
+            return None
+        value, expires_at = entry
+        if time.monotonic() >= expires_at:
+            del self._store[key]
+            return None
+        return value
+
+    def set(self, key: str, value: object, ttl: float) -> None:
+        if key in self._store:
+            del self._store[key]
+        elif len(self._store) >= self.maxsize:
+            self._store.popitem(last=False)
+        self._store[key] = (value, time.monotonic() + ttl)
+
 
 # 락업 해제(dump-risk) 데이터: 스케줄러가 UNLOCK_REFRESH_INTERVAL_HOURS 주기로 갱신.
 # TTL은 그 주기보다 넉넉하게 잡아서(주기+2시간) 스케줄러가 한 번 실패해도
@@ -36,12 +80,30 @@ goplus_cache: TTLCache = TTLCache(maxsize=256, ttl=settings.GOPLUS_CACHE_TTL_SEC
 # Polymarket CLOB 오더북: prediction.neg_risk_arbitrage가 neg-risk 그룹의 여러
 # outcome 레그를 한 번에 조회할 때, 그리고 prediction.exit_capacity_audit이
 # 직후 같은 토큰을 다시 조회할 때 중복 호출을 흡수해서 Polymarket CLOB의 IP
-# 레이트리밋(429)을 방어한다(2026-09, 배포 전 외부 리뷰 피드백 반영). 3초로
-# 짧게 잡은 이유는 오더북이 실시간성이 중요한 데이터라 TTL이 길면 차익
-# 시그널이 이미 사라진 가격을 보여줄 위험이 있어서다 - 레이트리밋 방어와
-# 실시간성 사이의 절충점. x402 결제는 캐시 히트와 무관하게 매 호출 그대로
-# 징수되므로 마진에는 영향 없다(위 ttl_cached() 설명 참고).
-polymarket_book_cache: TTLCache = TTLCache(maxsize=256, ttl=settings.POLYMARKET_BOOK_CACHE_TTL_SECONDS)
+# 레이트리밋(429)을 방어한다(2026-09, 배포 전 외부 리뷰 피드백 반영).
+#
+# 2026-10-18 Engineering Precision Backlog 2 "가변형 TTL 캐시 엔진"로 고정
+# 3초 TTL에서 VariableTTLCache로 교체 - 레이트리밋 방어와 실시간성 사이의
+# 절충점을 매번 "3초"라는 하나의 숫자로 뭉개는 대신, 시장이 조용할 때는
+# POLYMARKET_BOOK_CACHE_MAX_TTL_SECONDS(기본 5초)까지 늘려 레이트리밋 방어를
+# 더 강하게, 시장이 움직이는 중이거나 호가가 막 갱신됐을 때는
+# POLYMARKET_BOOK_CACHE_MIN_TTL_SECONDS(기본 1초)로 줄여 실시간성을 지킨다
+# (실제 계산은 app/data_sources.py의 _polymarket_book_ttl_fn 참고). x402
+# 결제는 캐시 히트와 무관하게 매 호출 그대로 징수되므로 마진에는 영향
+# 없다(위 ttl_cached() 설명 참고).
+polymarket_book_cache: VariableTTLCache = VariableTTLCache(maxsize=256)
+
+# Polymarket CLOB fee-rate(GET /fee-rate) 원본 응답 캐시. prediction.
+# polymarket_fee_estimate가 쓴다(2026-10-18, Engineering Precision Backlog 3).
+# 오더북과 달리 수수료율은 초 단위로 변하는 데이터가 아니라서(공식 문서/제3자
+# 기사 기준 카테고리별 수수료율이 여러 차례 바뀐 적은 있지만 그 주기는 일/주
+# 단위) 오더북 캐시처럼 짧게 잡을 필요가 없다 - 적당히 넉넉한 고정 TTL로 같은
+# token_id 반복 조회 시
+# Polymarket CLOB 레이트리밋을 방어한다. x402 결제는 캐시 히트와 무관하게 매
+# 호출 그대로 징수되므로 마진에는 영향 없다(위 ttl_cached() 설명 참고).
+polymarket_fee_rate_cache: TTLCache = TTLCache(
+    maxsize=256, ttl=settings.POLYMARKET_FEE_RATE_CACHE_TTL_SECONDS
+)
 
 # Hyperliquid HIP-4 outcomeMeta/allMids 원본 응답 캐시. prediction.hip4_snapshot이
 # 매 호출마다 두 API를 새로 때리지 않도록 짧은 TTL로 흡수한다(2026-09-28) - allMids는
@@ -57,7 +119,11 @@ hip4_cache: TTLCache = TTLCache(maxsize=4, ttl=settings.HIP4_CACHE_TTL_SECONDS)
 oracle_gap_cache: TTLCache = TTLCache(maxsize=4, ttl=settings.ORACLE_GAP_CACHE_TTL_SECONDS)
 
 
-def ttl_cached(cache: TTLCache, key_fn: Callable[..., str] | None = None):
+def ttl_cached(
+    cache: TTLCache | VariableTTLCache,
+    key_fn: Callable[..., str] | None = None,
+    ttl_fn: Callable[[str, dict], float] | None = None,
+):
     """
     비동기 함수 결과를 TTLCache에 저장하는 범용 데코레이터 (2026-09, "고마진 방어를
     위한 캐싱" 요청으로 추가). get_kimchi_alert()에 적용된 게 첫 사용례이고,
@@ -84,6 +150,18 @@ def ttl_cached(cache: TTLCache, key_fn: Callable[..., str] | None = None):
     - `key_fn`을 안 주면 인자를 그대로 문자열화해서 키로 쓴다 - 다만 여러 함수가
       같은 TTLCache 인스턴스를 공유할 때(예: price_cache) 키가 서로 충돌하지
       않도록, 함수별로 접두어를 붙인 key_fn을 넘기는 걸 권장한다.
+
+    ## 가변형 TTL (2026-10-18, Engineering Precision Backlog 2 확장)
+    `ttl_fn`을 주면 캐시미스 때마다 고정 TTL 대신 "이 결과를 몇 초간 캐시할지"를
+    `ttl_fn(key, result) -> float`로 매번 새로 계산한다 - 이때 `cache`는
+    `VariableTTLCache` 인스턴스여야 한다 (cachetools.TTLCache는 인스턴스 전체에
+    고정 ttl 하나만 지원해서 항목별 TTL을 못 받는다 - 위 VariableTTLCache
+    클래스 참고). `ttl_fn`을 안 주면(기본값) 기존 동작과 완전히 동일 - 기존
+    6개 캐시(unlock/price/markdown/goplus/hip4/oracle_gap)는 이 파라미터
+    없이 그대로 쓰고 있고 전혀 영향받지 않는다. 첫 적용 사례는
+    app/data_sources.py의 polymarket_book_cache(`_polymarket_book_ttl_fn`) -
+    시장 변동성(직전 대비 mid price 변화량)과 호가 갱신 빈도(책의 timestamp가
+    실제로 갱신됐는지)로 1~5초 사이에서 TTL을 정한다.
     """
     def decorator(func):
         @functools.wraps(func)
@@ -93,7 +171,10 @@ def ttl_cached(cache: TTLCache, key_fn: Callable[..., str] | None = None):
             if cached is not None:
                 return cached
             result = await func(*args, **kwargs)
-            cache[key] = result
+            if ttl_fn is not None:
+                cache.set(key, result, ttl_fn(key, result))
+            else:
+                cache[key] = result
             return result
         return wrapper
     return decorator

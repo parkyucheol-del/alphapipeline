@@ -246,10 +246,65 @@ class Settings:
     # 무관하게 매 호출 그대로 징수되므로 마진에는 영향 없다(app/cache.py 참고).
     GOPLUS_CACHE_TTL_SECONDS: int = int(os.getenv("GOPLUS_CACHE_TTL_SECONDS", "120"))
 
-    # Polymarket CLOB 오더북 캐시 TTL(초). 짧게 잡아서 neg_risk_arbitrage가 여러
-    # outcome 레그를 병렬 조회할 때/exit_capacity_audit이 직후 같은 토큰을 다시
-    # 조회할 때만 중복 호출을 흡수하고, 오더북 실시간성은 거의 그대로 유지한다.
-    POLYMARKET_BOOK_CACHE_TTL_SECONDS: int = int(os.getenv("POLYMARKET_BOOK_CACHE_TTL_SECONDS", "3"))
+    # ===== 2026-10-18 Engineering Precision Backlog 2: 가변형 TTL 캐시 엔진 =====
+    # Polymarket CLOB 오더북 캐시가 더 이상 고정 3초 TTL이 아니라, 시장
+    # 변동성/호가 갱신 빈도에 따라 매 캐시미스마다 이 두 값 사이에서 동적으로
+    # TTL을 계산한다 (app/cache.py의 VariableTTLCache,
+    # app/data_sources.py의 _polymarket_book_ttl_fn 참고). neg_risk_arbitrage가
+    # 여러 outcome 레그를 병렬 조회할 때/exit_capacity_audit·order_split_guide·
+    # Phase 3 3종이 직후 같은 토큰을 다시 조회할 때 중복 호출을 흡수하는 목적은
+    # 그대로이고, 시장이 조용하면 MAX_TTL까지 늘려 레이트리밋 방어를 더
+    # 강하게, 가격이 움직이는 중이거나 호가가 막 갱신됐으면 MIN_TTL로 줄여
+    # 실시간성을 지킨다.
+    POLYMARKET_BOOK_CACHE_MIN_TTL_SECONDS: float = float(
+        os.getenv("POLYMARKET_BOOK_CACHE_MIN_TTL_SECONDS", "1.0")
+    )
+    POLYMARKET_BOOK_CACHE_MAX_TTL_SECONDS: float = float(
+        os.getenv("POLYMARKET_BOOK_CACHE_MAX_TTL_SECONDS", "5.0")
+    )
+    # "변동성" 판정 기준 - mid price(0~1 스케일)가 직전 조회 대비 움직인 양을
+    # price-point*10000(=bp) 단위로 본다. LOW_BP 이하면 조용한 시장(MAX_TTL),
+    # HIGH_BP 이상이면 변동성 높음(MIN_TTL), 그 사이는 선형보간.
+    POLYMARKET_BOOK_VOLATILITY_LOW_BP: float = float(
+        os.getenv("POLYMARKET_BOOK_VOLATILITY_LOW_BP", "5.0")
+    )
+    POLYMARKET_BOOK_VOLATILITY_HIGH_BP: float = float(
+        os.getenv("POLYMARKET_BOOK_VOLATILITY_HIGH_BP", "50.0")
+    )
+
+    # ===== 2026-10-18 Engineering Precision Backlog 3: Polymarket 동적 수수료율 =====
+    # 공식 문서(docs.polymarket.com/trading/fees)로 2026-10-18에 직접 검증 완료:
+    # fee = shares * feeRate * price * (1 - price) 공식 자체는 맞음(종형곡선,
+    # p*(1-p) 형태 - min(p,1-p) 아님). 단, 카테고리별 feeRate 숫자는 "여러 차례
+    # 바뀐 적 있다"고 공식 문서/제3자 기사 양쪽이 확인 - 그래서 이 프로젝트는
+    # 카테고리 테이블을 하드코딩하지 않고, Polymarket 공식 GET /fee-rate
+    # 엔드포인트(token_id별 base_fee, basis point)를 마켓마다 실시간으로 불러와
+    # fee_rate = base_fee_bp / 10000로 환산한다(app/logic.py의
+    # get_polymarket_fee_estimate 참고) - 백로그가 요구한 "실측 선행, 하드코딩
+    # 금지" 원칙을 그대로 지킴.
+    PRICE_POLYMARKET_FEE_ESTIMATE_USDC: float = float(
+        os.getenv("PRICE_POLYMARKET_FEE_ESTIMATE_USDC", "0.01")
+    )
+    # Polymarket CLOB GET /fee-rate 응답 캐시 TTL(초). 수수료율은 오더북과 달리
+    # 초 단위로 안 변해서(며칠~몇 주 단위로만 바뀜) 넉넉하게 잡음 - 같은
+    # token_id 반복 조회 시 레이트리밋 방어.
+    POLYMARKET_FEE_RATE_CACHE_TTL_SECONDS: int = int(
+        os.getenv("POLYMARKET_FEE_RATE_CACHE_TTL_SECONDS", "300")
+    )
+
+    # ===== 2026-10-18 Engineering Precision Backlog 4: Polymarket용 =====
+    # internal_mispricing 확장. 2026-10-18 조사 결과(architecture-roadmap.md
+    # 참고): Polymarket Gamma API에는 HIP-4처럼 "같은 기초자산/같은 만기"를
+    # 서버가 직접 묶어서 내려주는 strike 사다리 구조가 없고, conditionId/
+    # questionId는 마켓마다 고유해서 비교 불가, negRisk 그룹도 "상호배타"
+    # 전용이라 strike 사다리와는 다른 개념 - 자동 그룹핑은 안전하게 구현할
+    # 방법이 없다고 결론. 그래서 "정산조건 동일성"을 서버가 추론하지 않고
+    # 호출자가 이미 확인한 뒤 명시적으로 넘기는 구조로 설계 변경 - 호출자가
+    # 임의의 마켓을 잘못 섞어 넘기면 가짜 신호가 나올 수 있다는 점을 notice에
+    # 항상 명시.
+    PRICE_POLYMARKET_MISPRICING_USDC: float = float(
+        os.getenv("PRICE_POLYMARKET_MISPRICING_USDC", "0.03")
+    )
 
     # Hyperliquid HIP-4 outcomeMeta/allMids 캐시 TTL(초, 2026-09-28). allMids는
     # 실시간 가격이라 너무 길면 신선도를 잃고, 너무 짧으면 Hyperliquid 무료 API를

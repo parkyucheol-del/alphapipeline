@@ -107,6 +107,8 @@ from app.schemas import (
     BID_ASK_SPREAD_PCT_EXAMPLE,
     ORDERBOOK_IMBALANCE_RATIO_EXAMPLE,
     LIQUIDITY_DEPTH_AFTER_HAIRCUT_EXAMPLE,
+    POLYMARKET_FEE_ESTIMATE_EXAMPLE,
+    POLYMARKET_MISPRICING_EXAMPLE,
     FUNDING_APR_EXAMPLE,
     FUNDING_RATE_EXAMPLE,
     FUNDING_RATE_VALUE_EXAMPLE,
@@ -147,6 +149,8 @@ from app.schemas import (
     PredictionBidAskSpreadPctResponse,
     PredictionOrderbookImbalanceRatioResponse,
     PredictionLiquidityDepthAfterHaircutResponse,
+    PredictionPolymarketFeeEstimateResponse,
+    PredictionPolymarketMispricingResponse,
     PredictionHip4PriceLadderResponse,
     PredictionHip4SnapshotResponse,
     PredictionNegRiskArbitrageResponse,
@@ -441,6 +445,11 @@ def build_routes(
     oracle_gap_bp_option = _payment_option(settings.PRICE_ORACLE_GAP_BP_USDC)
     hip4_price_option = _payment_option(settings.PRICE_HIP4_PRICE_USDC)
     hip4_mispricing_option = _payment_option(settings.PRICE_HIP4_MISPRICING_USDC)
+
+    # 2026-10-18 Engineering Precision Backlog 3/4 - Polymarket 동적 수수료율 /
+    # Polymarket용 internal_mispricing 확장.
+    polymarket_fee_estimate_option = _payment_option(settings.PRICE_POLYMARKET_FEE_ESTIMATE_USDC)
+    polymarket_mispricing_option = _payment_option(settings.PRICE_POLYMARKET_MISPRICING_USDC)
 
     macro_dday_option = _payment_option(settings.PRICE_MACRO_DDAY_USDC)
     routes: dict[str, RouteConfig] = {
@@ -1277,6 +1286,117 @@ def build_routes(
             ),
             service_name="AlphaPipeline Liquidity Depth After Haircut",
             tags=["prediction-market", "polymarket", "liquidity", "pre-trade-signal"],
+        ),
+        "GET /v1/prediction/polymarket-fee-estimate": _make_route_config(
+            accepts=[polymarket_fee_estimate_option],
+            mime_type="application/json",
+            description=(
+                "Polymarket's own taker fee (shares * fee_rate * price * (1-price), the "
+                "official bell-curve formula) for a hypothetical fill, in USDC. fee_rate is "
+                "read live from Polymarket's own GET /fee-rate for the exact token_id - "
+                "never hardcoded, since category rates have changed before. Omit price to "
+                "use the live best book quote. Accepts token_id or market_slug (+outcome). "
+                "Paid in USDC on Base."
+            ),
+            resource=_resource_url("/v1/prediction/polymarket-fee-estimate"),
+            extensions=_bazaar_extension(
+                input_example={
+                    "shares": 100.0,
+                    "market_slug": "will-btc-hit-150k-by-2028",
+                    "outcome": "yes",
+                    "side": "sell",
+                },
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "shares": {
+                            "type": "number",
+                            "description": "Hypothetical fill size, in shares. Must be > 0.",
+                        },
+                        "token_id": {
+                            "type": "string",
+                            "description": "The outcome's CLOB token_id / asset_id, if already known.",
+                        },
+                        "market_slug": {
+                            "type": "string",
+                            "description": (
+                                "Exact Polymarket market slug, used to resolve token_id "
+                                "automatically when not already known."
+                            ),
+                        },
+                        "outcome": {
+                            "type": "string",
+                            "description": "\"yes\" (default) or \"no\" - which side to resolve when using market_slug.",
+                        },
+                        "side": {
+                            "type": "string",
+                            "description": "\"sell\" (default) or \"buy\" - which side of the book to read price from when price is omitted.",
+                        },
+                        "price": {
+                            "type": "number",
+                            "description": "Hypothetical fill price (0-1 exclusive). Omit to use the live best book quote for `side`.",
+                        },
+                    },
+                    "required": ["shares"],
+                },
+                output_example=POLYMARKET_FEE_ESTIMATE_EXAMPLE,
+                output_schema=_inline_schema_defs(
+                    PredictionPolymarketFeeEstimateResponse.model_json_schema()
+                ),
+            ),
+            service_name="AlphaPipeline Polymarket Fee Estimate",
+            tags=["prediction-market", "polymarket", "fees", "pre-trade-signal"],
+        ),
+        "GET /v1/prediction/polymarket-mispricing": _make_route_config(
+            accepts=[polymarket_mispricing_option],
+            mime_type="application/json",
+            description=(
+                "Monotonicity check across Polymarket markets YOU assert already share the "
+                "same settlement condition (same underlying/expiry) - higher strike must not "
+                "be priced above a lower strike. Does NOT verify settlement-condition "
+                "equivalence itself (Polymarket's API has no safe field for that - see "
+                "response notice). Accepts token_ids or market_slugs(+outcomes). Not "
+                "investment advice. Paid in USDC on Base."
+            ),
+            resource=_resource_url("/v1/prediction/polymarket-mispricing"),
+            extensions=_bazaar_extension(
+                input_example={
+                    "strikes": [100000, 110000],
+                    "market_slugs": ["btc-above-100k-2026", "btc-above-110k-2026"],
+                },
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "strikes": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "description": "Strike for each rung, same order as token_ids/market_slugs. At least 2 required.",
+                        },
+                        "token_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "CLOB token_id per rung, if already known. Mutually exclusive with market_slugs.",
+                        },
+                        "market_slugs": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Polymarket market slug per rung, used to resolve token_ids automatically.",
+                        },
+                        "outcomes": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "\"yes\"/\"no\" per rung when using market_slugs (default: all \"yes\").",
+                        },
+                    },
+                    "required": ["strikes"],
+                },
+                output_example=POLYMARKET_MISPRICING_EXAMPLE,
+                output_schema=_inline_schema_defs(
+                    PredictionPolymarketMispricingResponse.model_json_schema()
+                ),
+            ),
+            service_name="AlphaPipeline Polymarket Mispricing",
+            tags=["prediction-market", "polymarket", "arbitrage", "pre-trade-signal"],
         ),
         "GET /v1/prediction/hip4-snapshot": _make_route_config(
             accepts=[hip4_snapshot_option],

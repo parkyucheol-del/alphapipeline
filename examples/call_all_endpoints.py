@@ -4,7 +4,8 @@ AlphaPipeline의 모든 REST 엔드포인트를 한 번씩 순서대로 호출�
 
 목적: 엔드포인트를 새로 추가/수정한 뒤 "다 한 번씩 불러서 살아있는지" 빠르게
 확인하는 용도. 각 호출은 실제 x402 결제가 나가는 라이브 호출이므로(총
-합산 약 $0.27~0.32 수준(2026-10-18 저가 티어 3개+hip4-mispricing+order-split-guide+Phase 3 3종 추가로 소폭 증가) -
+합산 약 $0.31~0.36 수준(2026-10-18 저가 티어 3개+hip4-mispricing+order-split-guide+Phase 3 3종+
+polymarket-fee-estimate($0.01)+polymarket-mispricing($0.03) 추가로 소폭 증가) -
 무료 엔드포인트 3개 제외하고 나머지 단가 합),
 실행 전에 그 점을 인지할 것.
 
@@ -222,6 +223,35 @@ ENDPOINTS: list[EndpointCall] = [
         },
         note="market_slug가 오래됐으면 404/빈 응답 가능 - 최신 슬러그로 교체 필요 (exit_capacity_audit와 동일 슬러그 재사용)",
     ),
+    EndpointCall(
+        "prediction.polymarket_fee_estimate",
+        "GET",
+        "/v1/prediction/polymarket-fee-estimate",
+        {
+            "shares": 100,
+            "market_slug": "how-many-fed-rate-cuts-in-2026",
+            "outcome": "yes",
+            "side": "sell",
+        },
+        note="market_slug가 오래됐으면 404/빈 응답 가능 - 최신 슬러그로 교체 필요 (exit_capacity_audit와 동일 슬러그 재사용)",
+    ),
+    EndpointCall(
+        "prediction.polymarket_mispricing",
+        "GET",
+        "/v1/prediction/polymarket-mispricing",
+        {
+            "strikes": [100000, 110000],
+            "market_slugs": [
+                "how-many-fed-rate-cuts-in-2026",
+                "how-many-fed-rate-cuts-in-2026",
+            ],
+        },
+        note=(
+            "스모크 테스트용 - 같은 슬러그를 두 rung에 재사용해 '동일 정산조건'을 "
+            "흉내만 낸 것으로 실제 차익거래 신호로 해석하면 안 됨. market_slug가 "
+            "오래됐으면 404/빈 응답 가능 - 최신 슬러그로 교체 필요."
+        ),
+    ),
     # --- 예측시장 (Hyperliquid HIP-4) ---
     EndpointCall(
         "prediction.hip4_snapshot", "GET", "/v1/prediction/hip4-snapshot", {"limit": 20}
@@ -256,7 +286,8 @@ ENDPOINTS: list[EndpointCall] = [
 #   같은 문자열을 재사용해서 생기는 레벨 불일치 - 서버 버그 아님
 #   (claude/session-log-2026-10-01-call-all-endpoints-smoke-test.md 참고).
 # - prediction.order_split_guide, prediction.bid_ask_spread_pct,
-#   prediction.orderbook_imbalance_ratio, prediction.liquidity_depth_after_haircut:
+#   prediction.orderbook_imbalance_ratio, prediction.liquidity_depth_after_haircut,
+#   prediction.polymarket_fee_estimate, prediction.polymarket_mispricing:
 #   exit_capacity_audit와 동일한 market_slug(실제로는 event 레벨 slug)를
 #   재사용하므로 같은 이유로 실패 가능 - 서버 버그 아님.
 KNOWN_EXPECTED_FAILURES: set[str] = {
@@ -265,6 +296,8 @@ KNOWN_EXPECTED_FAILURES: set[str] = {
     "prediction.bid_ask_spread_pct",
     "prediction.orderbook_imbalance_ratio",
     "prediction.liquidity_depth_after_haircut",
+    "prediction.polymarket_fee_estimate",
+    "prediction.polymarket_mispricing",
 }
 
 HIP4_SUBSCRIBE_ENDPOINT = EndpointCall(
@@ -298,12 +331,16 @@ def _load_account() -> Account | None:
 def _build_url(base_url: str, call: EndpointCall) -> str:
     url = f"{base_url}{call.path}"
     if call.params:
-        url = f"{url}?{urlencode(call.params)}"
+        # doseq=True: list 값(예: prediction.polymarket_mispricing의 strikes/
+        # market_slugs)을 반복 쿼리 파라미터(?strikes=1&strikes=2)로 풀어준다 -
+        # 기본값(False)이면 리스트를 str()해서 한 덩어리로 인코딩해버려 FastAPI의
+        # list[float]/list[str] Query 파싱이 깨진다(2026-10-18).
+        url = f"{url}?{urlencode(call.params, doseq=True)}"
     return url
 
 
 async def _call_one(http, call: EndpointCall) -> dict[str, Any]:
-    url_or_path = call.path + (f"?{urlencode(call.params)}" if call.params else "")
+    url_or_path = call.path + (f"?{urlencode(call.params, doseq=True)}" if call.params else "")
     started = time.monotonic()
     try:
         if call.method == "GET":

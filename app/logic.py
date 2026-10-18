@@ -3050,6 +3050,246 @@ async def get_liquidity_depth_after_haircut(
 
 
 # ============================================================================
+# prediction.polymarket_fee_estimate (2026-10-18) - Engineering Precision
+# Backlog 3 "Polymarket 동적 수수료율". 구현 전 docs.polymarket.com/trading/fees
+# 와 공식 API 레퍼런스를 직접 조사해서 검증:
+#   - 공식 수수료 공식은 fee = shares * feeRate * price * (1 - price)다
+#     (p*(1-p) 종형곡선 - min(p,1-p) 아님). 외부(제미나이) 제안과 형태는 일치.
+#   - 단, 카테고리별 feeRate 숫자는 공식 문서와 제3자 기사(2026-04)가 서로 다른
+#     값을 보고했고("여러 차례 바뀐 적 있다"는 문구까지 공식 레퍼런스에 있음) -
+#     그래서 카테고리 테이블을 하드코딩하지 않고, 공식 GET /fee-rate 엔드포인트
+#     (token_id별 base_fee, basis point)에서 마켓마다 직접 실측값을 받는다.
+#   - Maker는 모든 카테고리에서 0 - taker만 이 수수료를 낸다(메이커 리베이트는
+#     이 엔드포인트의 스코프 밖, 반환하지 않음).
+# ============================================================================
+
+_POLYMARKET_FEE_ESTIMATE_NOTICE = (
+    "Taker fee only - Polymarket makers pay 0 across every category (see "
+    "docs.polymarket.com/trading/fees). fee_rate is read live from "
+    "Polymarket's own GET /fee-rate endpoint for this exact token_id "
+    "(base_fee, basis points) - never hardcoded, since per-category rates "
+    "have changed more than once according to Polymarket's own reference "
+    "docs. fee_usd = shares * fee_rate * price * (1 - price), the official "
+    "bell-curve formula (peaks at a $0.50 price, falls toward zero near "
+    "$0/$1) - verified against docs.polymarket.com/trading/fees on "
+    "2026-10-18, not an unverified third-party claim. Rounded to 5 decimals "
+    "with a 0.00001 USDC floor on any nonzero fee, per Polymarket's own "
+    "stated rounding rule. This is Polymarket's exchange fee only - it does "
+    "not include gas, slippage, or AlphaPipeline's own charge for this call."
+)
+
+
+async def get_polymarket_fee_estimate(
+    shares: float,
+    token_id: str | None = None,
+    market_slug: str | None = None,
+    outcome: str = "yes",
+    side: str = "sell",
+    price: float | None = None,
+) -> dict:
+    """
+    지정한 Polymarket outcome에서 shares 수량을 price(0~1)에 체결한다고 가정할
+    때 Polymarket 자체 taker 수수료가 얼마인지 계산한다. price를 안 주면 실시간
+    오더북에서 side 기준 best quote를 가져와 대신 쓴다(exit_capacity_audit과
+    같은 오더북 조회 헬퍼 재사용). fee_rate는 하드코딩 없이 Polymarket 공식
+    GET /fee-rate에서 매번 실측 - app/data_sources.py의 get_polymarket_fee_rate
+    참고. GET /v1/prediction/polymarket-fee-estimate가 사용한다 (main.py 참고).
+    """
+    if shares is None or shares <= 0:
+        raise ValueError("shares는 0보다 큰 값이어야 합니다")
+    if price is not None and not (0 < price < 1):
+        raise ValueError("price는 0과 1 사이 값이어야 합니다")
+    if not token_id and not market_slug:
+        raise ValueError("token_id 또는 market_slug(정확한 Polymarket 마켓 slug) 중 하나는 필요합니다")
+
+    resolved_token_id = str(token_id).strip() if token_id else None
+    if not resolved_token_id:
+        market = await ds.get_polymarket_market(market_slug.strip())
+        tid = _market_token_id_for_outcome(market, outcome)
+        if not tid:
+            raise ValueError(f"마켓 slug '{market_slug}'에서 '{outcome}' 토큰을 찾지 못했습니다")
+        resolved_token_id = tid
+
+    resolved_price = price
+    price_source = "explicit"
+    book_snapshot_time = None
+    if resolved_price is None:
+        book = await ds.get_polymarket_order_book(resolved_token_id)
+        levels_raw = (book.get("bids") if side == "sell" else book.get("asks")) or []
+        levels = _parse_book_levels(levels_raw, reverse=(side == "sell"))
+        if not levels:
+            raise ValueError(
+                f"price를 직접 안 주면 오더북에서 가져오는데, 지금 "
+                f"{'bids' if side == 'sell' else 'asks'}가 비어있습니다 - price를 직접 지정하세요"
+            )
+        resolved_price = levels[0]["price"]
+        price_source = f"book_best_{side}"
+        try:
+            book_snapshot_time = _ms_epoch_to_timestamp_pair(int(book.get("timestamp")))
+        except (TypeError, ValueError):
+            book_snapshot_time = None
+
+    fee_rate_resp = await ds.get_polymarket_fee_rate(resolved_token_id)
+    try:
+        base_fee_bp = float(fee_rate_resp.get("base_fee"))
+    except (TypeError, ValueError):
+        raise ValueError("Polymarket fee-rate 응답에서 base_fee를 읽지 못했습니다")
+    fee_rate = base_fee_bp / 10_000
+
+    raw_fee_usd = shares * fee_rate * resolved_price * (1 - resolved_price)
+    fee_usd = round(raw_fee_usd, 5)
+    if raw_fee_usd > 0 and fee_usd < 0.00001:
+        fee_usd = 0.00001  # Polymarket 공식 문서의 최소 과금 단위 반영
+
+    return {
+        "generated_at": _timestamp_now(),
+        "token_id": resolved_token_id,
+        "market_slug": market_slug,
+        "shares": shares,
+        "price": round(resolved_price, 4),
+        "price_source": price_source,
+        "base_fee_bp": base_fee_bp,
+        "fee_rate": fee_rate,
+        "fee_usd": fee_usd,
+        "book_snapshot_time": book_snapshot_time,
+        "data_source": "polymarket-clob",
+        "notice": _POLYMARKET_FEE_ESTIMATE_NOTICE,
+    }
+
+
+# ============================================================================
+# prediction.polymarket_mispricing (2026-10-18) - Engineering Precision
+# Backlog 4 "Polymarket용 internal_mispricing 확장". 구현 전 Polymarket 공식
+# 문서(docs.polymarket.com/concepts/markets-events)를 조사한 결과: HIP-4처럼
+# 서버가 strike로 미리 정렬된 사다리를 직접 묶어서 내려주는 구조가 Polymarket
+# 에는 없다. conditionId/questionId는 마켓마다 고유해서 비교 불가, negRisk
+# 그룹도 "상호배타(둘 중 하나만 Yes)" 전용이라 strike 사다리와는 다른 개념 -
+# "이 마켓들이 같은 기초자산/같은 만기를 공유하는지"를 서버가 안전하게 자동
+# 판별할 Gamma API 필드가 없다고 결론.
+#
+# 그래서 hip4_mispricing과 달리 "정산조건 동일성"을 서버가 추론하지 않고,
+# 호출자가 이미 확인한 뒤 명시적으로 넘기는 구조로 설계했다 - 호출자가 임의의
+# 마켓을 잘못 섞어 넘기면 가짜 차익거래 신호가 나올 수 있다는 점을 notice에
+# 항상 명시(pending-backlog-2026-09-10.md 항목 8/architecture-roadmap.md
+# 백로그 4가 우려했던 바로 그 위험 - 자동 추론을 포기하는 쪽으로 회피).
+# ============================================================================
+
+_POLYMARKET_MISPRICING_NOTICE = (
+    "IMPORTANT: this endpoint does NOT verify or infer settlement-condition "
+    "equivalence between the rungs you supply - Polymarket's Gamma API has "
+    "no reliable field for that (conditionId/questionId are unique per "
+    "market, and negRisk groups are mutually-exclusive-outcome groups, not "
+    "strike ladders - see architecture-roadmap.md backlog item 4). You are "
+    "asserting that every token_id/market_slug you pass already shares the "
+    "same underlying asset and the same expiry/resolution date; passing "
+    "unrelated markets will produce a meaningless or false arbitrage "
+    "signal. Only a pure monotonicity check runs here - higher strike must "
+    "not be priced above a lower strike. max_riskless_profit_per_usd is a "
+    "textbook upper bound (the violation size itself): it ignores trading "
+    "fees (see prediction.polymarket_fee_estimate), slippage, position "
+    "limits, and the risk that one leg fails to fill. Not investment advice."
+)
+
+
+async def get_polymarket_mispricing(
+    strikes: list[float],
+    token_ids: list[str] | None = None,
+    market_slugs: list[str] | None = None,
+    outcomes: list[str] | None = None,
+) -> dict:
+    """
+    호출자가 "이 마켓들은 전부 같은 기초자산·같은 만기(정산조건)를 공유한다"고
+    이미 확인한 뒤 넘겨준 Polymarket 마켓 묶음(rung) 안에서, strike가 높을수록
+    yes_price가 낮거나 같아야 하는 단조성 위반을 찾는다. 정산조건 동일성 자체는
+    전혀 검증/추론하지 않음 - 위 _POLYMARKET_MISPRICING_NOTICE 참고.
+    token_ids를 직접 주거나, market_slugs(+ 선택적 outcomes, 기본 "yes")로
+    토큰을 자동 해석한다 - 둘을 섞어 쓰지 않음(하나를 고르면 그걸로 전부 해석).
+    GET /v1/prediction/polymarket-mispricing이 사용한다 (main.py 참고).
+    """
+    if not strikes or len(strikes) < 2:
+        raise ValueError("strikes는 최소 2개 이상이어야 합니다 (비교할 rung이 2개는 있어야 단조성을 체크할 수 있음)")
+    n = len(strikes)
+
+    if token_ids:
+        if len(token_ids) != n:
+            raise ValueError("token_ids와 strikes는 길이가 같아야 합니다")
+        resolved_ids = [str(t).strip() for t in token_ids]
+    elif market_slugs:
+        if len(market_slugs) != n:
+            raise ValueError("market_slugs와 strikes는 길이가 같아야 합니다")
+        resolved_outcomes = outcomes if outcomes else ["yes"] * n
+        if len(resolved_outcomes) != n:
+            raise ValueError("outcomes를 주려면 market_slugs/strikes와 길이가 같아야 합니다")
+        resolved_ids = []
+        for slug, oc in zip(market_slugs, resolved_outcomes):
+            market = await ds.get_polymarket_market(slug.strip())
+            tid = _market_token_id_for_outcome(market, oc)
+            if not tid:
+                raise ValueError(f"마켓 slug '{slug}'에서 '{oc}' 토큰을 찾지 못했습니다")
+            resolved_ids.append(tid)
+    else:
+        raise ValueError("token_ids 또는 market_slugs(+ 선택적 outcomes) 중 하나는 필요합니다")
+
+    books = await asyncio.gather(*(ds.get_polymarket_order_book(tid) for tid in resolved_ids))
+
+    rungs = []
+    book_timestamps_ms: list[int] = []
+    for tid, strike, book in zip(resolved_ids, strikes, books):
+        bids = _parse_book_levels(book.get("bids") or [], reverse=True)
+        asks = _parse_book_levels(book.get("asks") or [], reverse=False)
+        best_bid = bids[0]["price"] if bids else None
+        best_ask = asks[0]["price"] if asks else None
+        if best_bid is not None and best_ask is not None:
+            yes_price = (best_bid + best_ask) / 2
+        else:
+            yes_price = best_bid if best_bid is not None else best_ask
+        try:
+            book_timestamps_ms.append(int(book.get("timestamp")))
+        except (TypeError, ValueError):
+            pass
+        rungs.append({"token_id": tid, "strike": strike, "yes_price": yes_price})
+
+    rungs_with_price = sorted(
+        (r for r in rungs if r["yes_price"] is not None), key=lambda r: r["strike"]
+    )
+
+    violations = []
+    for lower, higher in zip(rungs_with_price, rungs_with_price[1:]):
+        if lower["strike"] == higher["strike"]:
+            continue
+        lower_yes = lower["yes_price"]
+        higher_yes = higher["yes_price"]
+        if higher_yes > lower_yes:
+            violations.append(
+                {
+                    "lower_strike": lower["strike"],
+                    "lower_token_id": lower["token_id"],
+                    "lower_strike_yes_price": round(lower_yes, 4),
+                    "higher_strike": higher["strike"],
+                    "higher_token_id": higher["token_id"],
+                    "higher_strike_yes_price": round(higher_yes, 4),
+                    "violation_bp": round((higher_yes - lower_yes) * 10_000, 2),
+                    "max_riskless_profit_per_usd": round(higher_yes - lower_yes, 6),
+                }
+            )
+
+    oldest_book_snapshot_time = (
+        _ms_epoch_to_timestamp_pair(min(book_timestamps_ms)) if book_timestamps_ms else None
+    )
+
+    return {
+        "generated_at": _timestamp_now(),
+        "rungs_checked": len(rungs_with_price),
+        "rungs_skipped_empty_book": len(rungs) - len(rungs_with_price),
+        "violation_count": len(violations),
+        "violations": violations,
+        "oldest_book_snapshot_time": oldest_book_snapshot_time,
+        "data_source": "polymarket-clob",
+        "notice": _POLYMARKET_MISPRICING_NOTICE,
+    }
+
+
+# ============================================================================
 # prediction.hip4_snapshot (2026-09-28) - 예측시장 확장 Wave 2. Hyperliquid
 # 공식 HIP-4(outcome/prediction market) 무료 info API만 쓴다(인증/지갑 불필요).
 # 상세 조사/데이터 검증 기록은 프로젝트 노트

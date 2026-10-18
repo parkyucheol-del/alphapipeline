@@ -1371,6 +1371,130 @@ LIQUIDITY_DEPTH_AFTER_HAIRCUT_EXAMPLE = {
 }
 
 
+# ===== prediction.polymarket_fee_estimate (2026-10-18) - Engineering Precision
+# Backlog 3 "Polymarket 동적 수수료율". fee_rate는 하드코딩 없이 Polymarket
+# 공식 GET /fee-rate에서 매 호출 실측 - app/logic.py's get_polymarket_fee_estimate
+# 모듈 코멘트에 조사 근거 전체 정리돼 있음. =====
+class PredictionPolymarketFeeEstimateResponse(BaseModel):
+    generated_at: TimestampPair
+    token_id: str
+    market_slug: str | None = None
+    shares: float
+    price: float
+    price_source: str = Field(
+        description="'explicit' if you passed price yourself, else 'book_best_sell'/'book_best_buy' "
+        "depending on side."
+    )
+    base_fee_bp: float = Field(
+        description="Raw basis-point value read live from Polymarket's own GET /fee-rate for this "
+        "exact token_id - never hardcoded."
+    )
+    fee_rate: float = Field(description="base_fee_bp / 10000.")
+    fee_usd: float = Field(
+        description="shares * fee_rate * price * (1 - price) - Polymarket's own bell-curve taker-fee "
+        "formula, peaking at a $0.50 price."
+    )
+    book_snapshot_time: TimestampPair | None = None
+    data_source: str
+    notice: str | None = None
+
+
+POLYMARKET_FEE_ESTIMATE_EXAMPLE = {
+    "generated_at": {"utc": "2026-10-18T12:00:00Z", "kst": "2026-10-18 21:00:00 KST"},
+    "token_id": "78901234567890123456789012345678901234567890123456789012345678",
+    "market_slug": "will-btc-hit-150k-by-2028",
+    "shares": 100.0,
+    "price": 0.47,
+    "price_source": "book_best_sell",
+    "base_fee_bp": 30.0,
+    "fee_rate": 0.003,
+    "fee_usd": 0.07473,
+    "book_snapshot_time": {"utc": "2026-10-18T11:59:59Z", "kst": "2026-10-18 20:59:59 KST"},
+    "data_source": "polymarket-clob",
+    "notice": (
+        "Taker fee only - Polymarket makers pay 0 across every category (see "
+        "docs.polymarket.com/trading/fees). fee_rate is read live from Polymarket's own GET "
+        "/fee-rate endpoint for this exact token_id (base_fee, basis points) - never hardcoded, "
+        "since per-category rates have changed more than once according to Polymarket's own "
+        "reference docs. fee_usd = shares * fee_rate * price * (1 - price), the official "
+        "bell-curve formula (peaks at a $0.50 price, falls toward zero near $0/$1) - verified "
+        "against docs.polymarket.com/trading/fees on 2026-10-18, not an unverified third-party "
+        "claim. Rounded to 5 decimals with a 0.00001 USDC floor on any nonzero fee, per "
+        "Polymarket's own stated rounding rule. This is Polymarket's exchange fee only - it does "
+        "not include gas, slippage, or AlphaPipeline's own charge for this call."
+    ),
+}
+
+
+# ===== prediction.polymarket_mispricing (2026-10-18) - Engineering Precision
+# Backlog 4 "Polymarket용 internal_mispricing 확장". 정산조건 동일성은 서버가
+# 추론하지 않고 호출자가 보증 - app/logic.py's get_polymarket_mispricing 모듈
+# 코멘트에 조사 근거 전체 정리돼 있음. =====
+class PolymarketMispricingViolation(BaseModel):
+    lower_strike: float
+    lower_token_id: str
+    lower_strike_yes_price: float
+    higher_strike: float
+    higher_token_id: str
+    higher_strike_yes_price: float
+    violation_bp: float = Field(
+        description="(higher_strike_yes_price - lower_strike_yes_price) * 10000. Always positive "
+        "when present - a positive value is what makes this a violation."
+    )
+    max_riskless_profit_per_usd: float = Field(
+        description="Textbook upper bound (= the violation size itself) per $1 notional on the "
+        "smaller leg, before fees/slippage/execution risk. Not investment advice."
+    )
+
+
+class PredictionPolymarketMispricingResponse(BaseModel):
+    generated_at: TimestampPair
+    rungs_checked: int
+    rungs_skipped_empty_book: int = Field(
+        description="Rungs whose order book had neither a bid nor an ask - excluded from the "
+        "monotonicity check entirely."
+    )
+    violation_count: int
+    violations: list[PolymarketMispricingViolation]
+    oldest_book_snapshot_time: TimestampPair | None = None
+    data_source: str
+    notice: str
+
+
+POLYMARKET_MISPRICING_EXAMPLE = {
+    "generated_at": {"utc": "2026-10-18T12:00:00Z", "kst": "2026-10-18 21:00:00 KST"},
+    "rungs_checked": 3,
+    "rungs_skipped_empty_book": 0,
+    "violation_count": 1,
+    "violations": [
+        {
+            "lower_strike": 100000.0,
+            "lower_token_id": "78901234567890123456789012345678901234567890123456789012345678",
+            "lower_strike_yes_price": 0.40,
+            "higher_strike": 110000.0,
+            "higher_token_id": "11223344556677889900112233445566778899001122334455667788990011",
+            "higher_strike_yes_price": 0.45,
+            "violation_bp": 500.0,
+            "max_riskless_profit_per_usd": 0.05,
+        }
+    ],
+    "oldest_book_snapshot_time": {"utc": "2026-10-18T11:59:59Z", "kst": "2026-10-18 20:59:59 KST"},
+    "data_source": "polymarket-clob",
+    "notice": (
+        "IMPORTANT: this endpoint does NOT verify or infer settlement-condition equivalence "
+        "between the rungs you supply - Polymarket's Gamma API has no reliable field for that "
+        "(conditionId/questionId are unique per market, and negRisk groups are mutually-"
+        "exclusive-outcome groups, not strike ladders). You are asserting that every "
+        "token_id/market_slug you pass already shares the same underlying asset and the same "
+        "expiry/resolution date; passing unrelated markets will produce a meaningless or false "
+        "arbitrage signal. Only a pure monotonicity check runs here - higher strike must not be "
+        "priced above a lower strike. max_riskless_profit_per_usd is a textbook upper bound (the "
+        "violation size itself): it ignores trading fees (see prediction.polymarket_fee_estimate), "
+        "slippage, position limits, and the risk that one leg fails to fill. Not investment advice."
+    ),
+}
+
+
 class Hip4Side(BaseModel):
     name: str = Field(description="Side label - usually 'Yes'/'No', sometimes a competitor's short name.")
     price: float | None = Field(

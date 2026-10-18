@@ -16,7 +16,14 @@ import logging
 
 import httpx
 from app.config import settings
-from app.cache import goplus_cache, hip4_cache, oracle_gap_cache, polymarket_book_cache, ttl_cached
+from app.cache import (
+    goplus_cache,
+    hip4_cache,
+    oracle_gap_cache,
+    polymarket_book_cache,
+    polymarket_fee_rate_cache,
+    ttl_cached,
+)
 
 logger = logging.getLogger("alphapipeline")
 
@@ -651,6 +658,26 @@ async def get_polymarket_order_book(token_id: str) -> dict:
     """
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         r = await client.get(f"{CLOB_API_BASE}/book", params={"token_id": token_id})
+        r.raise_for_status()
+        return r.json()
+
+
+# 2026-10-18 Engineering Precision Backlog 3 "Polymarket 동적 수수료율"용.
+# docs.polymarket.com/trading/fees/api-reference 2026-10-18 직접 확인:
+# GET {CLOB_API_BASE}/fee-rate?token_id=... -> {"base_fee": <int, basis points>}.
+# 카테고리별 feeRate 숫자는 변동이 있었다고 공식 문서/제3자 기사 양쪽이 확인했기
+# 때문에, 하드코딩된 카테고리 테이블 대신 이 엔드포인트로 마켓(token_id)별
+# 실측값을 직접 받는다 - app/logic.py의 get_polymarket_fee_estimate가 쓴다.
+@ttl_cached(polymarket_fee_rate_cache, key_fn=lambda token_id: f"fee_rate:{token_id}")
+async def get_polymarket_fee_rate(token_id: str) -> dict:
+    """
+    Polymarket CLOB 공식 수수료율 조회 (적당히 넉넉한 고정 TTL 캐시 -
+    POLYMARKET_FEE_RATE_CACHE_TTL_SECONDS, 수수료율은 오더북처럼 초 단위로
+    안 변해서 짧게 잡을 필요 없음). 응답의 base_fee는 basis point 단위 -
+    get_polymarket_fee_estimate에서 10000으로 나눠 fee_rate(소수)로 환산한다.
+    """
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        r = await client.get(f"{CLOB_API_BASE}/fee-rate", params={"token_id": token_id})
         r.raise_for_status()
         return r.json()
 
