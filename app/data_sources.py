@@ -570,15 +570,84 @@ async def get_hyperliquid_all_mids() -> dict:
         return r.json()
 
 
-@ttl_cached(polymarket_book_cache, key_fn=lambda token_id: f"book:{token_id}")
+# 2026-10-18 Engineering Precision Backlog 2 "가변형 TTL 캐시 엔진"의
+# 첫 적용 사례. polymarket_book_cache는 더 이상 고정 TTL이 아니라, 이
+# ttl_fn이 매 캐시미스마다 "이 책을 몇 초간 캐시할지"를 직접 계산한다 -
+# 신규 업스트림 호출은 전혀 없음, 이미 받은 book 응답의 bids[0]/asks[0]/
+# timestamp 필드만 쓴다.
+#
+# 신호 두 가지를 합친다(백로그 문구 "시장 변동성 및 호가 갱신 빈도"를 그대로
+# 구현):
+#   1. 호가 갱신 빈도: 직전 조회와 완전히 같은 timestamp가 다시 오면, 그
+#      사이 업스트림 자체가 호가를 갱신한 적이 없다는 뜻 - 더 길게 캐시해도
+#      실시간성 손실이 없으므로 즉시 MAX_TTL.
+#   2. 시장 변동성: timestamp가 바뀌었다면, mid price가 직전 조회 대비 얼마나
+#      움직였는지(price-point*10000 = bp 단위, 0~1 스케일 확률 가격이라
+#      상대비율(%) 대신 절대 변화량을 쓴다 - 안 그러면 가격이 0에 가까운
+#      마켓에서 상대비율이 터무니없이 커짐)를 LOW_BP~HIGH_BP 구간에서
+#      MAX_TTL~MIN_TTL로 선형보간.
+# 비교 기준이 없는 첫 조회, 혹은 호가가 완전히 비어있는 경우는 보수적으로
+# MIN_TTL (레이트리밋 방어보다 신선도를 우선).
+_polymarket_book_state: dict[str, tuple[float | None, object]] = {}
+
+
+def _polymarket_book_ttl_fn(key: str, book: dict) -> float:
+    min_ttl = settings.POLYMARKET_BOOK_CACHE_MIN_TTL_SECONDS
+    max_ttl = settings.POLYMARKET_BOOK_CACHE_MAX_TTL_SECONDS
+
+    timestamp = book.get("timestamp")
+    try:
+        bids = book.get("bids") or []
+        asks = book.get("asks") or []
+        best_bid = max((float(l["price"]) for l in bids), default=None)
+        best_ask = min((float(l["price"]) for l in asks), default=None)
+    except (TypeError, ValueError, KeyError):
+        best_bid = best_ask = None
+
+    if best_bid is None and best_ask is None:
+        mid = None
+    elif best_bid is not None and best_ask is not None:
+        mid = (best_bid + best_ask) / 2
+    else:
+        mid = best_bid if best_bid is not None else best_ask
+
+    last_mid, last_timestamp = _polymarket_book_state.get(key, (None, None))
+    _polymarket_book_state[key] = (mid, timestamp)
+
+    if mid is None:
+        return min_ttl  # 호가가 비어있는 희박한 상태는 보수적으로 짧게
+
+    if timestamp is not None and last_timestamp is not None and timestamp == last_timestamp:
+        return max_ttl  # 업스트림 자체가 그 사이 갱신 안 함 - 길게 캐시해도 안전
+
+    if last_mid is None:
+        return min_ttl  # 비교 기준이 없는 첫 조회는 보수적으로 짧게
+
+    moved_bp = abs(mid - last_mid) * 10_000
+    low_bp = settings.POLYMARKET_BOOK_VOLATILITY_LOW_BP
+    high_bp = settings.POLYMARKET_BOOK_VOLATILITY_HIGH_BP
+    if moved_bp >= high_bp:
+        return min_ttl
+    if moved_bp <= low_bp:
+        return max_ttl
+    frac = (moved_bp - low_bp) / (high_bp - low_bp)
+    return max_ttl - frac * (max_ttl - min_ttl)
+
+
+@ttl_cached(
+    polymarket_book_cache,
+    key_fn=lambda token_id: f"book:{token_id}",
+    ttl_fn=_polymarket_book_ttl_fn,
+)
 async def get_polymarket_order_book(token_id: str) -> dict:
     """
-    CLOB 오더북 조회 (POLYMARKET_BOOK_CACHE_TTL_SECONDS 짧은 TTL 캐시 -
-    neg_risk_arbitrage가 여러 outcome을 asyncio.gather로 한 번에 조회할 때,
-    그리고 exit_capacity_audit이 직후 같은 토큰을 다시 조회할 때 중복 호출을
-    줄여서 Polymarket CLOB의 IP 레이트리밋(429)을 방어한다. x402 결제는 캐시
-    히트와 무관하게 매 호출 그대로 징수되므로 마진에는 영향 없다 - app/cache.py의
-    ttl_cached() 참고).
+    CLOB 오더북 조회 (가변형 TTL 캐시 - POLYMARKET_BOOK_CACHE_MIN_TTL_SECONDS~
+    MAX_TTL_SECONDS 사이, 시장 변동성/호가 갱신 빈도에 따라 매번 다르게 계산됨,
+    _polymarket_book_ttl_fn 참고). neg_risk_arbitrage가 여러 outcome을
+    asyncio.gather로 한 번에 조회할 때, 그리고 exit_capacity_audit이 직후 같은
+    토큰을 다시 조회할 때 중복 호출을 줄여서 Polymarket CLOB의 IP
+    레이트리밋(429)을 방어한다. x402 결제는 캐시 히트와 무관하게 매 호출
+    그대로 징수되므로 마진에는 영향 없다 - app/cache.py의 ttl_cached() 참고).
     """
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         r = await client.get(f"{CLOB_API_BASE}/book", params={"token_id": token_id})
