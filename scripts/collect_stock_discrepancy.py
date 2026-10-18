@@ -11,10 +11,25 @@ nothing sensitive in it so it lives somewhere that actually gets committed):
       "timestamp_utc": "...", "timestamp_kst": "...",
       "last_regular_close_usd": 123.45,
       "b20_price_usd": 123.10, "b20_source": "geckoterminal", "b20_ok": true,
-      "hl_mark_price_usd": 123.30, "hl_funding_rate": 0.0001, "hl_dex": "xyz", "hl_ok": true,
+      "hl_mark_price_usd": 123.30, "hl_oracle_price_usd": 123.28, "hl_mid_price_usd": 123.31,
+      "hl_open_interest": 4821.5, "hl_funding_rate": 0.0001, "hl_dex": "xyz", "hl_ok": true,
       "b20_vs_close_pct": -0.28, "hl_vs_close_pct": -0.12, "b20_vs_hl_pct": -0.16,
+      "hl_mark_vs_oracle_bp": 1.6, "hl_mid_vs_oracle_bp": 2.4,
       "data_gap": false
     }
+
+2026-10-18 update (Daily Alpha action card, dex=xyz mark/oracle/mid +
+open interest): fetch_hl_mark_and_funding() was extended into
+fetch_hl_stock_perp_ctx(), pulling oraclePx/midPx/openInterest off the
+same per-dex metaAndAssetCtxs call alongside markPx/funding - same
+asset_ctx object Hyperliquid already returns, no extra request. Gap vs.
+oracle is reported in basis points (hl_mark_vs_oracle_bp,
+hl_mid_vs_oracle_bp), matching the bp convention measure_hl_gap.py
+already uses for the BTC/ETH default-dex mid-oracle alert. This collector
+was already wired into the hourly
+.github/workflows/stock-discrepancy-collect.yml cron (dex="xyz" was
+already in SYMBOLS' hl_coin_raw) - this change only adds fields to the
+row it was already writing, it does not touch the cron itself.
 
 IMPORTANT — read before relying on this:
 1. The Daily Alpha brief's example symbol list was NVDA/TSLA/AAPL/MSTR/COIN,
@@ -153,20 +168,25 @@ async def fetch_hl_perp_dex_universe(client: httpx.AsyncClient, dex_name: str) -
         return None
 
 
-async def fetch_hl_mark_and_funding(
+async def fetch_hl_stock_perp_ctx(
     client: httpx.AsyncClient, coin_raw: str
-) -> tuple[float | None, float | None]:
-    """mark price + funding rate for one HIP-3 stock perp, e.g. coin_raw="xyz:NVDA".
+) -> dict[str, float | None]:
+    """mark/oracle/mid price + funding + open interest for one HIP-3 stock
+    perp, e.g. coin_raw="xyz:NVDA".
 
     metaAndAssetCtxs returns [{"universe": [...]}, [asset_ctx, ...]] where
     asset_ctx[i] lines up positionally with universe[i] - this mirrors the
     allMids/outcomeMeta pairing pattern already used for prediction.hip4_snapshot
     in app/data_sources.py, just for a perp dex instead of the default one.
+    oraclePx/midPx/openInterest are already present on the same asset_ctx
+    object as markPx/funding (same fields measure_hl_gap.py reads off the
+    default dex for ETH/BTC) - no extra HTTP call needed to get them.
     """
+    empty = {"mark": None, "oracle": None, "mid": None, "funding": None, "open_interest": None}
     dex_name, _, coin = coin_raw.partition(":")
     data = await fetch_hl_perp_dex_universe(client, dex_name)
     if not data:
-        return None, None
+        return empty
     try:
         universe = data[0]["universe"]
         asset_ctxs = data[1]
@@ -178,17 +198,23 @@ async def fetch_hl_mark_and_funding(
             # coin didn't exist, when it actually did.
             if asset.get("name") == coin_raw:
                 ctx = asset_ctxs[i]
-                mark = ctx.get("markPx")
-                funding = ctx.get("funding")
-                return (
-                    float(mark) if mark is not None else None,
-                    float(funding) if funding is not None else None,
-                )
+
+                def f(key: str) -> float | None:
+                    val = ctx.get(key)
+                    return float(val) if val is not None else None
+
+                return {
+                    "mark": f("markPx"),
+                    "oracle": f("oraclePx"),
+                    "mid": f("midPx"),
+                    "funding": f("funding"),
+                    "open_interest": f("openInterest"),
+                }
         print(f"[warn] {coin_raw} not found in dex {dex_name} universe", file=sys.stderr)
-        return None, None
+        return empty
     except Exception as exc:
         print(f"[warn] parsing metaAndAssetCtxs failed for {coin_raw}: {exc}", file=sys.stderr)
-        return None, None
+        return empty
 
 
 def pct_diff(a: float | None, b: float | None) -> float | None:
@@ -197,13 +223,26 @@ def pct_diff(a: float | None, b: float | None) -> float | None:
     return round((a - b) / b * 100, 4)
 
 
+def bp_diff(a: float | None, b: float | None) -> float | None:
+    """Same as pct_diff but in basis points, matching measure_hl_gap.py's
+    mid-oracle alert convention (gap = (mid - oracle) / oracle * 1e4)."""
+    if a is None or b is None or b == 0:
+        return None
+    return round((a - b) / b * 1e4, 2)
+
+
 async def collect_stock_rows(client: httpx.AsyncClient) -> list[dict]:
     ts_utc, ts_kst = now_stamps()
     rows = []
     for symbol, cfg in SYMBOLS.items():
         close = await fetch_last_regular_close(client, symbol)
         b20_price = await fetch_b20_price(client, cfg["base_token_address"])
-        hl_mark, hl_funding = await fetch_hl_mark_and_funding(client, cfg["hl_coin_raw"])
+        hl_ctx = await fetch_hl_stock_perp_ctx(client, cfg["hl_coin_raw"])
+        hl_mark = hl_ctx["mark"]
+        hl_oracle = hl_ctx["oracle"]
+        hl_mid = hl_ctx["mid"]
+        hl_funding = hl_ctx["funding"]
+        hl_open_interest = hl_ctx["open_interest"]
 
         b20_ok = b20_price is not None
         hl_ok = hl_mark is not None
@@ -217,12 +256,20 @@ async def collect_stock_rows(client: httpx.AsyncClient) -> list[dict]:
                 "b20_source": "geckoterminal",
                 "b20_ok": b20_ok,
                 "hl_mark_price_usd": hl_mark,
+                "hl_oracle_price_usd": hl_oracle,
+                "hl_mid_price_usd": hl_mid,
+                "hl_open_interest": hl_open_interest,
                 "hl_funding_rate": hl_funding,
                 "hl_dex": cfg["hl_coin_raw"].split(":")[0],
                 "hl_ok": hl_ok,
                 "b20_vs_close_pct": pct_diff(b20_price, close),
                 "hl_vs_close_pct": pct_diff(hl_mark, close),
                 "b20_vs_hl_pct": pct_diff(b20_price, hl_mark),
+                # mark/mid vs oracle, in bp - same convention as
+                # measure_hl_gap.py's BTC/ETH default-dex alert, now applied
+                # to the xyz stock perps this collector already tracks.
+                "hl_mark_vs_oracle_bp": bp_diff(hl_mark, hl_oracle),
+                "hl_mid_vs_oracle_bp": bp_diff(hl_mid, hl_oracle),
                 # data_gap feeds the launch-criteria "<=10% missing data" check directly.
                 "data_gap": not (b20_ok and hl_ok and close is not None),
             }
