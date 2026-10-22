@@ -1,29 +1,29 @@
 {
-  "generated_at_utc": "2026-10-21T04:51:10.076859+00:00",
+  "generated_at_utc": "2026-10-22T04:50:08.773165+00:00",
   "current_cycle_halving_date": "2024-04-20",
-  "days_since_halving": 914,
+  "days_since_halving": 915,
   "btc": {
-    "price_usd_today": 82700.0,
+    "price_usd_today": 82765.49,
     "price_usd_on_current_halving": 60636.86,
-    "return_since_halving_pct": 36.39,
+    "return_since_halving_pct": 36.49,
     "return_since_halving_pct_2016_cycle_same_day": 453.53,
-    "return_vs_2016_cycle_pct": -417.14,
+    "return_vs_2016_cycle_pct": -417.04,
     "return_since_halving_pct_2020_cycle_same_day": 81.47,
-    "return_vs_2020_cycle_pct": -45.08,
+    "return_vs_2020_cycle_pct": -44.98,
     "data_ok": true
   },
   "eth": {
-    "price_usd_today": 2441.22,
+    "price_usd_today": 2440.63,
     "price_usd_on_current_halving": 3147.29,
-    "return_since_halving_pct": -22.43,
+    "return_since_halving_pct": -22.45,
     "return_since_halving_pct_2016_cycle_same_day": null,
     "return_vs_2016_cycle_pct": null,
     "return_since_halving_pct_2020_cycle_same_day": 489.8,
-    "return_vs_2020_cycle_pct": -512.23,
+    "return_vs_2020_cycle_pct": -512.25,
     "data_ok": true
   },
-  "btc_dominance_pct_today": 59.514662205499526,
-  "dxy_level": 101.78,
-  "us10y_yield_pct": 5.12,
+  "btc_dominance_pct_today": 59.54343973890496,
+  "dxy_level": 101.58,
+  "us10y_yield_pct": 5.15,
   "data_gap": false
 }
