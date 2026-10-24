@@ -80,3 +80,4 @@
 {"timestamp_utc": "2026-10-24T14:34:16.184514+00:00", "timestamp_kst": "2026-10-24T23:34:16.184514+09:00", "series_ticker": "KXBTC15M", "open_market_count": 1, "markets": [{"ticker": "KXBTC15M-26OCT241045-45", "yes_bid": null, "yes_ask": null, "close_time": "2026-10-24T14:45:00Z"}], "ok": true}
 {"timestamp_utc": "2026-10-24T18:10:10.554927+00:00", "timestamp_kst": "2026-10-25T03:10:10.554927+09:00", "series_ticker": "KXBTC15M", "open_market_count": 0, "markets": [], "ok": true}
 {"timestamp_utc": "2026-10-24T20:53:32.161238+00:00", "timestamp_kst": "2026-10-25T05:53:32.161238+09:00", "series_ticker": "KXBTC15M", "open_market_count": 0, "markets": [], "ok": true}
+{"timestamp_utc": "2026-10-24T23:16:11.838594+00:00", "timestamp_kst": "2026-10-25T08:16:11.838594+09:00", "series_ticker": "KXBTC15M", "open_market_count": 1, "markets": [{"ticker": "KXBTC15M-26OCT241930-30", "yes_bid": null, "yes_ask": null, "close_time": "2026-10-24T23:30:00Z"}], "ok": true}
