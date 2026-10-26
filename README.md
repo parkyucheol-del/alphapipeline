@@ -263,6 +263,8 @@ Collecting hourly, not selling yet. `scripts/collect_stock_discrepancy.py` runs 
 
 **Secondary, free feed**: the same cron also snapshots Kalshi's `KXBTC15M` 15-minute/hourly crypto prediction markets (public, no-auth API) into `data-public/kalshi_btc15m_log.jsonl`, to compare against `prediction.hip4_snapshot`'s own BTC probability later. No extra infrastructure cost; not part of the launch/hold decision above.
 
+**New sub-feed, started 2026-10-26 — EQX spot vs Hyperliquid perp gap**: EQX Labs listed 11 tokenized US stocks/ETFs (EQSPY, EQQQQ, EQAAPL, EQAMZN, EQGOOG, EQMETA, EQMSFT, EQNVDA, EQTSLA, EQMU, EQSPCX) as native Hyperliquid HIP-1 spot tokens on 2026-10-26 22:30 KST. Unlike the Base-vs-Hyperliquid comparison above (two different chains, bridge/settlement noise included), this is spot and perp on the *same* HyperCore venue, so the gap is a cleaner read on pure after-hours arbitrage-unavailability. Same hourly cron now also writes `data-public/eqx_gap_log.jsonl` (`collect_eqx_gap_rows()` in the same script). Not a paid endpoint yet — watching whether the after-hours/weekend gap is consistently larger than the regular-hours gap before deciding. No official EQX token ID registry was public at launch, so rows are matched by token name only (`EQ` + ticker) — revisit once EQX publishes IDs.
+
 ---
 
 ## Disclaimer

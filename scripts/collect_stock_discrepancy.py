@@ -31,6 +31,27 @@ was already wired into the hourly
 already in SYMBOLS' hl_coin_raw) - this change only adds fields to the
 row it was already writing, it does not touch the cron itself.
 
+2026-10-26 update (Daily Alpha build/action 카드, EQX 현물 상장): EQX Labs의
+EQ-프리픽스 토큰(EQNVDA 등)이 Hyperliquid HIP-1 현물로 상장하면서, 기존
+B20-vs-HL 비교(체인이 다른 두 자산)보다 더 깨끗한 "같은 체인 안 현물 vs 퍼프"
+비교가 가능해졌다. collect_eqx_gap_rows()가 이 비교를 담당하고, 결과는 별도
+파일 data-public/eqx_gap_log.jsonl에 쌓인다(기존 symbol 스키마와 안 섞음 -
+현물/퍼프 페어링 방식이 달라서 한 파일에 넣으면 혼란스러움):
+    {
+      "eqx_token_name": "EQNVDA", "underlying_symbol": "NVDA",
+      "timestamp_utc": "...", "timestamp_kst": "...",
+      "eqx_spot_price_usd": 123.40, "eqx_spot_day_volume_usd": 98210.5, "eqx_spot_ok": true,
+      "hl_perp_coin_raw": "xyz:NVDA", "hl_perp_mid_price_usd": 123.31,
+      "hl_perp_mark_price_usd": 123.30, "hl_perp_oracle_price_usd": 123.28, "hl_perp_ok": true,
+      "spot_vs_perp_mid_bp": 7.3,
+      "data_gap": false
+    }
+런칭은 2026-10-26 22:30 KST, 미국 정규장 마감은 그다음 날 05:00 KST라
+이미 매시간(:13) 도는 이 크론이 두 시점을 자연히 커버한다 - 다만 1시간 간격이라
+브리핑이 제안한 "5분마다"보다 거칠다. 괴리 가설("휴장 중 괴리가 장중보다 큰가")
+판정은 최소 1~2주 데이터가 쌓인 뒤 확인할 것 - 자세한 배경은 project 문서
+claude/session-log-2026-10-26-eqx-gap-collector-added.md 참고.
+
 IMPORTANT — read before relying on this:
 1. The Daily Alpha brief's example symbol list was NVDA/TSLA/AAPL/MSTR/COIN,
    but a web search this session (2026-10-08) only turned up confirmed
@@ -81,9 +102,44 @@ SYMBOLS = {
 
 KALSHI_SERIES_TICKER = "KXBTC15M"
 
+# --- EQX 현물(Hyperliquid HIP-1) vs xyz 퍼프 괴리 (2026-10-26 데일리 알파
+# build/action 카드 대응) ---
+#
+# 위의 B20-vs-HL 비교는 체인이 다른 두 자산(Base 토큰 vs Hyperliquid 퍼프)을
+# 비교해서 브리지/정산 잡음이 섞이는데, EQX의 EQ-프리픽스 토큰은 Hyperliquid
+# HIP-1 현물이라 xyz 퍼프와 같은 HyperCore 안에서 바로 비교할 수 있다 - 이게
+# 오늘 브리핑이 "더 깨끗한 비교"라고 부른 이유.
+#
+# EQX 공식 사이트(eqxlabs.io)·문서(docs.eqxlabs.io) 확인 결과(2026-10-26) 11개
+# 티커는 EQSPY, EQQQQ, EQAAPL, EQAMZN, EQGOOG, EQMETA, EQMSFT, EQNVDA, EQTSLA,
+# EQMU, EQSPCX다. EQGOOG는 기초자산이 GOOGL이지만 토큰 심볼 자체는 GOOG라 xyz
+# 퍼프 쪽 코인명(GOOGL)과 다를 수 있어 아래 매칭에서 둘 다 시도한다.
+#
+# 주의 - 아직 미확인: EQX는 이 글 작성 시점(런칭 당일)에 토큰 ID/주소를
+# 공개 문서에 올리지 않았다("공식 토큰 ID를 공개할 계획"이라고만 되어 있음).
+# 그래서 지금은 spotMetaAndAssetCtxs에서 받은 토큰 이름이 "EQ" + (아래 11개
+# 티커 중 하나)와 정확히 일치하는지로만 걸러낸다 - 이름이 같은 모방 토큰까지는
+# 못 거른다. EQX가 토큰 ID를 공개하면(docs.eqxlabs.io 쪽 "markets and token
+# IDs" 페이지) 여기 주석에 적어두고 ID 비교로 바꿀 것.
+EQX_TICKERS = {
+    "EQSPY": "SPY",
+    "EQQQQ": "QQQ",
+    "EQAAPL": "AAPL",
+    "EQAMZN": "AMZN",
+    "EQGOOG": "GOOGL",  # xyz 퍼프 코인명은 GOOGL 쪽일 가능성이 높아 기본값으로 둠 - 매칭 시 GOOG도 같이 시도
+    "EQMETA": "META",
+    "EQMSFT": "MSFT",
+    "EQNVDA": "NVDA",
+    "EQTSLA": "TSLA",
+    "EQMU": "MU",
+    "EQSPCX": "SPCX",
+}
+EQX_PERP_DEX = "xyz"
+
 DATA_DIR = Path(__file__).resolve().parent.parent / "data-public"
 STOCK_LOG_PATH = DATA_DIR / "stock_discrepancy_log.jsonl"
 KALSHI_LOG_PATH = DATA_DIR / "kalshi_btc15m_log.jsonl"
+EQX_GAP_LOG_PATH = DATA_DIR / "eqx_gap_log.jsonl"
 
 TIMEOUT = httpx.Timeout(20.0)
 
@@ -277,6 +333,96 @@ async def collect_stock_rows(client: httpx.AsyncClient) -> list[dict]:
     return rows
 
 
+async def fetch_eqx_spot_universe(client: httpx.AsyncClient) -> dict[str, dict] | None:
+    """spotMetaAndAssetCtxs 전체를 한 번 호출해서, 이름이 EQX_TICKERS에 있는
+    토큰만 뽑아 {token_name: {"price": ..., "day_volume_usd": ...}}로 돌려준다.
+
+    Hyperliquid 응답 구조는 [meta, asset_ctxs] 튜플이고, meta["tokens"]는
+    {"name", "index", ...} 토큰 정의 목록, meta["universe"]는 거래쌍(마켓)
+    목록으로 각 항목의 "tokens"가 [baseTokenIndex, quoteTokenIndex]다.
+    asset_ctxs[i]가 universe[i]와 위치로 대응된다 - fetch_hl_stock_perp_ctx()가
+    쓰는 metaAndAssetCtxs와 같은 페어링 패턴.
+    """
+    try:
+        r = await client.post(
+            HYPERLIQUID_INFO_URL,
+            json={"type": "spotMetaAndAssetCtxs"},
+        )
+        r.raise_for_status()
+        meta, asset_ctxs = r.json()
+        tokens_by_index = {t["index"]: t for t in meta["tokens"]}
+        result: dict[str, dict] = {}
+        for market, ctx in zip(meta["universe"], asset_ctxs):
+            base_token = tokens_by_index.get(market["tokens"][0])
+            if not base_token:
+                continue
+            name = base_token.get("name", "")
+            if name not in EQX_TICKERS:
+                continue
+            price = ctx.get("midPx") or ctx.get("markPx")
+            result[name] = {
+                "price": float(price) if price is not None else None,
+                "day_volume_usd": (
+                    float(ctx["dayNtlVlm"]) if ctx.get("dayNtlVlm") is not None else None
+                ),
+            }
+        return result
+    except Exception as exc:
+        print(f"[warn] spotMetaAndAssetCtxs failed: {exc}", file=sys.stderr)
+        return None
+
+
+async def collect_eqx_gap_rows(client: httpx.AsyncClient) -> list[dict]:
+    ts_utc, ts_kst = now_stamps()
+    spot = await fetch_eqx_spot_universe(client)
+    rows = []
+    for eqx_name, underlying in EQX_TICKERS.items():
+        spot_entry = (spot or {}).get(eqx_name)
+        spot_price = spot_entry["price"] if spot_entry else None
+        spot_vol = spot_entry["day_volume_usd"] if spot_entry else None
+
+        # GOOG/GOOGL처럼 현물 토큰 심볼과 퍼프 코인명이 다를 수 있어 둘 다 시도.
+        perp_candidates = [underlying]
+        if underlying == "GOOGL":
+            perp_candidates.append("GOOG")
+        elif underlying == "GOOG":
+            perp_candidates.append("GOOGL")
+
+        hl_mid = hl_mark = hl_oracle = None
+        matched_coin_raw = None
+        for candidate in perp_candidates:
+            ctx = await fetch_hl_stock_perp_ctx(client, f"{EQX_PERP_DEX}:{candidate}")
+            if ctx["mid"] is not None or ctx["mark"] is not None:
+                hl_mid, hl_mark, hl_oracle = ctx["mid"], ctx["mark"], ctx["oracle"]
+                matched_coin_raw = f"{EQX_PERP_DEX}:{candidate}"
+                break
+
+        perp_ref = hl_mid or hl_mark
+        spot_ok = spot_price is not None
+        perp_ok = perp_ref is not None
+        rows.append(
+            {
+                "eqx_token_name": eqx_name,
+                "underlying_symbol": underlying,
+                "timestamp_utc": ts_utc,
+                "timestamp_kst": ts_kst,
+                "eqx_spot_price_usd": spot_price,
+                "eqx_spot_day_volume_usd": spot_vol,
+                "eqx_spot_ok": spot_ok,
+                "hl_perp_coin_raw": matched_coin_raw,
+                "hl_perp_mid_price_usd": hl_mid,
+                "hl_perp_mark_price_usd": hl_mark,
+                "hl_perp_oracle_price_usd": hl_oracle,
+                "hl_perp_ok": perp_ok,
+                # 같은 HyperCore 안의 현물 vs 퍼프라 체인/브리지 잡음 없이 순수한
+                # 괴리만 남는다 - bp_diff() 재사용(측정 단위만 bp로 통일).
+                "spot_vs_perp_mid_bp": bp_diff(spot_price, perp_ref),
+                "data_gap": not (spot_ok and perp_ok),
+            }
+        )
+    return rows
+
+
 async def collect_kalshi_snapshot(client: httpx.AsyncClient) -> dict:
     ts_utc, ts_kst = now_stamps()
     try:
@@ -324,13 +470,19 @@ async def main() -> None:
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         stock_rows = await collect_stock_rows(client)
         kalshi_row = await collect_kalshi_snapshot(client)
+        eqx_rows = await collect_eqx_gap_rows(client)
 
     append_jsonl(STOCK_LOG_PATH, stock_rows)
     append_jsonl(KALSHI_LOG_PATH, [kalshi_row])
+    append_jsonl(EQX_GAP_LOG_PATH, eqx_rows)
 
     gaps = sum(1 for r in stock_rows if r["data_gap"])
     print(f"wrote {len(stock_rows)} stock rows ({gaps} with data_gap=true) to {STOCK_LOG_PATH}")
     print(f"wrote 1 kalshi row (ok={kalshi_row['ok']}) to {KALSHI_LOG_PATH}")
+    eqx_gaps = sum(1 for r in eqx_rows if r["data_gap"])
+    print(
+        f"wrote {len(eqx_rows)} EQX gap rows ({eqx_gaps} with data_gap=true) to {EQX_GAP_LOG_PATH}"
+    )
 
 
 if __name__ == "__main__":
