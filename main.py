@@ -127,6 +127,17 @@ app = FastAPI(
     ],
 )
 
+# ===== x402 라우트 가격표 (결제 게이트 ON/OFF와 무관하게 항상 조립) =====
+# 2026-10-26: 아래 root()의 공개 가격표(price_per_call_usdc)가 이 dict에서 직접
+# 파생되도록 바꿨다 - build_routes()는 순수 데이터 조립이라 (네트워크 호출 없음)
+# PAYMENT_BYPASS_FOR_TESTING과 무관하게 항상 안전하게 호출 가능해서, 미들웨어
+# 장착 여부와 분리했다. 자세한 이유는 root() 안 _price_per_call_usdc() 참고.
+_x402_routes = build_routes(
+    dump_risk_enabled=settings.DUMP_RISK_ENABLED,
+    kimchi_alert_enabled=settings.KIMCHI_ALERT_ENABLED,
+    hip4_events_enabled=settings.HIP4_EVENTS_ENABLED,
+)
+
 # ===== x402 공식 결제 미들웨어 장착 =====
 # PAYMENT_BYPASS_FOR_TESTING=true인 동안은 미들웨어를 아예 장착하지 않는다 -
 # 로컬에서 지갑/CDP 키 없이도 전체 흐름을 빠르게 테스트하기 위함.
@@ -135,12 +146,68 @@ if not settings.PAYMENT_BYPASS_FOR_TESTING:
     from x402.http.middleware.fastapi import PaymentMiddlewareASGI
 
     _x402_server = build_resource_server()
-    _x402_routes = build_routes(
-        dump_risk_enabled=settings.DUMP_RISK_ENABLED,
-        kimchi_alert_enabled=settings.KIMCHI_ALERT_ENABLED,
-        hip4_events_enabled=settings.HIP4_EVENTS_ENABLED,
-    )
     app.add_middleware(PaymentMiddlewareASGI, routes=_x402_routes, server=_x402_server)
+
+
+# 2026-10-26: "/" 응답의 가격표(price_per_call_usdc)는 과거엔 이 바로 아래 딕셔너리를
+# 손으로 직접 유지했는데, 그러면 실제 결제 금액을 결정하는 app/payment.py의
+# build_routes() 결과와 완전히 별개의 사본이라, 가격을 바꾸면서 한쪽만 고치면
+# 공개 가격표와 실제 402 청구 금액이 조용히 어긋나는 위험이 있었다(2026-10-25
+# x402 결제 가드 작업에서 지적된 "서버 쪽 /pricing.json이 실제 402 응답과 항상
+# 정확히 일치해야 한다"는 문제의 축소판 — 이 서버 자체에 이미 그 위험이 있었음).
+# 지금은 _x402_routes(=build_routes())를 유일한 소스로 두고 여기선 값만 뽑아온다 -
+# 구조적으로 어긋날 수 없다. 순서는 2026-09-19 제미나이 PMF 진단에 따라 정한
+# 기존 표시 순서(보안 3종 먼저)를 그대로 유지.
+_PRICE_DISPLAY_ORDER = [
+    "/v1/security/token-risk",
+    "/v1/security/contract-health-audit",
+    "/v1/security/token-prescreen",
+    "/v1/security/token-authenticity",
+    "/v1/security/token-diagnostic",
+    "/v1/dex/liquidity-slippage",
+    "/v1/derivatives/whale-position-audit",
+    "/v1/derivatives/funding-rate",
+    "/v1/derivatives/funding-rate-value",
+    "/v1/derivatives/funding-apr-matrix",
+    "/v1/arb/spread-matrix",
+    "/v1/prediction/neg-risk-arbitrage",
+    "/v1/prediction/exit-capacity-audit",
+    "/v1/prediction/order-split-guide",
+    "/v1/prediction/bid-ask-spread-pct",
+    "/v1/prediction/orderbook-imbalance-ratio",
+    "/v1/prediction/liquidity-depth-after-haircut",
+    "/v1/prediction/polymarket-fee-estimate",
+    "/v1/prediction/polymarket-mispricing",
+    "/v1/prediction/hip4-snapshot",
+    "/v1/prediction/hip4-price-ladder",
+    "/v1/prediction/hip4-price",
+    "/v1/prediction/hip4-mispricing",
+    "/v1/market/cycle-compare",
+    "/v1/market/oracle-gap",
+    "/v1/market/oracle-gap-bp",
+    "/v1/calendar/macro-dday",
+    "/v1/tools/ai-markdown",
+    "/v1/market/kimchi-alert",
+    "/v1/unlocks/dump-risk",
+]
+
+
+def _price_per_call_usdc() -> dict[str, float]:
+    """_x402_routes(app/payment.py build_routes())에서 직접 뽑은 "경로 -> 실제
+    청구 금액(USDC)" dict. _x402_routes에 없는 경로(=dump_risk_enabled/
+    kimchi_alert_enabled가 False라 결제 게이트 자체에서 빠진 무료 엔드포인트)는
+    0.0으로 표시한다 - PRICE_*_USDC 설정값이 아니라 build_routes()가 실제로
+    과금 라우트에 등록했는지 여부로만 판단하므로, 플래그가 꺼져 있는데 가격만
+    남아있는 상태가 생길 수 없다.
+    """
+    live_prices: dict[str, float] = {}
+    for route_key, route_config in _x402_routes.items():
+        _, _, path = route_key.partition(" ")
+        accepts = getattr(route_config, "accepts", None) or []
+        if not accepts:
+            continue
+        live_prices[path] = float(str(accepts[0].price).lstrip("$"))
+    return {path: live_prices.get(path, 0.0) for path in _PRICE_DISPLAY_ORDER}
 
 
 # ===== 법적 성격 명시 헤더 (2026-09 추가) =====
@@ -264,86 +331,14 @@ async def root(request: Request):
         # 2026-09부터 전 엔드포인트 단일가가 아니라 데이터 가치 기반 차등 요금제로
         # 전환함 (app/payment.py의 build_routes 참고) - 그래서 단일 숫자 대신
         # 엔드포인트별 가격표를 내려준다.
-        "price_per_call_usdc": {
-            # 2026-09-19: 제미나이 PMF 진단(claude/gemini-pmf-diagnosis-2026-09-19.md) 결과에
-            # 따라 유료 핵심 자산인 보안 3종을 맨 위로 재정렬 - 이 dict의 순서가 "/" 응답과
-            # 랜딩페이지에 그대로 노출되므로, 실제로 검증된 제품이 먼저 보이게 한다.
-            "/v1/security/token-risk": settings.PRICE_TOKEN_RISK_USDC,
-            "/v1/security/contract-health-audit": settings.PRICE_CONTRACT_HEALTH_USDC,
-            "/v1/security/token-prescreen": settings.PRICE_TOKEN_PRESCREEN_USDC,
-            "/v1/security/token-authenticity": settings.PRICE_TOKEN_AUTHENTICITY_USDC,
-            "/v1/security/token-diagnostic": settings.PRICE_TOKEN_DIAGNOSTIC_USDC,
-            "/v1/dex/liquidity-slippage": settings.PRICE_DEX_SLIPPAGE_USDC,
-            "/v1/derivatives/whale-position-audit": settings.PRICE_WHALE_AUDIT_USDC,
-            "/v1/derivatives/funding-rate": settings.PRICE_FUNDING_RATE_USDC,
-            "/v1/derivatives/funding-rate-value": settings.PRICE_FUNDING_RATE_VALUE_USDC,
-            "/v1/derivatives/funding-apr-matrix": settings.PRICE_FUNDING_APR_USDC,
-            "/v1/arb/spread-matrix": settings.PRICE_ARB_SPREAD_USDC,
-            "/v1/prediction/neg-risk-arbitrage": settings.PRICE_NEG_RISK_ARBITRAGE_USDC,
-            "/v1/prediction/exit-capacity-audit": settings.PRICE_EXIT_CAPACITY_AUDIT_USDC,
-            "/v1/prediction/order-split-guide": settings.PRICE_ORDER_SPLIT_GUIDE_USDC,
-            "/v1/prediction/bid-ask-spread-pct": settings.PRICE_BID_ASK_SPREAD_PCT_USDC,
-            "/v1/prediction/orderbook-imbalance-ratio": settings.PRICE_ORDERBOOK_IMBALANCE_RATIO_USDC,
-            "/v1/prediction/liquidity-depth-after-haircut": settings.PRICE_LIQUIDITY_DEPTH_AFTER_HAIRCUT_USDC,
-            "/v1/prediction/polymarket-fee-estimate": settings.PRICE_POLYMARKET_FEE_ESTIMATE_USDC,
-            "/v1/prediction/polymarket-mispricing": settings.PRICE_POLYMARKET_MISPRICING_USDC,
-            "/v1/prediction/hip4-snapshot": settings.PRICE_HIP4_SNAPSHOT_USDC,
-            "/v1/prediction/hip4-price-ladder": settings.PRICE_HIP4_PRICE_LADDER_USDC,
-            "/v1/prediction/hip4-price": settings.PRICE_HIP4_PRICE_USDC,
-            "/v1/prediction/hip4-mispricing": settings.PRICE_HIP4_MISPRICING_USDC,
-            "/v1/market/cycle-compare": settings.PRICE_CYCLE_COMPARE_USDC,
-            "/v1/market/oracle-gap": settings.PRICE_ORACLE_GAP_USDC,
-            "/v1/market/oracle-gap-bp": settings.PRICE_ORACLE_GAP_BP_USDC,
-            "/v1/calendar/macro-dday": settings.PRICE_MACRO_DDAY_USDC,
-            "/v1/tools/ai-markdown": settings.PRICE_AI_MARKDOWN_USDC,
-            # KIMCHI_ALERT_ENABLED/DUMP_RISK_ENABLED가 실제 과금 여부를 결정하는 것과
-            # 동일한 플래그를 그대로 참조한다 - PRICE_*_USDC 값과 무관하게 이 필드가
-            # 항상 실제 서빙 상태와 일치하도록 (app/payment.py의 build_routes 참고).
-            "/v1/market/kimchi-alert": (
-                settings.PRICE_KIMCHI_ALERT_USDC if settings.KIMCHI_ALERT_ENABLED else 0.0
-            ),
-            "/v1/unlocks/dump-risk": (
-                settings.PRICE_DUMP_RISK_USDC if settings.DUMP_RISK_ENABLED else 0.0
-            ),
-        },
+        "price_per_call_usdc": _price_per_call_usdc(),
         "payment": {
             "protocol": "x402",
             "network": ACTIVE_NETWORK,
             "facilitator": "cdp" if USE_CDP_FACILITATOR else "x402.org-testnet-fallback",
             "bypassed_for_testing": settings.PAYMENT_BYPASS_FOR_TESTING,
         },
-        "endpoints": [
-            "/v1/security/token-risk",
-            "/v1/security/contract-health-audit",
-            "/v1/security/token-prescreen",
-            "/v1/security/token-authenticity",
-            "/v1/security/token-diagnostic",
-            "/v1/dex/liquidity-slippage",
-            "/v1/derivatives/whale-position-audit",
-            "/v1/derivatives/funding-rate",
-            "/v1/derivatives/funding-rate-value",
-            "/v1/derivatives/funding-apr-matrix",
-            "/v1/arb/spread-matrix",
-            "/v1/prediction/neg-risk-arbitrage",
-            "/v1/prediction/exit-capacity-audit",
-            "/v1/prediction/order-split-guide",
-            "/v1/prediction/bid-ask-spread-pct",
-            "/v1/prediction/orderbook-imbalance-ratio",
-            "/v1/prediction/liquidity-depth-after-haircut",
-            "/v1/prediction/polymarket-fee-estimate",
-            "/v1/prediction/polymarket-mispricing",
-            "/v1/prediction/hip4-snapshot",
-            "/v1/prediction/hip4-price-ladder",
-            "/v1/prediction/hip4-price",
-            "/v1/prediction/hip4-mispricing",
-            "/v1/market/cycle-compare",
-            "/v1/market/oracle-gap",
-            "/v1/market/oracle-gap-bp",
-            "/v1/calendar/macro-dday",
-            "/v1/tools/ai-markdown",
-            "/v1/market/kimchi-alert",
-            "/v1/unlocks/dump-risk",
-        ],
+        "endpoints": list(_price_per_call_usdc().keys()),
         "coming_soon_endpoints": [],
         "docs": "/docs",
         "openapi_spec": "/openapi.json",
