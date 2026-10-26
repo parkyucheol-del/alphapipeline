@@ -45,16 +45,18 @@ DEFAULT_PARAMS에서 event_slug/market_slug만 최신 슬러그로 바꿔주면 
 """
 import argparse
 import asyncio
+import json
 import os
 import sys
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
 from eth_account import Account
 
-from x402 import x402Client
+from x402 import AbortResult, PaymentCreationContext, x402Client
 from x402.http import x402HTTPClient
 from x402.http.clients import x402HttpxClient
 from x402.mechanisms.evm import EthAccountSigner
@@ -70,6 +72,78 @@ _WETH_USDC_POOL_BASE = "0xd0b53d9277642d899df5c87a3966a349a798f224"
 # (실제 Hyperliquid 포지션은 없을 가능성이 높지만, 유효한 주소 형식으로 라우트
 # 자체가 정상 응답하는지는 확인 가능).
 _SAMPLE_EVM_ADDRESS = "0x2bcfA4F7E1fA5E96934846A7dEa623398Ed7f752"
+
+# 2026-10-25: 자가 결제 크론에 "기대 가격" 가드 추가 (데일리 알파 2026-10-25-6 대응,
+# x402 SDK 지출한도 결함 - V12 보고, Issue #3866 - 후속조치). 어제(10/24) 추가한
+# max_amount_per_payment=$0.05 상한은 "한 번에 얼마까지"만 막고, "이 엔드포인트가
+# 평소보다 훨씬 비싸졌는지"는 못 걸러낸다 (예: 평소 $0.01짜리를 $0.04로 올려 불러도
+# $0.05 상한 밑이라 그냥 통과함). 엔드포인트별 가격표를 코드에 하드코딩하는 대신,
+# 과거에 실제로 지불했던 "최저 관측가"를 로컬 파일에 기록해두고, 그보다
+# PRICE_JUMP_RATIO배 이상 + 절대로도 유의미하게 비싸게 부르면 결제 전에 막는다.
+# 하드코딩 표는 정상적인 가격 변경 때마다 수동으로 맞춰줘야 해서 금방 낡는데
+# (2026-10-25-2 빌드카드에서 서버 쪽 /pricing.json에도 지적된 것과 같은 문제),
+# 이 방식은 정상 가격 변경에는 자동으로 적응하면서 "갑자기 수십~수백 배" 같은
+# 비정상 과금만 잡아낸다. (V12 분석: 10/12~10/23 베이스 체인 x402 결제 중 25건이
+# 정상가의 100배 이상 + $1 이상 과금됨, 사례 중 하나는 $0.01짜리가 $588로 청구됨.)
+PRICE_BASELINE_FILE = Path(__file__).parent / ".price_baseline.json"
+PRICE_JUMP_RATIO = 5.0  # 과거 최저 관측가의 5배 넘게 부르면 의심
+PRICE_JUMP_MIN_ABS_USDC = 0.02  # 절대 차이가 $0.02 미만이면 반올림 차이 정도로 보고 무시
+
+
+def _load_price_baseline() -> dict[str, int]:
+    try:
+        return json.loads(PRICE_BASELINE_FILE.read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _save_price_baseline(baseline: dict[str, int]) -> None:
+    try:
+        PRICE_BASELINE_FILE.write_text(json.dumps(baseline, indent=2, sort_keys=True))
+    except OSError as exc:
+        print(f"[가격 가드] 베이스라인 저장 실패(무시하고 진행): {exc}")
+
+
+def make_expected_price_guard():
+    """결제 직전에 '이 엔드포인트가 과거 관측가 대비 비정상적으로 비싸졌는지'를
+    검사하는 on_before_payment_creation 훅을 만든다. 통과시킨 가격은 즉시
+    베이스라인에 반영해서(최저가만 저장) 다음 호출/실행에도 쓴다.
+
+    훅 컨텍스트(PaymentCreationContext)에는 호출 URL이 없어서, 네트워크/자산/
+    수취 지갑 조합을 엔드포인트 식별자 대신 쓴다 - AlphaPipeline은 엔드포인트마다
+    이 조합이 거의 고정이라 실질적으로 충분하다.
+    """
+    baseline = _load_price_baseline()
+
+    def hook(context: "PaymentCreationContext"):
+        req = context.selected_requirements
+        key = f"{req.network}:{req.asset}:{req.pay_to}".lower()
+        try:
+            amount = int(req.get_amount())
+        except (TypeError, ValueError, AttributeError):
+            return None  # amount를 못 읽으면 이 가드는 건너뛴다 (max_amount_per_payment가 여전히 상한 역할)
+
+        prior = baseline.get(key)
+        if prior is not None and prior > 0:
+            jump_abs_usdc = (amount - prior) / 1_000_000  # USDC는 6 decimals
+            if amount > prior * PRICE_JUMP_RATIO and jump_abs_usdc > PRICE_JUMP_MIN_ABS_USDC:
+                return AbortResult(
+                    reason="unexpected_price_jump",
+                    message=(
+                        f"{key} 가격이 과거 최저 관측가 {prior}(atomic) 대비 "
+                        f"{amount}(atomic)로 {amount / prior:.1f}배 뛰었습니다 - "
+                        "결제를 막습니다. 서버 설정 오류이거나 공격일 수 있습니다."
+                    ),
+                )
+            if amount < prior:
+                baseline[key] = amount
+                _save_price_baseline(baseline)
+        else:
+            baseline[key] = amount
+            _save_price_baseline(baseline)
+        return None
+
+    return hook
 
 
 @dataclass
@@ -397,6 +471,15 @@ async def run(base_url: str, include_hip4_subscribe: bool) -> list[dict[str, Any
     else:
         print(f"사용 지갑 주소: {account.address}\n")
         client = x402Client()
+        # 2026-10-24: x402 SDK 지출한도 결함(V12 보고, Issue #3866) 대응 - 패키지
+        # 기본값에 기대지 않고 결제당 상한을 코드에 명시. AlphaPipeline 엔드포인트
+        # 중 가장 비싼 게 $0.03이라 $0.05면 정상 호출은 전부 통과하고 비정상
+        # 과금만 막는다.
+        client.set_spend_controls({"max_amount_per_payment": "$0.05"})
+        # 2026-10-25: 위 상한과 별개로, 엔드포인트별 "기대 가격"(과거 최저 관측가)
+        # 대비 비정상적인 가격 상승을 막는 훅. 자세한 설명은 파일 상단
+        # make_expected_price_guard() 주석 참고.
+        client.on_before_payment_creation(make_expected_price_guard())
         register_exact_evm_client(client, EthAccountSigner(account))
         http_client = x402HTTPClient(client)
 
