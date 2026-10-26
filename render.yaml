@@ -5,6 +5,14 @@ services:
     plan: free
     buildCommand: "pip install -r requirements.txt"
     startCommand: "uvicorn main:app --host 0.0.0.0 --port $PORT"
+    # 2026-10-26: data-public/에는 매시간 도는 수집 크론(stock-discrepancy-collect.yml)이
+    # 자동 커밋하는 jsonl/캐시 파일만 들어있고 앱 코드와는 무관한데, ignoredPaths가
+    # 없으면 그 커밋마다 Render가 전체 재빌드·재배포를 해버린다(하루 20회 이상,
+    # 매번 40~60초 빌드 + 짧은 재시작/콜드스타트). 데이터만 바뀐 커밋은 재배포
+    # 대상에서 빼서 실제 코드가 바뀔 때만 배포되게 한다.
+    buildFilter:
+      ignoredPaths:
+        - data-public/**
     envVars:
       - key: RECEIVER_WALLET_ADDRESS
         sync: false
