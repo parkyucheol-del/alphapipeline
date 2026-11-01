@@ -56,7 +56,7 @@ from urllib.parse import urlencode
 
 from eth_account import Account
 
-from x402 import AbortResult, PaymentCreationContext, x402Client
+from x402 import AbortResult, PaymentAbortedError, PaymentCreationContext, x402Client
 from x402.http import x402HTTPClient
 from x402.http.clients import x402HttpxClient
 from x402.mechanisms.evm import EthAccountSigner
@@ -89,6 +89,19 @@ PRICE_BASELINE_FILE = Path(__file__).parent / ".price_baseline.json"
 PRICE_JUMP_RATIO = 5.0  # 과거 최저 관측가의 5배 넘게 부르면 의심
 PRICE_JUMP_MIN_ABS_USDC = 0.02  # 절대 차이가 $0.02 미만이면 반올림 차이 정도로 보고 무시
 
+# 2026-11-01: 첫 실결제 스모크테스트 실행에서 발견된 버그 수정
+# (claude/session-log-2026-11-01-price-guard-global-baseline-bug.md) - 아래
+# 캐시 키가 원래 network:asset:pay_to뿐이었는데, AlphaPipeline은 모든
+# 엔드포인트가 같은 체인·자산·수신 지갑으로 결제받아서 이 키가 사실상
+# 전체 공용이었다. "지금까지 관측된 최저가"로 래칫되는 구조라, 이 스크립트처럼
+# 가격대가 다른 20개+ 엔드포인트를 연달아 부르면 가장 싼 엔드포인트가 전체
+# 베이스라인이 되어버려서 이후의 정상적으로 더 비싼 엔드포인트가 "폭등"으로
+# 오판되어 막혔다(neg_risk_arbitrage, polymarket_mispricing 둘 다 실제로
+# 이렇게 막힘). PaymentCreationContext에는 호출 URL이 없어서, 지금 호출
+# 중인 엔드포인트 이름을 _call_one()이 요청 직전에 여기 기록해두고 훅이
+# 읽어가는 방식으로 엔드포인트별 베이스라인을 분리한다.
+_PRICE_GUARD_CONTEXT: dict[str, str | None] = {"endpoint_name": None}
+
 
 def _load_price_baseline() -> dict[str, int]:
     try:
@@ -109,15 +122,20 @@ def make_expected_price_guard():
     검사하는 on_before_payment_creation 훅을 만든다. 통과시킨 가격은 즉시
     베이스라인에 반영해서(최저가만 저장) 다음 호출/실행에도 쓴다.
 
-    훅 컨텍스트(PaymentCreationContext)에는 호출 URL이 없어서, 네트워크/자산/
-    수취 지갑 조합을 엔드포인트 식별자 대신 쓴다 - AlphaPipeline은 엔드포인트마다
-    이 조합이 거의 고정이라 실질적으로 충분하다.
+    훅 컨텍스트(PaymentCreationContext)에는 호출 URL이 없어서, 모듈 전역
+    _PRICE_GUARD_CONTEXT["endpoint_name"]에 _call_one()이 기록해 둔 "지금
+    호출 중인 엔드포인트 이름"을 네트워크/자산/수취 지갑 조합 앞에 붙여서
+    캐시 키를 만든다 - 2026-11-01 이전에는 이 식별자가 없어서 AlphaPipeline의
+    모든 엔드포인트가 같은 키(네트워크/자산/지갑이 전부 동일)를 공유했고,
+    실제로 이것 때문에 정상 엔드포인트가 "가격 폭등"으로 오판되어 막히는
+    버그가 있었다(claude/session-log-2026-11-01-price-guard-global-baseline-bug.md).
     """
     baseline = _load_price_baseline()
 
     def hook(context: "PaymentCreationContext"):
         req = context.selected_requirements
-        key = f"{req.network}:{req.asset}:{req.pay_to}".lower()
+        endpoint_name = _PRICE_GUARD_CONTEXT["endpoint_name"] or "unknown"
+        key = f"{endpoint_name}:{req.network}:{req.asset}:{req.pay_to}".lower()
         try:
             amount = int(req.get_amount())
         except (TypeError, ValueError, AttributeError):
@@ -414,6 +432,9 @@ def _build_url(base_url: str, call: EndpointCall) -> str:
 
 
 async def _call_one(http, call: EndpointCall) -> dict[str, Any]:
+    # 2026-11-01: 가격가드 훅이 이 호출의 엔드포인트를 알 수 있도록 요청 직전에
+    # 기록 (make_expected_price_guard() 주석/session-log-2026-11-01 참고).
+    _PRICE_GUARD_CONTEXT["endpoint_name"] = call.name
     url_or_path = call.path + (f"?{urlencode(call.params, doseq=True)}" if call.params else "")
     started = time.monotonic()
     try:
@@ -430,6 +451,23 @@ async def _call_one(http, call: EndpointCall) -> dict[str, Any]:
             "body_preview": response.text[:200],
             "note": call.note,
             "error": None,
+            "abort_reason": None,
+        }
+    except PaymentAbortedError as exc:
+        # 2026-11-01: 가격가드(또는 다른 before-payment 훅)가 결제를 막은 경우를
+        # 일반 예외와 분리해서 abort_reason을 남긴다 - _print_summary()가 이걸로
+        # "엔드포인트 이름"이 아니라 "실패 사유"를 보고 KNOWN_EXPECTED_FAILURES
+        # 여부를 판정하게 하기 위함 (claude/session-log-2026-11-01-price-guard-
+        # global-baseline-bug.md에서 발견된 메타버그 수정).
+        elapsed_ms = int((time.monotonic() - started) * 1000)
+        return {
+            "name": call.name,
+            "status": None,
+            "elapsed_ms": elapsed_ms,
+            "body_preview": "",
+            "note": call.note,
+            "error": f"{type(exc).__name__}: {exc}",
+            "abort_reason": exc.reason,
         }
     except Exception as exc:  # 한 엔드포인트 실패가 전체 루프를 막으면 안 됨
         elapsed_ms = int((time.monotonic() - started) * 1000)
@@ -440,6 +478,7 @@ async def _call_one(http, call: EndpointCall) -> dict[str, Any]:
             "body_preview": "",
             "note": call.note,
             "error": f"{type(exc).__name__}: {exc}",
+            "abort_reason": None,
         }
 
 
@@ -527,14 +566,25 @@ def _print_summary(results: list[dict[str, Any]], payment_free: bool) -> list[di
     ok = [r for r in results if _is_ok(r)]
     failed = [r for r in results if r not in ok]
     print(f"성공: {len(ok)}/{len(results)}")
+
+    # 2026-11-01: KNOWN_EXPECTED_FAILURES는 "엔드포인트 이름"으로 판정했었는데,
+    # 가격가드가 막은 실패(abort_reason 있음)는 이름이 뭐든 항상 "예상 못한
+    # 실패"로 쳐야 한다 - 이름 기준 매칭이 이걸 덮어써서 polymarket_mispricing의
+    # unexpected_price_jump가 "기대된 실패(슬러그 만료)"로 잘못 묻힌 적이 실제로
+    # 있었다(claude/session-log-2026-11-01-price-guard-global-baseline-bug.md).
+    def _is_expected_failure(r: dict[str, Any]) -> bool:
+        if r.get("abort_reason"):
+            return False
+        return r["name"] in KNOWN_EXPECTED_FAILURES
+
     if failed:
         print("실패/주의 필요:")
         for r in failed:
             status = r["status"] if r["status"] is not None else "예외"
-            expected = " (기대된 실패 - KNOWN_EXPECTED_FAILURES)" if r["name"] in KNOWN_EXPECTED_FAILURES else ""
+            expected = " (기대된 실패 - KNOWN_EXPECTED_FAILURES)" if _is_expected_failure(r) else ""
             print(f"  - {r['name']}: {status}{expected}")
 
-    unexpected = [r for r in failed if r["name"] not in KNOWN_EXPECTED_FAILURES]
+    unexpected = [r for r in failed if not _is_expected_failure(r)]
     if unexpected:
         print(f"\n⚠️  예상 못한 실패 {len(unexpected)}건 - exit code 1로 종료합니다.")
     return unexpected
