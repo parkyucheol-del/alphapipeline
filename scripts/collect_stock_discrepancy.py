@@ -52,6 +52,15 @@ B20-vs-HL 비교(체인이 다른 두 자산)보다 더 깨끗한 "같은 체인
 판정은 최소 1~2주 데이터가 쌓인 뒤 확인할 것 - 자세한 배경은 project 문서
 claude/session-log-2026-10-26-eqx-gap-collector-added.md 참고.
 
+2026-11-04 update (Daily Alpha action 카드): CFTC가 11/3 개별 주식 무기한
+선물을 처음 허용했고 Kalshi가 "수일 내" 출시를 예고했다. 출시 전 xyz dex
+전체의 기준선을 남겨 두라는 카드 요청에 따라 collect_xyz_perp_baseline()을
+추가 - 기존 4개 심볼(NVDA/AAPL/META/GOOGL)만 보던 collect_stock_rows()와는
+별도로, xyz dex 전체 유니버스를 일일 거래량 기준 상위 15개까지
+data-public/xyz_perp_baseline_log.jsonl에 남긴다. fetch_hl_perp_dex_universe
+캐시를 재사용해서 추가 HTTP 호출은 없음(순서: collect_stock_rows를 먼저
+불러야 캐시가 채워짐, main()에서 보장).
+
 IMPORTANT — read before relying on this:
 1. The Daily Alpha brief's example symbol list was NVDA/TSLA/AAPL/MSTR/COIN,
    but a web search this session (2026-10-08) only turned up confirmed
@@ -140,6 +149,7 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "data-public"
 STOCK_LOG_PATH = DATA_DIR / "stock_discrepancy_log.jsonl"
 KALSHI_LOG_PATH = DATA_DIR / "kalshi_btc15m_log.jsonl"
 EQX_GAP_LOG_PATH = DATA_DIR / "eqx_gap_log.jsonl"
+XYZ_BASELINE_LOG_PATH = DATA_DIR / "xyz_perp_baseline_log.jsonl"
 
 TIMEOUT = httpx.Timeout(20.0)
 
@@ -423,6 +433,54 @@ async def collect_eqx_gap_rows(client: httpx.AsyncClient) -> list[dict]:
     return rows
 
 
+async def collect_xyz_perp_baseline(client: httpx.AsyncClient, top_n: int = 15) -> list[dict]:
+    """2026-11-04 Daily Alpha action 카드 (Kalshi 주식 퍼프 "수일 내" 출시 예고,
+    CFTC가 11/3 개별 주식 무기한 선물을 처음 허용) 대응. 기존 collect_stock_rows()는
+    xyz dex 중 B20 토큰이 확인된 4개(NVDA/AAPL/META/GOOGL)만 보는데, 이 카드는
+    Kalshi가 신청한 종목(NVDA/AAPL/TSLA/MSTR/SPY/QQQ 등, 정확한 50~58개 리스트는
+    미공개)과 폭넓게 겹치는 xyz dex 전체를 거래량 상위 top_n개만 스냅샷으로 남겨
+    "Kalshi 출시 전 마지막 기준선"을 확보하라고 한다.
+
+    fetch_hl_perp_dex_universe(client, "xyz")가 이미 collect_stock_rows() 안에서
+    (fetch_hl_stock_perp_ctx 경유로) 한 번 호출되고 런(run) 단위로 캐시돼 있으므로,
+    main()에서 이 함수를 그 뒤에 불러도 추가 HTTP 호출은 없다 - collect_stock_rows를
+    먼저 실행해야 캐시가 채워진다(순서 의존, main()에서 보장).
+    """
+    ts_utc, ts_kst = now_stamps()
+    data = await fetch_hl_perp_dex_universe(client, "xyz")
+    if not data:
+        return [{
+            "timestamp_utc": ts_utc, "timestamp_kst": ts_kst,
+            "dex": "xyz", "ok": False, "error": "metaAndAssetCtxs fetch failed",
+        }]
+    try:
+        universe, asset_ctxs = data[0]["universe"], data[1]
+        rows = []
+        for asset, ctx in zip(universe, asset_ctxs):
+            def f(key: str) -> float | None:
+                val = ctx.get(key)
+                return float(val) if val is not None else None
+            mark, oracle = f("markPx"), f("oraclePx")
+            rows.append({
+                "timestamp_utc": ts_utc, "timestamp_kst": ts_kst, "dex": "xyz",
+                "coin_raw": asset.get("name"),
+                "mark": mark, "oracle": oracle, "mid": f("midPx"),
+                "funding_1h": f("funding"),
+                "open_interest": f("openInterest"),
+                "day_volume_usd": f("dayNtlVlm"),
+                "mark_vs_oracle_bp": bp_diff(mark, oracle),
+                "ok": True,
+            })
+        rows.sort(key=lambda r: r["day_volume_usd"] or 0, reverse=True)
+        return rows[:top_n]
+    except Exception as exc:
+        print(f"[warn] xyz baseline parsing failed: {exc}", file=sys.stderr)
+        return [{
+            "timestamp_utc": ts_utc, "timestamp_kst": ts_kst,
+            "dex": "xyz", "ok": False, "error": str(exc),
+        }]
+
+
 async def collect_kalshi_snapshot(client: httpx.AsyncClient) -> dict:
     ts_utc, ts_kst = now_stamps()
     try:
@@ -468,13 +526,18 @@ def append_jsonl(path: Path, rows: list[dict]) -> None:
 
 async def main() -> None:
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        # collect_stock_rows()가 먼저 돌면서 fetch_hl_perp_dex_universe("xyz")를
+        # 캐시에 채워 두므로, collect_xyz_perp_baseline()은 추가 HTTP 호출 없이
+        # 같은 캐시를 재사용한다 - 순서를 바꾸면 안 됨.
         stock_rows = await collect_stock_rows(client)
         kalshi_row = await collect_kalshi_snapshot(client)
         eqx_rows = await collect_eqx_gap_rows(client)
+        xyz_baseline_rows = await collect_xyz_perp_baseline(client)
 
     append_jsonl(STOCK_LOG_PATH, stock_rows)
     append_jsonl(KALSHI_LOG_PATH, [kalshi_row])
     append_jsonl(EQX_GAP_LOG_PATH, eqx_rows)
+    append_jsonl(XYZ_BASELINE_LOG_PATH, xyz_baseline_rows)
 
     gaps = sum(1 for r in stock_rows if r["data_gap"])
     print(f"wrote {len(stock_rows)} stock rows ({gaps} with data_gap=true) to {STOCK_LOG_PATH}")
@@ -482,6 +545,10 @@ async def main() -> None:
     eqx_gaps = sum(1 for r in eqx_rows if r["data_gap"])
     print(
         f"wrote {len(eqx_rows)} EQX gap rows ({eqx_gaps} with data_gap=true) to {EQX_GAP_LOG_PATH}"
+    )
+    xyz_ok = sum(1 for r in xyz_baseline_rows if r.get("ok"))
+    print(
+        f"wrote {len(xyz_baseline_rows)} xyz baseline rows ({xyz_ok} ok) to {XYZ_BASELINE_LOG_PATH}"
     )
 
 
